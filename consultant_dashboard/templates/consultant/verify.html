@@ -1,0 +1,23 @@
+{% extends "shared/base.html" %}
+{% block body %}
+  <div class="card">
+    <div class="label">{{ brand }}</div>
+    <h1>Verify Login</h1>
+    <p class="muted">Enter the 6-digit verification code.</p>
+    <form method="post" id="verify-form">
+      <input id="code" type="text" inputmode="numeric" maxlength="6" name="code" placeholder="123456" required>
+      <button type="submit">Verify</button>
+    </form>
+    <script>
+      const code = document.getElementById("code");
+      const form = document.getElementById("verify-form");
+      let attempted = false;
+      code.addEventListener("input", () => {
+        if (!attempted && code.value.length === 6) {
+          attempted = true;
+          form.requestSubmit();
+        }
+      });
+    </script>
+  </div>
+{% endblock %}

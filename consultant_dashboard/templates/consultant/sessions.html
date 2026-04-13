@@ -1,0 +1,34 @@
+{% extends "shared/base.html" %}
+{% block body %}
+  <div class="nav">
+    <a href="/consultant/dashboard">Overview</a>
+    <a href="/consultant/clients">Clients</a>
+    <a href="/consultant/sessions">Sessions</a>
+  </div>
+  <div class="card">
+    <div class="label">{{ brand }}</div>
+    <h1>Sessions</h1>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Client</th>
+          <th>Time</th>
+          <th>Status</th>
+          <th>Duration</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for session_row in sessions %}
+          <tr>
+            <td><a href="/consultant/sessions/{{ session_row.id }}">{{ session_row.display_name }}</a></td>
+            <td>{{ session_row.ended_at or session_row.started_at or session_row.created_at }}</td>
+            <td>{{ session_row.status }}{% if session_row.urgent_escalation %} · urgent escalation{% endif %}</td>
+            <td>{{ session_row.duration_seconds }}s</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4" class="muted">No sessions yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

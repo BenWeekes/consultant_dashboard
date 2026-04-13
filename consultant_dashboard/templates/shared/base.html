@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title or brand }}</title>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; background: linear-gradient(180deg, #f4f7f2 0%, #eef5ef 100%); color: #132218; }
+      .wrap { max-width: 1120px; margin: 0 auto; padding: 32px 20px; }
+      .card { background: white; border-radius: 18px; padding: 24px; box-shadow: 0 8px 24px rgba(0,0,0,.08); }
+      .grid { display: grid; gap: 16px; }
+      .stats { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+      .stat { background: #ebf4ec; border-radius: 14px; padding: 16px; }
+      .label { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #5a7261; }
+      .value { font-size: 28px; font-weight: 700; margin-top: 6px; }
+      input, textarea { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid #bfd0c3; box-sizing: border-box; background: #fff; }
+      textarea { min-height: 120px; resize: vertical; }
+      button { background: #0f6b42; color: white; border: 0; border-radius: 12px; padding: 12px 16px; cursor: pointer; }
+      .muted { color: #5a7261; }
+      .error { color: #a32424; margin-bottom: 12px; }
+      .pill { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #ebf4ec; color: #0f6b42; font-size: 12px; }
+      .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+      .split { display: grid; gap: 16px; grid-template-columns: 1.2fr .8fr; }
+      .nav { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+      .nav a { display: inline-block; padding: 10px 14px; border-radius: 999px; background: rgba(15,107,66,.08); text-decoration: none; }
+      .stack { display: grid; gap: 12px; }
+      .list { display: grid; gap: 12px; }
+      .item { padding: 14px; border: 1px solid #d8e6db; border-radius: 14px; background: #fbfdfb; }
+      .table { width: 100%; border-collapse: collapse; }
+      .table th, .table td { text-align: left; padding: 12px; border-bottom: 1px solid #e3ece4; vertical-align: top; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      form { display: grid; gap: 12px; }
+      a { color: #0f6b42; }
+      @media (max-width: 800px) {
+        .split { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="{{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+      {% endwith %}
+      {% block body %}{% endblock %}
+    </div>
+  </body>
+</html>

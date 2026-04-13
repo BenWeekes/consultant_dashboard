@@ -1,0 +1,53 @@
+{% extends "shared/base.html" %}
+{% block body %}
+  <div class="nav">
+    <a href="/consultant/dashboard">Overview</a>
+    <a href="/consultant/clients">Clients</a>
+    <a href="/consultant/sessions">Sessions</a>
+  </div>
+  <div class="split">
+    <div class="card grid">
+      <div>
+        <div class="label">Session</div>
+        <h1>{{ session_row.display_name }}</h1>
+        <p class="muted mono">{{ session_row.id }}</p>
+      </div>
+      <div class="row">
+        <span class="pill">{{ session_row.status }}</span>
+        <span class="pill">{{ session_row.duration_seconds }} seconds</span>
+        {% if session_row.urgent_escalation %}<span class="pill">Urgent escalation</span>{% endif %}
+      </div>
+      <div class="item">
+        <div class="label">Summary</div>
+        {% if summary %}
+          <pre>{{ summary | tojson(indent=2) }}</pre>
+        {% else %}
+          <div class="muted">No summary stored.</div>
+        {% endif %}
+      </div>
+      <div class="item">
+        <div class="label">Biomarkers</div>
+        {% if biomarkers %}
+          <pre>{{ biomarkers | tojson(indent=2) }}</pre>
+        {% else %}
+          <div class="muted">No biomarker aggregates stored.</div>
+        {% endif %}
+      </div>
+    </div>
+    <div class="card">
+      <div class="label">Alerts</div>
+      <h2>Session Alerts</h2>
+      <div class="list">
+        {% for alert in alerts %}
+          <div class="item">
+            <strong>{{ alert.title }}</strong>
+            <div class="muted">{{ alert.severity }} · {{ alert.source }}</div>
+            <div class="muted">{{ alert.created_at }}</div>
+          </div>
+        {% else %}
+          <div class="muted">No alerts stored for this session.</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+{% endblock %}

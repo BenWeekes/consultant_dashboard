@@ -1,0 +1,4 @@
+Flask==3.1.0
+cryptography==46.0.1
+python-dotenv==1.1.0
+twilio==9.8.5

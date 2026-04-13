@@ -1,0 +1,5 @@
+session_secret=replace-me-with-a-random-secret
+session_ttl=28800
+# Generate hashes with:
+# python run.py hash-password --password 'your-password'
+admin@example.com=pbkdf2:sha256:1000000$replace$me

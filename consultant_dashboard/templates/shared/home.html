@@ -1,0 +1,16 @@
+{% extends "shared/base.html" %}
+{% block body %}
+  <div class="card grid">
+    <div>
+      <div class="label">Service</div>
+      <h1>{{ brand }}</h1>
+      <p class="muted">Consultant dashboard service for AI-assisted consultation workflows.</p>
+    </div>
+    <div class="grid">
+      <a href="/consultant/login">Consultant Login</a>
+      <a href="/admin/login">Admin Login</a>
+      <a href="/health">Health</a>
+      <a href="/internal/health">Internal Health</a>
+    </div>
+  </div>
+{% endblock %}

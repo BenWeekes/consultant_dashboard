@@ -1,0 +1,12 @@
+{% extends "shared/base.html" %}
+{% block body %}
+  <div class="card">
+    <div class="label">{{ brand }}</div>
+    <h1>Admin Login</h1>
+    <form method="post">
+      <input type="email" name="email" placeholder="Email" required>
+      <input type="password" name="password" placeholder="Password" required>
+      <button type="submit">Sign in</button>
+    </form>
+  </div>
+{% endblock %}

@@ -1,0 +1,65 @@
+{% extends "shared/base.html" %}
+{% block body %}
+  <div class="nav">
+    <a href="/consultant/dashboard">Overview</a>
+    <a href="/consultant/clients">Clients</a>
+    <a href="/consultant/sessions">Sessions</a>
+  </div>
+  <div class="card grid">
+    <div>
+      <div class="label">{{ brand }}</div>
+      <h1>Consultant Dashboard</h1>
+      <p class="muted">Signed in as {{ consultant.name }}{% if consultant.email %} · {{ consultant.email }}{% endif %}</p>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="label">Clients</div><div class="value">{{ stats.clients }}</div></div>
+      <div class="stat"><div class="label">Sessions</div><div class="value">{{ stats.sessions }}</div></div>
+      <div class="stat"><div class="label">Open Alerts</div><div class="value">{{ stats.alerts }}</div></div>
+    </div>
+  </div>
+  <div class="split" style="margin-top: 16px;">
+    <div class="card">
+      <div class="row" style="justify-content: space-between;">
+        <div>
+          <div class="label">Recent Clients</div>
+          <h2>Current Caseload</h2>
+        </div>
+        <a href="/consultant/clients">Manage clients</a>
+      </div>
+      <div class="list">
+        {% for client in recent_clients %}
+          <div class="item">
+            <div class="row" style="justify-content: space-between;">
+              <strong><a href="/consultant/clients/{{ client.id }}">{{ client.display_name }}</a></strong>
+              <span class="pill">{{ client.session_count }} sessions</span>
+            </div>
+            <div class="muted">{{ client.email or client.phone_number or "No contact details yet" }}</div>
+          </div>
+        {% else %}
+          <div class="muted">No clients yet.</div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content: space-between;">
+        <div>
+          <div class="label">Recent Sessions</div>
+          <h2>Latest Activity</h2>
+        </div>
+        <a href="/consultant/sessions">View all sessions</a>
+      </div>
+      <div class="list">
+        {% for session_row in recent_sessions %}
+          <div class="item">
+            <strong><a href="/consultant/sessions/{{ session_row.id }}">{{ session_row.display_name }}</a></strong>
+            <div class="muted">{{ session_row.ended_at or session_row.started_at or session_row.created_at }}</div>
+            <div class="muted">{{ session_row.status }}{% if session_row.urgent_escalation %} · urgent escalation{% endif %}</div>
+          </div>
+        {% else %}
+          <div class="muted">No sessions yet.</div>
+        {% endfor %}
+      </div>
+      <form method="post" action="/logout"><button type="submit">Logout</button></form>
+    </div>
+  </div>
+{% endblock %}

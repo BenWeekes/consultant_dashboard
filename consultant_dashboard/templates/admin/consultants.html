@@ -1,0 +1,48 @@
+{% extends "shared/base.html" %}
+{% block body %}
+  <div class="nav">
+    <a href="/admin/dashboard">Overview</a>
+    <a href="/admin/consultants">Consultants</a>
+  </div>
+  <div class="split">
+    <div class="card">
+      <div class="label">{{ brand }}</div>
+      <h1>Consultants</h1>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Contact</th>
+            <th>Clients</th>
+            <th>Sessions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for consultant in consultants %}
+            <tr>
+              <td>{{ consultant.name }}</td>
+              <td>{{ consultant.email }}<br>{{ consultant.phone_number }}</td>
+              <td>{{ consultant.client_count }}</td>
+              <td>{{ consultant.session_count }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4" class="muted">No consultants yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="label">New Consultant</div>
+      <h2>Add Consultant</h2>
+      <form method="post">
+        <input name="name" placeholder="Name" required>
+        <input name="email" type="email" placeholder="Email" required>
+        <input name="phone_number" placeholder="Phone number" required>
+        <input name="notification_email" type="email" placeholder="Notification email">
+        <input name="escalation_phone_number" placeholder="Escalation phone number">
+        <input name="password" type="password" placeholder="Temporary password" required>
+        <button type="submit">Create consultant</button>
+      </form>
+    </div>
+  </div>
+{% endblock %}

@@ -1,0 +1,76 @@
+{% extends "shared/base.html" %}
+{% block body %}
+  <div class="nav">
+    <a href="/consultant/dashboard">Overview</a>
+    <a href="/consultant/clients">Clients</a>
+    <a href="/consultant/sessions">Sessions</a>
+  </div>
+  <div class="split">
+    <div class="card grid">
+      <div>
+        <div class="label">Client</div>
+        <h1>{{ client.display_name }}</h1>
+        <p class="muted">{{ client.email or "" }}{% if client.email and client.phone_number %} · {% endif %}{{ client.phone_number or "" }}</p>
+      </div>
+      <div class="row">
+        {% if client.notification_email %}<span class="pill">Notify {{ client.notification_email }}</span>{% endif %}
+        {% if client.escalation_phone_number %}<span class="pill">Escalate {{ client.escalation_phone_number }}</span>{% endif %}
+      </div>
+      <div class="item">
+        <div class="label">Notes</div>
+        <div>{{ client.notes_current or "No notes yet." }}</div>
+      </div>
+      <div class="item">
+        <div class="label">Direction</div>
+        <div>{{ client.direction_current or "No direction yet." }}</div>
+      </div>
+      <div class="item">
+        <div class="label">Latest Summary</div>
+        {% if latest_summary %}
+          <pre>{{ latest_summary | tojson(indent=2) }}</pre>
+        {% else %}
+          <div class="muted">No summary stored yet.</div>
+        {% endif %}
+      </div>
+      <div class="item">
+        <div class="label">Biomarker Baseline</div>
+        {% if baseline %}
+          <pre>{{ baseline | tojson(indent=2) }}</pre>
+        {% else %}
+          <div class="muted">No biomarker baseline stored yet.</div>
+        {% endif %}
+      </div>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <div class="label">Open Alerts</div>
+        <h2>Alerts</h2>
+        <div class="list">
+          {% for alert in open_alerts %}
+            <div class="item">
+              <strong>{{ alert.title }}</strong>
+              <div class="muted">{{ alert.severity }} · {{ alert.source }} · {{ alert.created_at }}</div>
+            </div>
+          {% else %}
+            <div class="muted">No open alerts.</div>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="card">
+        <div class="label">Sessions</div>
+        <h2>History</h2>
+        <div class="list">
+          {% for session_row in sessions %}
+            <div class="item">
+              <strong><a href="/consultant/sessions/{{ session_row.id }}">{{ session_row.id }}</a></strong>
+              <div class="muted">{{ session_row.ended_at or session_row.started_at or session_row.created_at }}</div>
+              <div class="muted">{{ session_row.status }}{% if session_row.urgent_escalation %} · urgent escalation{% endif %}</div>
+            </div>
+          {% else %}
+            <div class="muted">No sessions yet.</div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
