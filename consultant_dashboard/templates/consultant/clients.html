@@ -14,6 +14,7 @@
           <tr>
             <th>Name</th>
             <th>Contact</th>
+            <th>Linked</th>
             <th>Sessions</th>
             <th>Last Session</th>
           </tr>
@@ -23,11 +24,12 @@
             <tr>
               <td><a href="/consultant/clients/{{ client.id }}">{{ client.display_name }}</a></td>
               <td>{{ client.email or client.phone_number or "Not set" }}</td>
+              <td>{{ "Ready" if client.email or client.phone_number else "Missing contact" }}</td>
               <td>{{ client.session_count }}</td>
               <td>{{ client.last_session_at or "Not yet" }}</td>
             </tr>
           {% else %}
-            <tr><td colspan="4" class="muted">No clients yet.</td></tr>
+            <tr><td colspan="5" class="muted">No clients yet.</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -35,6 +37,7 @@
     <div class="card">
       <div class="label">New Client</div>
       <h2>Add Client</h2>
+      <p class="muted">If the client later signs in with the same Gmail address and phone number, they will resolve to this record automatically.</p>
       <form method="post">
         <input name="display_name" placeholder="Name" required>
         <input name="email" type="email" placeholder="Email">

@@ -1,0 +1,80 @@
+# 05 Workflows
+
+Purpose: provide fast paths for common maintenance and feature work.
+
+## Add a New Internal Endpoint
+
+1. Add the route in `core/internal_api.py`.
+2. Reuse `_verify_internal_request()` and the shared HMAC pattern.
+3. Put query/update helpers in `core/db.py` if logic touches SQLite.
+4. If the endpoint reads/writes encrypted blobs, use `EncryptedStorage`.
+5. Add or extend tests in `tests/test_internal_api.py`, and keep `tests/test_smoke.py` passing.
+6. Update `06_interfaces.md`.
+
+## Add a New Dashboard Page
+
+1. Add the route in `core/web.py`.
+2. Protect it with `require_consultant` or `require_admin` if needed.
+3. Add a template under `templates/consultant/` or `templates/admin/`.
+4. Fetch only the data the page needs from `core/db.py`.
+5. Avoid putting business logic in Jinja templates.
+6. Update `03_code_map.md` if the page adds a new stable area.
+
+## Add a New Table or Field
+
+1. Change `core/schema.sql`.
+2. Add helper functions or extend queries in `core/db.py`.
+3. Update code paths that read/write the new data.
+4. If the field is sensitive, decide whether it belongs in SQLite or encrypted artifacts.
+5. Update `06_interfaces.md` and `08_security.md` if the boundary changes.
+6. Re-run the full test suite.
+
+## Add a New Session Ingestion Field
+
+1. Extend the payload handling in `core/internal_api.py`.
+2. Decide whether it belongs in:
+   - `sessions` row
+   - `session_alerts`
+   - encrypted artifact payload
+3. Preserve idempotent `upsert_session()` behavior.
+4. If it affects consultant-visible UI, update `core/web.py` and templates.
+5. Update `06_interfaces.md`.
+
+## Add a New Login Rule
+
+1. Modify `core/auth.py`.
+2. Keep consultant/admin separation explicit.
+3. Update audit logging for success/failure cases.
+4. If Twilio behavior changes, test both dev-mode and production-style branches conceptually.
+5. Update `07_gotchas.md` if the change is easy to misconfigure.
+
+## Run a Basic Local Verification
+
+```bash
+source venv/bin/activate
+python -m unittest discover -s tests -v
+python run.py serve
+```
+
+Then exercise:
+
+- `/health`
+- consultant login
+- admin login
+- signed `GET /internal/resolve-client`
+- signed `POST /internal/session-complete`
+- signed `GET /internal/client-context`
+
+Targeted runs:
+
+```bash
+python -m unittest tests.test_internal_api -v
+python -m unittest tests.test_web_dashboard -v
+python -m unittest tests.test_smoke -v
+```
+
+## See Also
+
+- [01 Setup](01_setup.md)
+- [06 Interfaces](06_interfaces.md)
+- [07 Gotchas](07_gotchas.md)

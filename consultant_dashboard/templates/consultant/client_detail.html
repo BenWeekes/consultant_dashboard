@@ -15,6 +15,19 @@
       <div class="row">
         {% if client.notification_email %}<span class="pill">Notify {{ client.notification_email }}</span>{% endif %}
         {% if client.escalation_phone_number %}<span class="pill">Escalate {{ client.escalation_phone_number }}</span>{% endif %}
+        {% if auth_identity %}
+          <span class="pill">Identity linked</span>
+        {% else %}
+          <span class="pill">Identity not linked</span>
+        {% endif %}
+      </div>
+      <div class="item">
+        <div class="label">Client Sign-In Match</div>
+        {% if auth_identity %}
+          <div class="muted">This client will resolve automatically when the user logs in with the same Gmail address and phone number stored on this record.</div>
+        {% else %}
+          <div class="muted">Add an email address and phone number for automatic client resolution.</div>
+        {% endif %}
       </div>
       <div class="item">
         <div class="label">Notes</div>

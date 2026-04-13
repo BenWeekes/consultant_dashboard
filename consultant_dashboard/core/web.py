@@ -49,6 +49,16 @@ def _consultant_dashboard_stats(db, consultant_id: str):
             """,
             (consultant_id,),
         ).fetchone()["c"],
+        "linked_clients": db.execute(
+            """
+            SELECT COUNT(DISTINCT c.id) AS c
+            FROM clients c
+            JOIN consultant_clients cc ON cc.client_id = c.id
+            JOIN client_auth_identities cai ON cai.client_id = c.id
+            WHERE cc.consultant_id = ? AND c.is_active = 1
+            """,
+            (consultant_id,),
+        ).fetchone()["c"],
     }
 
 
@@ -146,6 +156,15 @@ def consultant_client_detail(client_id: str):
         """,
         (client_id,),
     ).fetchall()
+    auth_identity = db.execute(
+        """
+        SELECT *
+        FROM client_auth_identities
+        WHERE client_id = ?
+        LIMIT 1
+        """,
+        (client_id,),
+    ).fetchone()
     storage = _storage()
     latest_summary = None
     baseline = None
@@ -160,6 +179,7 @@ def consultant_client_detail(client_id: str):
         client=client,
         sessions=sessions,
         open_alerts=open_alerts,
+        auth_identity=auth_identity,
         latest_summary=latest_summary,
         baseline=baseline,
     )

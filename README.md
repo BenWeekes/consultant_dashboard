@@ -78,6 +78,30 @@ For `POST`, `payload` is the raw request body.
 - `python run.py create-client ...`
 - `python run.py link-client-auth ...`
 
+## Tests
+
+Test modules live under `tests/`:
+
+- `tests/test_smoke.py`
+- `tests/test_internal_api.py`
+- `tests/test_web_dashboard.py`
+
+Run the full suite:
+
+```bash
+source venv/bin/activate
+python -m unittest discover -s tests -v
+```
+
+Coverage currently includes:
+
+- consultant/admin login success and failure cases
+- route protection redirects
+- internal API signing failures
+- full `resolve-client`, `client-context`, and `session-complete` flows
+- consultant client/session pages
+- admin consultant creation and duplicate handling
+
 ## Admin Auth File
 
 Set `CONSULTANT_ADMIN_AUTH_FILE` to a real file. The app refuses to start if it is missing or malformed.

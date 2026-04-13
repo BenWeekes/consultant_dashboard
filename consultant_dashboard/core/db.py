@@ -3,6 +3,7 @@ import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from .client_identity import build_identity_hashes
 
 def get_db(config: dict) -> sqlite3.Connection:
     db = sqlite3.connect(config["DB_PATH"])
@@ -88,7 +89,7 @@ def create_client(
     notes: str,
     direction: str,
 ) -> str:
-    cursor = db.execute(
+    db.execute(
         """
         INSERT INTO clients (
             display_name, email, phone_number, notification_email,
@@ -115,6 +116,15 @@ def create_client(
         """,
         (consultant_id, client_id),
     )
+    identity_hashes = build_identity_hashes(display_name, email, phone_number)
+    if any(identity_hashes.values()):
+        upsert_client_auth_identity(
+            db,
+            client_id=client_id,
+            email_hash=identity_hashes["email_hash"],
+            normalized_name_hash=identity_hashes["normalized_name_hash"],
+            phone_hash=identity_hashes["phone_hash"],
+        )
     return client_id
 
 
