@@ -34,11 +34,7 @@ python run.py create-client \
   --consultant-id <consultant-id> \
   --name "Alex Demo" \
   --email alex@example.com \
-  --phone +447700900111
-python run.py link-client-auth \
-  --client-id <client-id> \
-  --email alex@example.com \
-  --name "Alex Demo" \
+  --password clientpass123 \
   --phone +447700900111
 python run.py serve
 ```
@@ -48,6 +44,17 @@ Open:
 - `http://127.0.0.1:8090/health`
 - `http://127.0.0.1:8090/consultant/login`
 - `http://127.0.0.1:8090/admin/login`
+- `http://127.0.0.1:8090/consultant/account`
+- `http://127.0.0.1:8090/admin/account`
+
+Normal dashboard behavior:
+
+- consultants and admins have different login URLs
+- clients do not log into this service directly
+- client access is controlled by the client record email + phone number, with optional client password support
+- only US and UK phone numbers are supported right now
+- admins can set or reset consultant passwords from the consultant detail page
+- consultants manage client access by updating the client email, phone, and optional password fields
 
 ## Internal APIs
 
@@ -85,6 +92,7 @@ Test modules live under `tests/`:
 - `tests/test_smoke.py`
 - `tests/test_internal_api.py`
 - `tests/test_web_dashboard.py`
+- `tests/test_live_stack.py` (opt-in live service smoke test)
 
 Run the full suite:
 
@@ -98,9 +106,34 @@ Coverage currently includes:
 - consultant/admin login success and failure cases
 - route protection redirects
 - internal API signing failures
-- full `resolve-client`, `client-context`, and `session-complete` flows
+- full `resolve-client`, `verify-client-password`, `client-context`, and `session-complete` flows
 - consultant client/session pages
-- admin consultant creation and duplicate handling
+- admin consultant creation, editing, and duplicate handling
+- consultant/admin password change flows
+- client password create/reset flows
+
+Optional live stack smoke test:
+
+```bash
+source venv/bin/activate
+RUN_LIVE_STACK_TESTS=1 python -m unittest tests.test_live_stack -v
+```
+
+Default live endpoints checked:
+
+- `http://127.0.0.1:8082/health`
+- `http://127.0.0.1:8082/auth-check?...`
+- `http://127.0.0.1:8090/health`
+- `http://127.0.0.1:8101/ping`
+- configured Cloudflare tunnel `/ping`
+
+Override them with:
+
+- `LIVE_BACKEND_URL`
+- `LIVE_CLIENT_URL`
+- `LIVE_DASHBOARD_URL`
+- `LIVE_CUSTOM_LLM_URL`
+- `LIVE_TUNNEL_PING_URL`
 
 ## Admin Auth File
 

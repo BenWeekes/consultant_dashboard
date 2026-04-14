@@ -1,9 +1,10 @@
 {% extends "shared/base.html" %}
 {% block body %}
+  <div class="auth-shell">
   <div class="card">
     <div class="label">{{ brand }}</div>
-    <h1>Verify Login</h1>
-    <p class="muted">Enter the 6-digit verification code.</p>
+    <h1>MindFix</h1>
+    <p class="muted">We sent a 6-digit code to your phone.</p>
     <form method="post" id="verify-form">
       <input id="code" type="text" inputmode="numeric" maxlength="6" name="code" placeholder="123456" required>
       <button type="submit">Verify</button>
@@ -19,5 +20,6 @@
         }
       });
     </script>
+  </div>
   </div>
 {% endblock %}

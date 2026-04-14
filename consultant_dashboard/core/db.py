@@ -16,8 +16,15 @@ def init_db(config: dict) -> None:
     db = get_db(config)
     schema_path = Path(__file__).with_name("schema.sql")
     db.executescript(schema_path.read_text(encoding="utf-8"))
+    _ensure_migrations(db)
     db.commit()
     db.close()
+
+
+def _ensure_migrations(db: sqlite3.Connection) -> None:
+    client_columns = {row["name"] for row in db.execute("PRAGMA table_info(clients)").fetchall()}
+    if "password_hash" not in client_columns:
+        db.execute("ALTER TABLE clients ADD COLUMN password_hash TEXT")
 
 
 def create_consultant(
@@ -62,6 +69,123 @@ def get_consultant_by_id(db: sqlite3.Connection, consultant_id: str):
     ).fetchone()
 
 
+def update_consultant(
+    db: sqlite3.Connection,
+    *,
+    consultant_id: str,
+    email: str,
+    name: str,
+    phone_number: str,
+    notification_email: str,
+    escalation_phone_number: str,
+) -> None:
+    db.execute(
+        """
+        UPDATE consultants
+        SET email = ?,
+            name = ?,
+            phone_number = ?,
+            notification_email = ?,
+            escalation_phone_number = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (
+            email.lower().strip(),
+            name.strip(),
+            phone_number.strip(),
+            notification_email.strip(),
+            escalation_phone_number.strip(),
+            consultant_id,
+        ),
+    )
+
+
+def update_consultant_password(
+    db: sqlite3.Connection,
+    *,
+    consultant_id: str,
+    password_hash: str,
+) -> None:
+    db.execute(
+        """
+        UPDATE consultants
+        SET password_hash = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (password_hash, consultant_id),
+    )
+
+
+def deactivate_consultant(
+    db: sqlite3.Connection,
+    *,
+    consultant_id: str,
+) -> None:
+    db.execute(
+        """
+        UPDATE consultants
+        SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (consultant_id,),
+    )
+
+
+def update_client(
+    db: sqlite3.Connection,
+    *,
+    client_id: str,
+    display_name: str,
+    email: str,
+    phone_number: str,
+    notification_email: str,
+    escalation_phone_number: str,
+    notes: str,
+    direction: str,
+) -> None:
+    db.execute(
+        """
+        UPDATE clients
+        SET display_name = ?,
+            email = ?,
+            phone_number = ?,
+            notification_email = ?,
+            escalation_phone_number = ?,
+            notes_current = ?,
+            direction_current = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (
+            display_name.strip(),
+            email.strip(),
+            phone_number.strip(),
+            notification_email.strip(),
+            escalation_phone_number.strip(),
+            notes.strip(),
+            direction.strip(),
+            client_id,
+        ),
+    )
+
+
+def update_client_password(
+    db: sqlite3.Connection,
+    *,
+    client_id: str,
+    password_hash: str,
+) -> None:
+    db.execute(
+        """
+        UPDATE clients
+        SET password_hash = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (password_hash, client_id),
+    )
+
+
 def list_consultants(db: sqlite3.Connection):
     return db.execute(
         """
@@ -71,6 +195,7 @@ def list_consultants(db: sqlite3.Connection):
         FROM consultants c
         LEFT JOIN consultant_clients cc ON cc.consultant_id = c.id
         LEFT JOIN sessions s ON s.consultant_id = c.id
+        WHERE c.is_active = 1
         GROUP BY c.id
         ORDER BY c.created_at DESC
         """
@@ -83,6 +208,7 @@ def create_client(
     consultant_id: str,
     display_name: str,
     email: str,
+    password_hash: str = "",
     phone_number: str,
     notification_email: str,
     escalation_phone_number: str,
@@ -92,14 +218,15 @@ def create_client(
     db.execute(
         """
         INSERT INTO clients (
-            display_name, email, phone_number, notification_email,
+            display_name, email, password_hash, phone_number, notification_email,
             escalation_phone_number, notes_current, direction_current,
             created_by_consultant_id, is_active
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
         """,
         (
             display_name.strip(),
             email.strip(),
+            password_hash.strip(),
             phone_number.strip(),
             notification_email.strip(),
             escalation_phone_number.strip(),
@@ -128,6 +255,20 @@ def create_client(
     return client_id
 
 
+def get_client_by_email(db: sqlite3.Connection, email: str):
+    return db.execute(
+        """
+        SELECT c.*, cc.consultant_id
+        FROM clients c
+        LEFT JOIN consultant_clients cc ON cc.client_id = c.id
+        WHERE c.email = ? AND c.is_active = 1
+        ORDER BY cc.created_at DESC
+        LIMIT 1
+        """,
+        (email.lower().strip(),),
+    ).fetchone()
+
+
 def upsert_client_auth_identity(
     db: sqlite3.Connection,
     *,
@@ -152,10 +293,10 @@ def upsert_client_auth_identity(
         db.execute(
             """
             UPDATE client_auth_identities
-            SET google_sub_hash = COALESCE(?, google_sub_hash),
-                email_hash = COALESCE(?, email_hash),
-                normalized_name_hash = COALESCE(?, normalized_name_hash),
-                phone_hash = COALESCE(?, phone_hash),
+            SET google_sub_hash = ?,
+                email_hash = ?,
+                normalized_name_hash = ?,
+                phone_hash = ?,
                 last_verified_at = CURRENT_TIMESTAMP
             WHERE client_id = ?
             """,

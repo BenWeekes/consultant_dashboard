@@ -1,0 +1,30 @@
+{% extends "shared/base.html" %}
+{% block body %}
+  <div class="nav">
+    <a href="/admin/dashboard">Overview</a>
+    <a href="/admin/consultants">Consultants</a>
+    <a href="/admin/account">Account</a>
+  </div>
+  <div class="split">
+    <div class="card">
+      <div class="label">{{ brand }}</div>
+      <h1>Admin Account</h1>
+      <p class="muted">{{ admin_email }}</p>
+      <p class="muted">Use this page to change your password.</p>
+    </div>
+    <div class="card">
+      <div class="label">Security</div>
+      <h2>Change Password</h2>
+      <form method="post">
+        <label class="field-label">Current Password</label>
+        <input name="current_password" type="password" required>
+        <label class="field-label">New Password</label>
+        <input name="new_password" type="password" required>
+        <div class="field-help">Use at least 8 characters.</div>
+        <label class="field-label">Confirm New Password</label>
+        <input name="confirm_password" type="password" required>
+        <button type="submit">Update password</button>
+      </form>
+    </div>
+  </div>
+{% endblock %}

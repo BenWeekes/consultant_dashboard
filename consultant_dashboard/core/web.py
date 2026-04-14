@@ -6,6 +6,7 @@ from .auth import require_admin, require_consultant
 from .db import (
     create_client,
     create_consultant,
+    deactivate_consultant,
     get_client_detail,
     get_consultant_by_id,
     get_db,
@@ -15,10 +16,25 @@ from .db import (
     list_sessions,
     list_sessions_for_client,
     log_audit,
+    update_client,
+    update_client_password,
+    update_consultant,
+    update_consultant_password,
+    upsert_client_auth_identity,
 )
+from .client_identity import build_identity_hashes
+from .phone_numbers import country_options, infer_country_code, local_display_number, normalize_phone
 from .storage import EncryptedStorage
+from werkzeug.security import generate_password_hash
 
 web_bp = Blueprint("web", __name__)
+
+
+def _phone_form_value(phone_number: str):
+    return {
+        "country_code": infer_country_code(phone_number),
+        "local_number": local_display_number(phone_number),
+    }
 
 
 def _storage() -> EncryptedStorage:
@@ -80,6 +96,7 @@ def consultant_dashboard():
     return render_template(
         "consultant/dashboard.html",
         brand=current_app.config["BRAND_NAME"],
+        theme="consultant",
         stats=stats,
         consultant=consultant,
         recent_clients=recent_clients,
@@ -92,15 +109,77 @@ def consultant_dashboard():
 def consultant_clients():
     consultant_id = session.get("consultant_id")
     db = get_db(current_app.config)
+    form_defaults = {
+        "phone_country_code": "US",
+        "escalation_phone_country_code": "US",
+    }
     if request.method == "POST":
         display_name = request.form.get("display_name", "").strip()
         if not display_name:
             flash("Client name is required", "error")
         else:
             email = request.form.get("email", "").strip()
-            phone_number = request.form.get("phone_number", "").strip()
+            phone_country_code = request.form.get("phone_country_code", "US").strip().upper()
+            escalation_phone_country_code = request.form.get("escalation_phone_country_code", phone_country_code).strip().upper()
+            raw_phone_number = request.form.get("phone_number", "").strip()
+            raw_escalation_phone = request.form.get("escalation_phone_number", "").strip()
+            initial_password = request.form.get("initial_password", "").strip()
+            if initial_password and (not email or not raw_phone_number):
+                flash("Email and phone number are required when setting a client password.", "error")
+                clients = list_clients_for_consultant(db, consultant_id)
+                form_defaults = {
+                    "display_name": display_name,
+                    "email": email,
+                    "initial_password": initial_password,
+                    "phone_number": raw_phone_number,
+                    "phone_country_code": phone_country_code,
+                    "notification_email": request.form.get("notification_email", "").strip(),
+                    "escalation_phone_number": raw_escalation_phone,
+                    "escalation_phone_country_code": escalation_phone_country_code,
+                    "notes": request.form.get("notes", "").strip(),
+                    "direction": request.form.get("direction", "").strip(),
+                }
+                db.close()
+                return render_template(
+                    "consultant/clients.html",
+                    brand=current_app.config["BRAND_NAME"],
+                    theme="consultant",
+                    clients=clients,
+                    phone_countries=country_options(),
+                    form_defaults=form_defaults,
+                )
+            try:
+                phone_number = normalize_phone(raw_phone_number, phone_country_code) if raw_phone_number else ""
+                escalation_phone_number = (
+                    normalize_phone(raw_escalation_phone, escalation_phone_country_code)
+                    if raw_escalation_phone
+                    else phone_number
+                )
+            except ValueError as exc:
+                flash(str(exc), "error")
+                form_defaults = {
+                    "display_name": display_name,
+                    "email": email,
+                    "initial_password": initial_password,
+                    "phone_number": raw_phone_number,
+                    "phone_country_code": phone_country_code,
+                    "notification_email": request.form.get("notification_email", "").strip(),
+                    "escalation_phone_number": raw_escalation_phone,
+                    "escalation_phone_country_code": escalation_phone_country_code,
+                    "notes": request.form.get("notes", "").strip(),
+                    "direction": request.form.get("direction", "").strip(),
+                }
+                clients = list_clients_for_consultant(db, consultant_id)
+                db.close()
+                return render_template(
+                    "consultant/clients.html",
+                    brand=current_app.config["BRAND_NAME"],
+                    theme="consultant",
+                    clients=clients,
+                    phone_countries=country_options(),
+                    form_defaults=form_defaults,
+                )
             notification_email = request.form.get("notification_email", "").strip() or email
-            escalation_phone_number = request.form.get("escalation_phone_number", "").strip() or phone_number
             notes = request.form.get("notes", "").strip()
             direction = request.form.get("direction", "").strip()
             client_id = create_client(
@@ -108,6 +187,7 @@ def consultant_clients():
                 consultant_id=consultant_id,
                 display_name=display_name,
                 email=email,
+                password_hash=generate_password_hash(initial_password, method="pbkdf2:sha256") if initial_password else "",
                 phone_number=phone_number,
                 notification_email=notification_email,
                 escalation_phone_number=escalation_phone_number,
@@ -133,11 +213,14 @@ def consultant_clients():
     return render_template(
         "consultant/clients.html",
         brand=current_app.config["BRAND_NAME"],
+        theme="consultant",
         clients=clients,
+        phone_countries=country_options(),
+        form_defaults=form_defaults,
     )
 
 
-@web_bp.get("/consultant/clients/<client_id>")
+@web_bp.route("/consultant/clients/<client_id>", methods=["GET", "POST"])
 @require_consultant
 def consultant_client_detail(client_id: str):
     consultant_id = session.get("consultant_id")
@@ -146,6 +229,88 @@ def consultant_client_detail(client_id: str):
     if not client:
         db.close()
         abort(404)
+
+    if request.method == "POST":
+        display_name = request.form.get("display_name", "").strip()
+        email = request.form.get("email", "").strip()
+        phone_country_code = request.form.get("phone_country_code", "US").strip().upper()
+        escalation_phone_country_code = request.form.get("escalation_phone_country_code", phone_country_code).strip().upper()
+        raw_phone_number = request.form.get("phone_number", "").strip()
+        raw_escalation_phone = request.form.get("escalation_phone_number", "").strip()
+        notification_email = request.form.get("notification_email", "").strip() or email
+        notes = request.form.get("notes", "").strip()
+        direction = request.form.get("direction", "").strip()
+        reset_password = request.form.get("reset_password", "").strip()
+
+        if not display_name:
+            flash("Client name is required", "error")
+        else:
+            try:
+                if reset_password and (not email or not raw_phone_number):
+                    raise ValueError("Email and phone number are required when setting a client password.")
+                phone_number = normalize_phone(raw_phone_number, phone_country_code) if raw_phone_number else ""
+                escalation_phone_number = (
+                    normalize_phone(raw_escalation_phone, escalation_phone_country_code)
+                    if raw_escalation_phone
+                    else phone_number
+                )
+                update_client(
+                    db,
+                    client_id=client_id,
+                    display_name=display_name,
+                    email=email,
+                    phone_number=phone_number,
+                    notification_email=notification_email,
+                    escalation_phone_number=escalation_phone_number,
+                    notes=notes,
+                    direction=direction,
+                )
+                if reset_password:
+                    if len(reset_password) < 8:
+                        raise ValueError("Temporary password must be at least 8 characters.")
+                    update_client_password(
+                        db,
+                        client_id=client_id,
+                        password_hash=generate_password_hash(reset_password, method="pbkdf2:sha256"),
+                    )
+                    log_audit(
+                        db,
+                        actor_type="consultant",
+                        actor_id=consultant_id,
+                        action="client_password_reset",
+                        target_type="client",
+                        target_id=client_id,
+                        ip_address=request.headers.get("X-Forwarded-For", request.remote_addr or ""),
+                        user_agent=request.headers.get("User-Agent", ""),
+                    )
+                identity_hashes = build_identity_hashes(display_name, email, phone_number)
+                if any(identity_hashes.values()):
+                    upsert_client_auth_identity(
+                        db,
+                        client_id=client_id,
+                        email_hash=identity_hashes["email_hash"],
+                        normalized_name_hash=identity_hashes["normalized_name_hash"],
+                        phone_hash=identity_hashes["phone_hash"],
+                    )
+                log_audit(
+                    db,
+                    actor_type="consultant",
+                    actor_id=consultant_id,
+                    action="client_updated",
+                    target_type="client",
+                    target_id=client_id,
+                    ip_address=request.headers.get("X-Forwarded-For", request.remote_addr or ""),
+                    user_agent=request.headers.get("User-Agent", ""),
+                )
+                db.commit()
+                flash("Client updated", "muted")
+                if reset_password:
+                    flash("Temporary client password updated", "muted")
+            except ValueError as exc:
+                db.rollback()
+                flash(str(exc), "error")
+            client = get_client_detail(db, client_id, consultant_id=consultant_id)
+
     sessions = list_sessions_for_client(db, client_id, limit=20)
     open_alerts = db.execute(
         """
@@ -176,12 +341,16 @@ def consultant_client_detail(client_id: str):
     return render_template(
         "consultant/client_detail.html",
         brand=current_app.config["BRAND_NAME"],
+        theme="consultant",
         client=client,
         sessions=sessions,
         open_alerts=open_alerts,
         auth_identity=auth_identity,
         latest_summary=latest_summary,
         baseline=baseline,
+        phone_countries=country_options(),
+        phone_form=_phone_form_value(client["phone_number"]),
+        escalation_phone_form=_phone_form_value(client["escalation_phone_number"]),
     )
 
 
@@ -195,6 +364,7 @@ def consultant_sessions():
     return render_template(
         "consultant/sessions.html",
         brand=current_app.config["BRAND_NAME"],
+        theme="consultant",
         sessions=sessions,
     )
 
@@ -228,6 +398,7 @@ def consultant_session_detail(session_id: str):
     return render_template(
         "consultant/session_detail.html",
         brand=current_app.config["BRAND_NAME"],
+        theme="consultant",
         session_row=session_row,
         summary=summary,
         biomarkers=biomarkers,
@@ -259,15 +430,49 @@ def admin_dashboard():
 @require_admin
 def admin_consultants():
     db = get_db(current_app.config)
+    form_defaults = {
+        "phone_country_code": "US",
+        "escalation_phone_country_code": "US",
+    }
     if request.method == "POST":
         email = request.form.get("email", "").strip().lower()
         name = request.form.get("name", "").strip()
-        phone_number = request.form.get("phone_number", "").strip()
+        phone_country_code = request.form.get("phone_country_code", "US").strip().upper()
+        escalation_phone_country_code = request.form.get("escalation_phone_country_code", phone_country_code).strip().upper()
+        raw_phone_number = request.form.get("phone_number", "").strip()
+        raw_escalation_phone = request.form.get("escalation_phone_number", "").strip()
         password = request.form.get("password", "").strip()
-        if not email or not name or not phone_number or not password:
+        if not email or not name or not raw_phone_number or not password:
             flash("Email, name, phone number, and password are required", "error")
         else:
-            from werkzeug.security import generate_password_hash
+            try:
+                phone_number = normalize_phone(raw_phone_number, phone_country_code)
+                escalation_phone_number = (
+                    normalize_phone(raw_escalation_phone, escalation_phone_country_code)
+                    if raw_escalation_phone
+                    else phone_number
+                )
+            except ValueError as exc:
+                flash(str(exc), "error")
+                consultants = list_consultants(db)
+                form_defaults = {
+                    "name": name,
+                    "email": email,
+                    "phone_number": raw_phone_number,
+                    "phone_country_code": phone_country_code,
+                    "notification_email": request.form.get("notification_email", "").strip(),
+                    "escalation_phone_number": raw_escalation_phone,
+                    "escalation_phone_country_code": escalation_phone_country_code,
+                    "password": password,
+                }
+                db.close()
+                return render_template(
+                    "admin/consultants.html",
+                    brand=current_app.config["BRAND_NAME"],
+                    consultants=consultants,
+                    phone_countries=country_options(),
+                    form_defaults=form_defaults,
+                )
 
             try:
                 create_consultant(
@@ -277,7 +482,7 @@ def admin_consultants():
                     phone_number=phone_number,
                     password_hash=generate_password_hash(password, method="pbkdf2:sha256"),
                     notification_email=request.form.get("notification_email", "").strip() or email,
-                    escalation_phone_number=request.form.get("escalation_phone_number", "").strip() or phone_number,
+                    escalation_phone_number=escalation_phone_number,
                 )
                 log_audit(
                     db,
@@ -301,4 +506,121 @@ def admin_consultants():
         "admin/consultants.html",
         brand=current_app.config["BRAND_NAME"],
         consultants=consultants,
+        phone_countries=country_options(),
+        form_defaults=form_defaults,
     )
+
+
+@web_bp.route("/admin/consultants/<consultant_id>", methods=["GET", "POST"])
+@require_admin
+def admin_consultant_detail(consultant_id: str):
+    db = get_db(current_app.config)
+    consultant = get_consultant_by_id(db, consultant_id)
+    if not consultant:
+        db.close()
+        abort(404)
+
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        name = request.form.get("name", "").strip()
+        phone_country_code = request.form.get("phone_country_code", "US").strip().upper()
+        escalation_phone_country_code = request.form.get("escalation_phone_country_code", phone_country_code).strip().upper()
+        raw_phone_number = request.form.get("phone_number", "").strip()
+        notification_email = request.form.get("notification_email", "").strip() or email
+        raw_escalation_phone = request.form.get("escalation_phone_number", "").strip()
+        reset_password = request.form.get("reset_password", "").strip()
+
+        if not email or not name or not raw_phone_number:
+            flash("Email, name, and phone number are required", "error")
+        else:
+            try:
+                phone_number = normalize_phone(raw_phone_number, phone_country_code)
+                escalation_phone_number = (
+                    normalize_phone(raw_escalation_phone, escalation_phone_country_code)
+                    if raw_escalation_phone
+                    else phone_number
+                )
+                update_consultant(
+                    db,
+                    consultant_id=consultant_id,
+                    email=email,
+                    name=name,
+                    phone_number=phone_number,
+                    notification_email=notification_email,
+                    escalation_phone_number=escalation_phone_number,
+                )
+                if reset_password:
+                    if len(reset_password) < 8:
+                        raise ValueError("Temporary password must be at least 8 characters.")
+                    update_consultant_password(
+                        db,
+                        consultant_id=consultant_id,
+                        password_hash=generate_password_hash(reset_password, method="pbkdf2:sha256"),
+                    )
+                    log_audit(
+                        db,
+                        actor_type="admin",
+                        actor_id=session.get("admin_email", "unknown"),
+                        action="consultant_password_reset",
+                        target_type="consultant",
+                        target_id=consultant_id,
+                        ip_address=request.headers.get("X-Forwarded-For", request.remote_addr or ""),
+                        user_agent=request.headers.get("User-Agent", ""),
+                    )
+                log_audit(
+                    db,
+                    actor_type="admin",
+                    actor_id=session.get("admin_email", "unknown"),
+                    action="consultant_updated",
+                    target_type="consultant",
+                    target_id=consultant_id,
+                    ip_address=request.headers.get("X-Forwarded-For", request.remote_addr or ""),
+                    user_agent=request.headers.get("User-Agent", ""),
+                )
+                db.commit()
+                flash("Consultant updated", "muted")
+                if reset_password:
+                    flash("Temporary password updated", "muted")
+            except sqlite3.IntegrityError:
+                db.rollback()
+                flash("A consultant with that email already exists", "error")
+            except ValueError as exc:
+                db.rollback()
+                flash(str(exc), "error")
+            consultant = get_consultant_by_id(db, consultant_id)
+
+    db.close()
+    return render_template(
+        "admin/consultant_detail.html",
+        brand=current_app.config["BRAND_NAME"],
+        consultant=consultant,
+        phone_countries=country_options(),
+        phone_form=_phone_form_value(consultant["phone_number"]),
+        escalation_phone_form=_phone_form_value(consultant["escalation_phone_number"]),
+    )
+
+
+@web_bp.post("/admin/consultants/<consultant_id>/delete")
+@require_admin
+def admin_consultant_delete(consultant_id: str):
+    db = get_db(current_app.config)
+    consultant = get_consultant_by_id(db, consultant_id)
+    if not consultant:
+        db.close()
+        abort(404)
+
+    deactivate_consultant(db, consultant_id=consultant_id)
+    log_audit(
+        db,
+        actor_type="admin",
+        actor_id=session.get("admin_email", "unknown"),
+        action="consultant_deleted",
+        target_type="consultant",
+        target_id=consultant_id,
+        ip_address=request.headers.get("X-Forwarded-For", request.remote_addr or ""),
+        user_agent=request.headers.get("User-Agent", ""),
+    )
+    db.commit()
+    db.close()
+    flash("Consultant deleted", "muted")
+    return redirect(url_for("web.admin_consultants"))

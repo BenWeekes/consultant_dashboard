@@ -4,6 +4,7 @@
     <a href="/consultant/dashboard">Overview</a>
     <a href="/consultant/clients">Clients</a>
     <a href="/consultant/sessions">Sessions</a>
+    <a href="/consultant/account">Account</a>
   </div>
   <div class="card grid">
     <div>
@@ -25,16 +26,14 @@
           <div class="label">Recent Clients</div>
           <h2>Current Caseload</h2>
         </div>
-        <a href="/consultant/clients">Manage clients</a>
       </div>
+      <p class="muted">You can add yourself as a client if you want to test the AI flow from the normal client app.</p>
       <div class="list">
         {% for client in recent_clients %}
           <div class="item">
-            <div class="row" style="justify-content: space-between;">
-              <strong><a href="/consultant/clients/{{ client.id }}">{{ client.display_name }}</a></strong>
-              <span class="pill">{{ client.session_count }} sessions</span>
-            </div>
+            <strong><a href="/consultant/clients/{{ client.id }}">{{ client.display_name }}</a></strong>
             <div class="muted">{{ client.email or client.phone_number or "No contact details yet" }}</div>
+            <div class="muted">Latest session: {{ client.last_session_at or "Not yet" }}</div>
           </div>
         {% else %}
           <div class="muted">No clients yet.</div>

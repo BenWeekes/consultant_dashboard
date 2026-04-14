@@ -2,6 +2,8 @@
 
 Purpose: boot the service locally, seed initial records, and understand the required runtime configuration.
 
+This repo documents the product/admin layer. Client session boot, Agora channel setup, Shen, and Thymia live primarily in the sample-stack recipe at `agent-samples/recipes/therapist.md`.
+
 ## Stack
 
 - Python service: Flask app in `consultant_dashboard/`
@@ -10,10 +12,12 @@ Purpose: boot the service locally, seed initial records, and understand the requ
 - Auth:
   - consultant login = email/password + OTP
   - admin login = file-based email/password
+  - clients do not log into this service; they authenticate through `simple-backend` with Google + phone verification
 - Tests:
   - `tests/test_smoke.py`
   - `tests/test_internal_api.py`
   - `tests/test_web_dashboard.py`
+  - `tests/test_live_stack.py` (opt-in live service smoke test)
 
 ## Quick Start
 
@@ -39,6 +43,8 @@ Service URLs:
 - `http://127.0.0.1:8090/health`
 - `http://127.0.0.1:8090/consultant/login`
 - `http://127.0.0.1:8090/admin/login`
+- `http://127.0.0.1:8090/consultant/account`
+- `http://127.0.0.1:8090/admin/account`
 - `http://127.0.0.1:8090/internal/health`
 
 ## Required Environment Variables
@@ -94,11 +100,9 @@ Create client:
 python run.py create-client --consultant-id ... --name ... --email ... --phone ...
 ```
 
-Link hashed auth identity for `simple-backend` lookup testing:
+Normal product flow does not require a CLI link step. When a consultant creates a client in the dashboard UI with name, email, and phone, the service creates the hashed identity rows that `simple-backend` later resolves after Google + SMS login.
 
-```bash
-python run.py link-client-auth --client-id ... --email ... --name ... --phone ...
-```
+`link-client-auth` still exists as a low-level helper for tests, fixtures, or repair work.
 
 ## Verification
 
@@ -107,6 +111,13 @@ Run:
 ```bash
 source venv/bin/activate
 python -m unittest discover -s tests -v
+```
+
+Run the live stack smoke test:
+
+```bash
+source venv/bin/activate
+RUN_LIVE_STACK_TESTS=1 python -m unittest tests.test_live_stack -v
 ```
 
 Coverage includes:
@@ -118,6 +129,16 @@ Coverage includes:
 - signed `POST /internal/session-complete`
 - dashboard route protections and render paths
 - consultant/admin CRUD flows
+- consultant/admin password change flows
+- automatic client identity resolution contract used by `simple-backend`
+
+Live smoke coverage includes:
+
+- `simple-backend` health
+- `simple-backend` auth-check contract
+- `consultant-dashboard` health
+- `server-custom-llm` ping
+- Cloudflare tunnel ping
 
 ## See Also
 

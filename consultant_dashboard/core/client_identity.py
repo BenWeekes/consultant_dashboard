@@ -1,6 +1,8 @@
 import hashlib
 import re
 
+from .phone_numbers import normalize_phone as normalize_supported_phone
+
 
 def hash_value(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
@@ -11,15 +13,10 @@ def normalize_name(name: str) -> str:
 
 
 def normalize_phone(phone: str) -> str:
-    digits = re.sub(r"[^\d+]", "", (phone or "").strip())
-    if not digits:
+    try:
+        return normalize_supported_phone(phone)
+    except ValueError:
         return ""
-    if not digits.startswith("+"):
-        if len(digits) == 10:
-            digits = "+1" + digits
-        elif len(digits) == 11 and digits.startswith("1"):
-            digits = "+" + digits
-    return digits
 
 
 def build_identity_hashes(display_name: str, email: str, phone_number: str) -> dict:

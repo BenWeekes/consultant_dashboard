@@ -107,6 +107,30 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
         self.assertEqual(response.json["baseline"]["window_sessions"], 1)
         self.assertEqual(len(response.json["alerts"]), 2)
 
+    def test_verify_client_password_returns_client_mapping(self):
+        body = json.dumps({"email": "alex@example.com", "password": "clientpass123"}, separators=(",", ":"))
+        response = self.client.post(
+            "/internal/verify-client-password",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/verify-client-password", body),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json["ok"])
+        self.assertEqual(response.json["client_id"], self.client_id)
+        self.assertEqual(response.json["phone_number"], "+447700900111")
+
+    def test_verify_client_password_rejects_invalid_credentials(self):
+        body = json.dumps({"email": "alex@example.com", "password": "wrongpass"}, separators=(",", ":"))
+        response = self.client.post(
+            "/internal/verify-client-password",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/verify-client-password", body),
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json["error"], "invalid_credentials")
+
     def test_session_complete_creates_session_baseline_and_alert_rows(self):
         response = self.ingest_session(session_id="sess_internal_002", urgent_escalation=True)
         self.assertTrue(response.json["ok"])

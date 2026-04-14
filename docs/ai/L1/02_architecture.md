@@ -23,6 +23,7 @@ It does not own:
 - Agora session launch
 - live call orchestration
 - live memory generation during the call
+- client-facing Google/SMS login screens
 
 Those stay in sibling services such as `simple-backend` and `server-custom-llm`.
 
@@ -34,6 +35,7 @@ simple-backend ----signed GET----> consultant-dashboard /internal/client-context
 server-custom-llm -signed POST---> consultant-dashboard /internal/session-complete
 
 consultant/admin browser ---> consultant-dashboard web routes
+client browser -----------> simple-backend auth + react client
 
 consultant-dashboard
   ├─ SQLite metadata
@@ -49,6 +51,7 @@ consultant-dashboard
 2. Password is checked against `consultants.password_hash`.
 3. OTP is sent through Twilio Verify if configured; otherwise dev mode stores/logs a local code.
 4. `/consultant/verify` validates the code and creates the authenticated session.
+5. Admins can replace a consultant password from the consultant detail page by setting a new temporary password.
 
 ### Admin login
 
@@ -58,10 +61,28 @@ consultant-dashboard
 
 ### Start-of-session support
 
-1. External caller sends signed `GET /internal/resolve-client` with hashed identity fields.
-2. Service maps hashes to `client_id` in `client_auth_identities`.
-3. External caller sends signed `GET /internal/client-context?client_id=...`.
-4. Service returns current notes, direction, recent summary, baseline, and open alerts.
+1. Client authenticates in `simple-backend` using either email/password + phone verification, or Google + phone verification.
+2. `simple-backend` hashes the authenticated identity fields and sends signed `GET /internal/resolve-client`.
+3. Service maps those hashes to `client_id` in `client_auth_identities`.
+4. `simple-backend` sends signed `GET /internal/client-context?client_id=...`.
+5. Service returns current notes, direction, recent summary, baseline, and open alerts.
+6. `simple-backend` passes the resulting context and dashboard callback config into `server-custom-llm`.
+
+Normal production expectation:
+
+- email hash + phone hash are the primary client match keys
+- Google identity can still be sent as supporting identity data
+- client password verification happens through signed `POST /internal/verify-client-password`
+- if the session-launch profile enables required dashboard authorization, `simple-backend` should deny access when no dashboard client record matches
+- only US and UK phone numbers are accepted in the dashboard and in the client auth form for now
+- clients can use dashboard-managed email/password + SMS, and Google + SMS remains optional for matching email accounts
+
+This is how the consultant influences the next AI session:
+
+- `notes` provide durable background context for the AI
+- `direction` provides explicit steering for the next session
+- `latest_summary` gives the AI a generalized view of the last session
+- `baseline` gives the AI the client biomarker reference point
 
 ### End-of-call ingestion
 
@@ -70,6 +91,13 @@ consultant-dashboard
 3. Service upserts the `sessions` row.
 4. Service recomputes the rolling biomarker baseline from the latest five stored biomarker snapshots.
 5. Service stores session alerts and writes an audit log row.
+
+The dashboard summary is intended to stay consultant-facing and generalized. Richer runtime continuity memory remains the responsibility of `server-custom-llm` and should not be treated as the same artifact.
+
+Current end-of-call split:
+
+- continuity memory: private AI follow-up summary stored by `server-custom-llm`
+- consultant summary: generalized dashboard summary with overview, biomarker summary, risk overview, and follow-up guidance
 
 ## Storage Model
 
@@ -107,4 +135,3 @@ The plan anticipates later migration of artifacts to S3 or a storage abstraction
 - [03 Code Map](03_code_map.md)
 - [06 Interfaces](06_interfaces.md)
 - [08 Security](08_security.md)
-

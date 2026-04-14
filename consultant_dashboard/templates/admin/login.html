@@ -1,5 +1,6 @@
 {% extends "shared/base.html" %}
 {% block body %}
+  <div class="auth-shell">
   <div class="card">
     <div class="label">{{ brand }}</div>
     <h1>Admin Login</h1>
@@ -8,5 +9,6 @@
       <input type="password" name="password" placeholder="Password" required>
       <button type="submit">Sign in</button>
     </form>
+  </div>
   </div>
 {% endblock %}

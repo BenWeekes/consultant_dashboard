@@ -4,9 +4,11 @@ import time
 from typing import Dict, List
 
 from flask import Blueprint, current_app, jsonify, request
+from werkzeug.security import check_password_hash
 
 from .db import (
     create_session_alert,
+    get_client_by_email,
     get_client_context,
     get_db,
     log_audit,
@@ -112,6 +114,35 @@ def client_context():
     }
 
 
+@internal_bp.post("/verify-client-password")
+def verify_client_password():
+    payload = request.get_json(force=True)
+    email = (payload.get("email") or "").strip().lower()
+    password = payload.get("password") or ""
+    if not email or not password:
+        return jsonify({"error": "email and password required"}), 400
+
+    db = get_db(current_app.config)
+    client = get_client_by_email(db, email)
+    db.close()
+    if not client:
+        return jsonify({"error": "invalid_credentials"}), 401
+    if not client["password_hash"]:
+        return jsonify({"error": "password_login_not_enabled"}), 403
+    if not check_password_hash(client["password_hash"], password):
+        return jsonify({"error": "invalid_credentials"}), 401
+
+    return {
+        "ok": True,
+        "client_id": client["id"],
+        "consultant_id": client["consultant_id"],
+        "display_name": client["display_name"],
+        "email": client["email"],
+        "phone_number": client["phone_number"],
+        "is_active": bool(client["is_active"]),
+    }
+
+
 def _compute_baseline(storage: EncryptedStorage, db, client_id: str):
     rows = db.execute(
         """
@@ -147,6 +178,11 @@ def session_complete():
     payload = request.get_json(force=True)
     client_id = payload["client_id"]
     session_id = payload["session_id"]
+    print(
+        f"[consultant-dashboard] session-complete received "
+        f"client_id={client_id} session_id={session_id} "
+        f"profile={payload.get('profile', 'default')} urgent={bool(payload.get('urgent_escalation'))}"
+    )
     storage = EncryptedStorage(current_app.config["STORAGE_ROOT"], current_app.config["MASTER_KEY"])
 
     summary_key = None
@@ -241,4 +277,8 @@ def session_complete():
     )
     db.commit()
     db.close()
+    print(
+        f"[consultant-dashboard] session-complete stored "
+        f"client_id={client_id} session_id={session_id} baseline_key={baseline_key or 'none'}"
+    )
     return {"ok": True, "session_id": session_id, "baseline_storage_key": baseline_key}

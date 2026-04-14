@@ -7,9 +7,9 @@ from functools import wraps
 from typing import Dict, Optional, Tuple
 
 from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
-from .db import get_consultant_by_email, get_db, log_audit
+from .db import get_consultant_by_email, get_consultant_by_id, get_db, log_audit, update_consultant_password
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -41,6 +41,18 @@ def _load_admin_users(path: str) -> Tuple[Dict[str, str], str, int]:
     return users, secret, ttl
 
 
+def _write_admin_users(path: str, users: Dict[str, str], secret: str, ttl: int) -> None:
+    lines = [
+        f"session_secret={secret}",
+        f"session_ttl={ttl}",
+    ]
+    for email in sorted(users.keys()):
+        lines.append(f"{email}={users[email]}")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    os.chmod(path, 0o600)
+
+
 def _send_or_store_code(phone_number: str, code: str) -> None:
     cfg = current_app.config
     if (
@@ -49,10 +61,18 @@ def _send_or_store_code(phone_number: str, code: str) -> None:
         and cfg["TWILIO_VERIFY_SERVICE_SID"]
         and not cfg["AUTH_DEV_MODE"]
     ):
+        print(
+            f"[consultant-dashboard] Sending Twilio Verify OTP to {phone_number} "
+            f"service={cfg['TWILIO_VERIFY_SERVICE_SID'][:6]}..."
+        )
         from twilio.rest import Client
         client = Client(cfg["TWILIO_ACCOUNT_SID"], cfg["TWILIO_AUTH_TOKEN"])
-        client.verify.v2.services(cfg["TWILIO_VERIFY_SERVICE_SID"]).verifications.create(
+        result = client.verify.v2.services(cfg["TWILIO_VERIFY_SERVICE_SID"]).verifications.create(
             to=phone_number, channel="sms"
+        )
+        print(
+            f"[consultant-dashboard] Twilio Verify send status={getattr(result, 'status', 'unknown')} "
+            f"to={phone_number}"
         )
         return
     print(f"[consultant-dashboard] OTP for {phone_number}: {code}")
@@ -77,6 +97,10 @@ def _verify_code(phone_number: str, code: str) -> bool:
         result = client.verify.v2.services(cfg["TWILIO_VERIFY_SERVICE_SID"]).verification_checks.create(
             to=phone_number,
             code=code,
+        )
+        print(
+            f"[consultant-dashboard] Twilio Verify check status={result.status} "
+            f"to={phone_number}"
         )
         return result.status == "approved"
     return (
@@ -114,7 +138,7 @@ def _record_audit(actor_type: str, actor_id: str, action: str, details: Optional
 @auth_bp.route("/consultant/login", methods=["GET", "POST"])
 def consultant_login():
     if request.method == "GET":
-        return render_template("consultant/login.html", brand=current_app.config["BRAND_NAME"])
+        return render_template("consultant/login.html", brand=current_app.config["BRAND_NAME"], theme="consultant")
 
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
@@ -124,7 +148,7 @@ def consultant_login():
         _record_audit("consultant", email or "unknown", "login_failed")
         flash("Invalid email or password", "error")
         db.close()
-        return render_template("consultant/login.html", brand=current_app.config["BRAND_NAME"]), 401
+        return render_template("consultant/login.html", brand=current_app.config["BRAND_NAME"], theme="consultant"), 401
 
     code = "000000" if current_app.config["AUTH_DEV_MODE"] else f"{random.randint(0, 999999):06d}"
     session.clear()
@@ -133,7 +157,13 @@ def consultant_login():
     session["pending_phone"] = consultant["phone_number"]
     session["pending_code"] = code
     session["pending_code_exp"] = int(time.time()) + 300
-    _send_or_store_code(consultant["phone_number"], code)
+    try:
+        _send_or_store_code(consultant["phone_number"], code)
+    except Exception as exc:
+        print(f"[consultant-dashboard] Failed to send OTP to {consultant['phone_number']}: {exc}")
+        flash("Failed to send verification code. Please check the phone number and Twilio setup.", "error")
+        db.close()
+        return render_template("consultant/login.html", brand=current_app.config["BRAND_NAME"], theme="consultant"), 500
     _record_audit("consultant", consultant["id"], "login_password_verified")
     db.close()
     return redirect(url_for("auth.consultant_verify"))
@@ -144,13 +174,13 @@ def consultant_verify():
     if session.get("pending_role") != "consultant":
         return redirect(url_for("auth.consultant_login"))
     if request.method == "GET":
-        return render_template("consultant/verify.html", brand=current_app.config["BRAND_NAME"])
+        return render_template("consultant/verify.html", brand=current_app.config["BRAND_NAME"], theme="consultant")
 
     code = request.form.get("code", "").strip()
     if not _verify_code(session.get("pending_phone", ""), code):
         flash("Invalid or expired code", "error")
         _record_audit("consultant", session.get("pending_consultant_id", "unknown"), "login_otp_failed")
-        return render_template("consultant/verify.html", brand=current_app.config["BRAND_NAME"]), 401
+        return render_template("consultant/verify.html", brand=current_app.config["BRAND_NAME"], theme="consultant"), 401
 
     consultant_id = session["pending_consultant_id"]
     session.clear()
@@ -180,6 +210,74 @@ def admin_login():
     session.permanent = True
     _record_audit("admin", email, "login_success")
     return redirect(url_for("web.admin_dashboard"))
+
+
+@auth_bp.route("/consultant/account", methods=["GET", "POST"])
+@_require_role("consultant")
+def consultant_account():
+    consultant_id = session.get("consultant_id")
+    db = get_db(current_app.config)
+    consultant = get_consultant_by_id(db, consultant_id)
+    if not consultant:
+        db.close()
+        session.clear()
+        return redirect(url_for("auth.consultant_login"))
+
+    if request.method == "POST":
+        current_password = request.form.get("current_password", "")
+        new_password = request.form.get("new_password", "")
+        confirm_password = request.form.get("confirm_password", "")
+        if not check_password_hash(consultant["password_hash"], current_password):
+            flash("Current password is incorrect", "error")
+        elif not new_password or len(new_password) < 8:
+            flash("New password must be at least 8 characters", "error")
+        elif new_password != confirm_password:
+            flash("New password and confirmation do not match", "error")
+        else:
+            update_consultant_password(
+                db,
+                consultant_id=consultant_id,
+                password_hash=generate_password_hash(new_password, method="pbkdf2:sha256"),
+            )
+            db.commit()
+            _record_audit("consultant", consultant_id, "password_changed")
+            flash("Password updated", "muted")
+            consultant = get_consultant_by_id(db, consultant_id)
+    db.close()
+    return render_template(
+        "consultant/account.html",
+        brand=current_app.config["BRAND_NAME"],
+        theme="consultant",
+        consultant=consultant,
+    )
+
+
+@auth_bp.route("/admin/account", methods=["GET", "POST"])
+@_require_role("admin")
+def admin_account():
+    admin_email = session.get("admin_email", "")
+    users, secret, ttl = _load_admin_users(current_app.config["ADMIN_AUTH_FILE"])
+    current_hash = users.get(admin_email)
+    if request.method == "POST":
+        current_password = request.form.get("current_password", "")
+        new_password = request.form.get("new_password", "")
+        confirm_password = request.form.get("confirm_password", "")
+        if not current_hash or not check_password_hash(current_hash, current_password):
+            flash("Current password is incorrect", "error")
+        elif not new_password or len(new_password) < 8:
+            flash("New password must be at least 8 characters", "error")
+        elif new_password != confirm_password:
+            flash("New password and confirmation do not match", "error")
+        else:
+            users[admin_email] = generate_password_hash(new_password, method="pbkdf2:sha256")
+            _write_admin_users(current_app.config["ADMIN_AUTH_FILE"], users, secret, ttl)
+            _record_audit("admin", admin_email, "password_changed")
+            flash("Password updated", "muted")
+    return render_template(
+        "admin/account.html",
+        brand=current_app.config["BRAND_NAME"],
+        admin_email=admin_email,
+    )
 
 
 @auth_bp.route("/logout", methods=["POST"])

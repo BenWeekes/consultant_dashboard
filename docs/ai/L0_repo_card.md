@@ -1,6 +1,6 @@
 # consultant_dashboard — Repo Card
 
-> Flask service for consultant/admin operations, encrypted session artifacts, and internal APIs used by session-launch and custom-LLM services.
+> Flask service for consultant/admin operations, encrypted session artifacts, and internal APIs used by the live session stack. Product-specific behavior should be documented here, not in the sample repo recipes.
 
 ## Identity
 | Field | Value |
@@ -30,4 +30,3 @@ The Audience column helps agents prioritise: **Use** = consuming the repo's func
 ## L2 — Deep Dives
 
 - [Deep Dive Index](L1/deep_dives/_index.md)
-

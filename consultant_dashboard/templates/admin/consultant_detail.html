@@ -1,0 +1,74 @@
+{% extends "shared/base.html" %}
+{% block body %}
+  <div class="nav">
+    <a href="/admin/dashboard">Overview</a>
+    <a href="/admin/consultants">Consultants</a>
+    <a href="/admin/account">Account</a>
+  </div>
+  <div class="split">
+    <div class="card">
+      <div class="label">{{ brand }}</div>
+      <h1>Edit Consultant</h1>
+      <p class="muted">Update contact and escalation settings for this consultant.</p>
+      <div class="item">
+        <strong>{{ consultant.name }}</strong>
+        <div class="muted">{{ consultant.email }} · {{ consultant.phone_number }}</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="label">Consultant Settings</div>
+      <h2>Profile</h2>
+      <form method="post">
+        <label class="field-label">Name</label>
+        <input name="name" value="{{ consultant.name }}" required>
+
+        <label class="field-label">Email</label>
+        <input name="email" type="email" value="{{ consultant.email }}" required>
+
+        <label class="field-label">Phone Number</label>
+        <div class="phone-row">
+          <div>
+            <label class="field-label" for="phone_country_code">Country</label>
+            <select id="phone_country_code" name="phone_country_code">
+              {% for phone_country in phone_countries %}
+                <option value="{{ phone_country.code }}" {% if phone_form.country_code == phone_country.code %}selected{% endif %}>{{ phone_country.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="field-label" for="phone_number">Number</label>
+            <input id="phone_number" name="phone_number" value="{{ phone_form.local_number }}" required>
+          </div>
+        </div>
+
+        <label class="field-label">Notification Email <span class="tooltip" tabindex="0" data-tooltip="Receives consultant-facing notifications such as session-complete and urgent escalation emails.">?</span></label>
+        <input name="notification_email" type="email" value="{{ consultant.notification_email }}">
+
+        <label class="field-label">Escalation Phone Number <span class="tooltip" tabindex="0" data-tooltip="Used for urgent escalation handling if the system needs to reach a human quickly.">?</span></label>
+        <div class="phone-row">
+          <div>
+            <label class="field-label" for="escalation_phone_country_code">Country</label>
+            <select id="escalation_phone_country_code" name="escalation_phone_country_code">
+              {% for phone_country in phone_countries %}
+                <option value="{{ phone_country.code }}" {% if escalation_phone_form.country_code == phone_country.code %}selected{% endif %}>{{ phone_country.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="field-label" for="escalation_phone_number">Number</label>
+            <input id="escalation_phone_number" name="escalation_phone_number" value="{{ escalation_phone_form.local_number }}">
+          </div>
+        </div>
+
+        <label class="field-label">Set Temporary Password <span class="tooltip" tabindex="0" data-tooltip="Optional. If filled, this replaces the consultant password immediately. Use this for admin-initiated resets.">?</span></label>
+        <input name="reset_password" type="password" placeholder="Leave blank to keep current password">
+
+        <button type="submit">Save changes</button>
+      </form>
+      <p class="muted">Delete hides this consultant from the dashboard and blocks future login, but keeps existing records.</p>
+      <form method="post" action="/admin/consultants/{{ consultant.id }}/delete" onsubmit="return confirm('Delete this consultant?');">
+        <button type="submit" class="button-danger">Delete consultant</button>
+      </form>
+    </div>
+  </div>
+{% endblock %}

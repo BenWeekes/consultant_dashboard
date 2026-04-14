@@ -4,6 +4,7 @@
     <a href="/consultant/dashboard">Overview</a>
     <a href="/consultant/clients">Clients</a>
     <a href="/consultant/sessions">Sessions</a>
+    <a href="/consultant/account">Account</a>
   </div>
   <div class="split">
     <div class="card">
@@ -39,13 +40,57 @@
       <h2>Add Client</h2>
       <p class="muted">If the client later signs in with the same Gmail address and phone number, they will resolve to this record automatically.</p>
       <form method="post">
-        <input name="display_name" placeholder="Name" required>
-        <input name="email" type="email" placeholder="Email">
-        <input name="phone_number" placeholder="Phone number">
-        <input name="notification_email" type="email" placeholder="Notification email">
-        <input name="escalation_phone_number" placeholder="Escalation phone number">
-        <textarea name="notes" placeholder="Background notes for the AI"></textarea>
-        <textarea name="direction" placeholder="Direction for the next session"></textarea>
+        <label class="field-label">Client Name</label>
+        <input name="display_name" placeholder="Name" value="{{ form_defaults.display_name or '' }}" required>
+
+        <label class="field-label">Email</label>
+        <input name="email" type="email" placeholder="Email" value="{{ form_defaults.email or '' }}">
+        <div class="field-help">Should match the Gmail address the client will use to sign in.</div>
+
+        <label class="field-label">Initial Password <span class="tooltip" tabindex="0" data-tooltip="Optional. Set this to allow the client to sign in with email, password, and SMS instead of Google. Leave blank for Google-only access.">?</span></label>
+        <input name="initial_password" type="password" placeholder="Optional initial password" value="{{ form_defaults.initial_password or '' }}">
+
+        <label class="field-label">Phone Number</label>
+        <div class="phone-row">
+          <div>
+            <label class="field-label" for="phone_country_code">Country</label>
+            <select id="phone_country_code" name="phone_country_code">
+              {% for phone_country in phone_countries %}
+                <option value="{{ phone_country.code }}" {% if (form_defaults.phone_country_code or 'US') == phone_country.code %}selected{% endif %}>{{ phone_country.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="field-label" for="phone_number">Number</label>
+            <input id="phone_number" name="phone_number" placeholder="7700900111 or 07700900111" value="{{ form_defaults.phone_number or '' }}">
+          </div>
+        </div>
+        <div class="field-help">Only US and UK numbers are supported for now. This number is used for SMS verification on every client login.</div>
+
+        <label class="field-label">Notification Email <span class="tooltip" tabindex="0" data-tooltip="Receives session-complete and urgent escalation notifications. Defaults to the consultant email if left blank.">?</span></label>
+        <input name="notification_email" type="email" placeholder="Notification email" value="{{ form_defaults.notification_email or '' }}">
+
+        <label class="field-label">Escalation Phone Number <span class="tooltip" tabindex="0" data-tooltip="Used for urgent escalation handling when the AI or biomarkers detect a serious risk state. Defaults to the consultant phone number if left blank.">?</span></label>
+        <div class="phone-row">
+          <div>
+            <label class="field-label" for="escalation_phone_country_code">Country</label>
+            <select id="escalation_phone_country_code" name="escalation_phone_country_code">
+              {% for phone_country in phone_countries %}
+                <option value="{{ phone_country.code }}" {% if (form_defaults.escalation_phone_country_code or form_defaults.phone_country_code or 'US') == phone_country.code %}selected{% endif %}>{{ phone_country.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="field-label" for="escalation_phone_number">Number</label>
+            <input id="escalation_phone_number" name="escalation_phone_number" placeholder="Optional escalation number" value="{{ form_defaults.escalation_phone_number or '' }}">
+          </div>
+        </div>
+
+        <label class="field-label">Notes <span class="tooltip" tabindex="0" data-tooltip="Background context for the AI. Keep this concise and general rather than highly personal.">?</span></label>
+        <textarea name="notes" placeholder="Background notes for the AI">{{ form_defaults.notes or '' }}</textarea>
+
+        <label class="field-label">Direction <span class="tooltip" tabindex="0" data-tooltip="How you want the next AI session to be guided. This is injected into session context at call start.">?</span></label>
+        <textarea name="direction" placeholder="Direction for the next session">{{ form_defaults.direction or '' }}</textarea>
         <button type="submit">Create client</button>
       </form>
     </div>

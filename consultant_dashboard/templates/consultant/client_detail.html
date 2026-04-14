@@ -4,6 +4,7 @@
     <a href="/consultant/dashboard">Overview</a>
     <a href="/consultant/clients">Clients</a>
     <a href="/consultant/sessions">Sessions</a>
+    <a href="/consultant/account">Account</a>
   </div>
   <div class="split">
     <div class="card grid">
@@ -24,9 +25,9 @@
       <div class="item">
         <div class="label">Client Sign-In Match</div>
         {% if auth_identity %}
-          <div class="muted">This client will resolve automatically when the user logs in with the same Gmail address and phone number stored on this record.</div>
+          <div class="muted">This client will resolve automatically when the user signs in with the same email address and phone number stored on this record. If a password is set, the same record also supports email, password, and SMS.</div>
         {% else %}
-          <div class="muted">Add an email address and phone number for automatic client resolution.</div>
+          <div class="muted">Add an email address and phone number for client resolution, then optionally set a password for email/password login.</div>
         {% endif %}
       </div>
       <div class="item">
@@ -55,6 +56,66 @@
       </div>
     </div>
     <div class="grid">
+      <div class="card">
+        <div class="label">Access Settings</div>
+        <h2>Edit Client</h2>
+        <p class="muted">Clients sign in with Gmail and SMS, so changing email or phone here changes who can access this record.</p>
+        <form method="post">
+          <label class="field-label">Client Name</label>
+          <input name="display_name" value="{{ client.display_name }}" required>
+
+          <label class="field-label">Email</label>
+          <input name="email" type="email" value="{{ client.email or '' }}">
+          <div class="field-help">Used for client sign-in. This can be any email address. Gmail users can still use Google sign-in if the email matches.</div>
+
+          <label class="field-label">Set Temporary Password <span class="tooltip" tabindex="0" data-tooltip="Optional. If filled, the client can sign in with email, password, and SMS. This replaces any existing client password.">?</span></label>
+          <input name="reset_password" type="password" placeholder="Leave blank to keep current password">
+
+          <label class="field-label">Phone Number</label>
+          <div class="phone-row">
+            <div>
+              <label class="field-label" for="phone_country_code">Country</label>
+              <select id="phone_country_code" name="phone_country_code">
+                {% for phone_country in phone_countries %}
+                  <option value="{{ phone_country.code }}" {% if phone_form.country_code == phone_country.code %}selected{% endif %}>{{ phone_country.label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div>
+              <label class="field-label" for="phone_number">Number</label>
+              <input id="phone_number" name="phone_number" value="{{ phone_form.local_number }}">
+            </div>
+          </div>
+          <div class="field-help">Only US and UK numbers are supported for now. This is the client's 2FA number for login verification.</div>
+
+          <label class="field-label">Notification Email <span class="tooltip" tabindex="0" data-tooltip="Receives session-complete and urgent escalation notifications for this client.">?</span></label>
+          <input name="notification_email" type="email" value="{{ client.notification_email or '' }}">
+
+          <label class="field-label">Escalation Phone Number <span class="tooltip" tabindex="0" data-tooltip="Used if the system needs to reach a human quickly for an urgent escalation.">?</span></label>
+          <div class="phone-row">
+            <div>
+              <label class="field-label" for="escalation_phone_country_code">Country</label>
+              <select id="escalation_phone_country_code" name="escalation_phone_country_code">
+                {% for phone_country in phone_countries %}
+                  <option value="{{ phone_country.code }}" {% if escalation_phone_form.country_code == phone_country.code %}selected{% endif %}>{{ phone_country.label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div>
+              <label class="field-label" for="escalation_phone_number">Number</label>
+              <input id="escalation_phone_number" name="escalation_phone_number" value="{{ escalation_phone_form.local_number }}">
+            </div>
+          </div>
+
+          <label class="field-label">Notes <span class="tooltip" tabindex="0" data-tooltip="Background context for the AI. Keep this general rather than overly specific.">?</span></label>
+          <textarea name="notes">{{ client.notes_current or '' }}</textarea>
+
+          <label class="field-label">Direction <span class="tooltip" tabindex="0" data-tooltip="How you want the next AI session to be guided. This is injected into the next session context.">?</span></label>
+          <textarea name="direction">{{ client.direction_current or '' }}</textarea>
+
+          <button type="submit">Save client</button>
+        </form>
+      </div>
       <div class="card">
         <div class="label">Open Alerts</div>
         <h2>Alerts</h2>

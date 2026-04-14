@@ -82,6 +82,7 @@ def main() -> int:
     cl.add_argument("--consultant-id", required=True)
     cl.add_argument("--name", required=True)
     cl.add_argument("--email", default="")
+    cl.add_argument("--password", default="")
     cl.add_argument("--phone", default="")
     cl.add_argument("--notification-email", default="")
     cl.add_argument("--escalation-phone-number", default="")
@@ -141,6 +142,7 @@ def main() -> int:
             consultant_id=args.consultant_id,
             display_name=args.name,
             email=args.email,
+            password_hash=generate_password_hash(args.password, method=PASSWORD_HASH_METHOD) if args.password else "",
             phone_number=args.phone,
             notification_email=args.notification_email or args.email,
             escalation_phone_number=args.escalation_phone_number or args.phone,

@@ -71,6 +71,7 @@ class ConsultantDashboardTestCase(unittest.TestCase):
             consultant_id=self.consultant_id,
             display_name="Alex Demo",
             email="alex@example.com",
+            password_hash=generate_password_hash("clientpass123", method=PASSWORD_HASH_METHOD),
             phone_number="+447700900111",
             notification_email="consultant@example.com",
             escalation_phone_number="+447700900000",

@@ -20,6 +20,14 @@ Purpose: provide fast paths for common maintenance and feature work.
 5. Avoid putting business logic in Jinja templates.
 6. Update `03_code_map.md` if the page adds a new stable area.
 
+## Change Client Identity Matching
+
+1. Keep the normal flow UI-driven: consultant creates or edits the client in the dashboard.
+2. Update hashing or matching logic in `core/db.py` and any related helper in `app.py`.
+3. Preserve the current contract: `simple-backend` sends hashed Google/email/name/phone fields and receives a single `client_id`.
+4. Do not move normal onboarding back to CLI-only helpers.
+5. Add or extend tests in `tests/test_internal_api.py` and `tests/test_web_dashboard.py`.
+
 ## Add a New Table or Field
 
 1. Change `core/schema.sql`.
@@ -33,12 +41,18 @@ Purpose: provide fast paths for common maintenance and feature work.
 
 1. Extend the payload handling in `core/internal_api.py`.
 2. Decide whether it belongs in:
-   - `sessions` row
+  - `sessions` row
    - `session_alerts`
    - encrypted artifact payload
 3. Preserve idempotent `upsert_session()` behavior.
 4. If it affects consultant-visible UI, update `core/web.py` and templates.
 5. Update `06_interfaces.md`.
+
+If the field is derived from live safety or biomarker streams, document whether the dashboard should store:
+
+- current/latest state
+- worst state seen during the call
+- rolling baseline comparison
 
 ## Add a New Login Rule
 

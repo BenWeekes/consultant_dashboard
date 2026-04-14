@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS clients (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
     display_name TEXT NOT NULL,
     email TEXT,
+    password_hash TEXT,
     phone_number TEXT,
     notification_email TEXT,
     escalation_phone_number TEXT,
