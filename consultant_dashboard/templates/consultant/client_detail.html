@@ -1,150 +1,427 @@
 {% extends "shared/base.html" %}
 {% block body %}
+  {% set latest_session_row = sessions[0] if sessions else None %}
+  {% set preferred_biomarker_keys = ['stress_index', 'hrv', 'heart_rate', 'breathing_rate', 'stress', 'burnout'] %}
+  {% set latest_biomarker_values = latest_biomarkers.averages if latest_biomarkers and latest_biomarkers.averages else {} %}
   <div class="nav">
     <a href="/consultant/dashboard">Overview</a>
     <a href="/consultant/clients">Clients</a>
     <a href="/consultant/sessions">Sessions</a>
     <a href="/consultant/account">Account</a>
   </div>
-  <div class="split">
-    <div class="card grid">
-      <div>
-        <div class="label">Client</div>
-        <h1>{{ client.display_name }}</h1>
-        <p class="muted">{{ client.email or "" }}{% if client.email and client.phone_number %} · {% endif %}{{ client.phone_number or "" }}</p>
-      </div>
-      <div class="row">
-        {% if client.notification_email %}<span class="pill">Notify {{ client.notification_email }}</span>{% endif %}
-        {% if client.escalation_phone_number %}<span class="pill">Escalate {{ client.escalation_phone_number }}</span>{% endif %}
-        {% if auth_identity %}
-          <span class="pill">Identity linked</span>
-        {% else %}
-          <span class="pill">Identity not linked</span>
-        {% endif %}
-      </div>
-      <div class="item">
-        <div class="label">Client Sign-In Match</div>
-        {% if auth_identity %}
-          <div class="muted">This client will resolve automatically when the user signs in with the same email address and phone number stored on this record. If a password is set, the same record also supports email, password, and SMS.</div>
-        {% else %}
-          <div class="muted">Add an email address and phone number for client resolution, then optionally set a password for email/password login.</div>
-        {% endif %}
-      </div>
-      <div class="item">
-        <div class="label">Notes</div>
-        <div>{{ client.notes_current or "No notes yet." }}</div>
-      </div>
-      <div class="item">
-        <div class="label">Direction</div>
-        <div>{{ client.direction_current or "No direction yet." }}</div>
-      </div>
-      <div class="item">
-        <div class="label">Latest Summary</div>
-        {% if latest_summary %}
-          <pre>{{ latest_summary | tojson(indent=2) }}</pre>
-        {% else %}
-          <div class="muted">No summary stored yet.</div>
-        {% endif %}
-      </div>
-      <div class="item">
-        <div class="label">Biomarker Baseline</div>
-        {% if baseline %}
-          <pre>{{ baseline | tojson(indent=2) }}</pre>
-        {% else %}
-          <div class="muted">No biomarker baseline stored yet.</div>
-        {% endif %}
+
+  <div class="card client-header">
+    <div>
+      <h1>{{ client.display_name }}</h1>
+      <div class="client-contact-line">
+        {% if client.email %}<span>{{ client.email }}</span>{% endif %}
+        {% if client.email and client.phone_number %}<span class="client-sep">·</span>{% endif %}
+        {% if client.phone_number %}<span>{{ client.phone_number }}</span>{% endif %}
       </div>
     </div>
-    <div class="grid">
-      <div class="card">
-        <div class="label">Access Settings</div>
-        <h2>Edit Client</h2>
-        <p class="muted">Clients sign in with Gmail and SMS, so changing email or phone here changes who can access this record.</p>
-        <form method="post">
-          <label class="field-label">Client Name</label>
-          <input name="display_name" value="{{ client.display_name }}" required>
-
-          <label class="field-label">Email</label>
-          <input name="email" type="email" value="{{ client.email or '' }}">
-          <div class="field-help">Used for client sign-in. This can be any email address. Gmail users can still use Google sign-in if the email matches.</div>
-
-          <label class="field-label">Set Temporary Password <span class="tooltip" tabindex="0" data-tooltip="Optional. If filled, the client can sign in with email, password, and SMS. This replaces any existing client password.">?</span></label>
-          <input name="reset_password" type="password" placeholder="Leave blank to keep current password">
-
-          <label class="field-label">Phone Number</label>
-          <div class="phone-row">
-            <div>
-              <label class="field-label" for="phone_country_code">Country</label>
-              <select id="phone_country_code" name="phone_country_code">
-                {% for phone_country in phone_countries %}
-                  <option value="{{ phone_country.code }}" {% if phone_form.country_code == phone_country.code %}selected{% endif %}>{{ phone_country.label }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div>
-              <label class="field-label" for="phone_number">Number</label>
-              <input id="phone_number" name="phone_number" value="{{ phone_form.local_number }}">
-            </div>
-          </div>
-          <div class="field-help">Only US and UK numbers are supported for now. This is the client's 2FA number for login verification.</div>
-
-          <label class="field-label">Notification Email <span class="tooltip" tabindex="0" data-tooltip="Receives session-complete and urgent escalation notifications for this client.">?</span></label>
-          <input name="notification_email" type="email" value="{{ client.notification_email or '' }}">
-
-          <label class="field-label">Escalation Phone Number <span class="tooltip" tabindex="0" data-tooltip="Used if the system needs to reach a human quickly for an urgent escalation.">?</span></label>
-          <div class="phone-row">
-            <div>
-              <label class="field-label" for="escalation_phone_country_code">Country</label>
-              <select id="escalation_phone_country_code" name="escalation_phone_country_code">
-                {% for phone_country in phone_countries %}
-                  <option value="{{ phone_country.code }}" {% if escalation_phone_form.country_code == phone_country.code %}selected{% endif %}>{{ phone_country.label }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div>
-              <label class="field-label" for="escalation_phone_number">Number</label>
-              <input id="escalation_phone_number" name="escalation_phone_number" value="{{ escalation_phone_form.local_number }}">
-            </div>
-          </div>
-
-          <label class="field-label">Notes <span class="tooltip" tabindex="0" data-tooltip="Background context for the AI. Keep this general rather than overly specific.">?</span></label>
-          <textarea name="notes">{{ client.notes_current or '' }}</textarea>
-
-          <label class="field-label">Direction <span class="tooltip" tabindex="0" data-tooltip="How you want the next AI session to be guided. This is injected into the next session context.">?</span></label>
-          <textarea name="direction">{{ client.direction_current or '' }}</textarea>
-
-          <button type="submit">Save client</button>
-        </form>
-      </div>
-      <div class="card">
-        <div class="label">Open Alerts</div>
-        <h2>Alerts</h2>
-        <div class="list">
-          {% for alert in open_alerts %}
-            <div class="item">
-              <strong>{{ alert.title }}</strong>
-              <div class="muted">{{ alert.severity }} · {{ alert.source }} · {{ alert.created_at }}</div>
-            </div>
-          {% else %}
-            <div class="muted">No open alerts.</div>
-          {% endfor %}
-        </div>
-      </div>
-      <div class="card">
-        <div class="label">Sessions</div>
-        <h2>History</h2>
-        <div class="list">
-          {% for session_row in sessions %}
-            <div class="item">
-              <strong><a href="/consultant/sessions/{{ session_row.id }}">{{ session_row.id }}</a></strong>
-              <div class="muted">{{ session_row.ended_at or session_row.started_at or session_row.created_at }}</div>
-              <div class="muted">{{ session_row.status }}{% if session_row.urgent_escalation %} · urgent escalation{% endif %}</div>
-            </div>
-          {% else %}
-            <div class="muted">No sessions yet.</div>
-          {% endfor %}
-        </div>
-      </div>
+    <div class="actions">
+      <button type="button" class="button-secondary" data-open-contact-editor>Edit contact</button>
     </div>
   </div>
+
+  <div class="client-top-grid">
+    <div class="card panel-equal">
+      <div class="panel-head">
+        <div class="panel-title">
+          <div class="panel-kicker">Last Session</div>
+        </div>
+        {% if latest_session_row %}
+          <a href="/consultant/sessions/{{ latest_session_row.id }}" class="subtle-link">Open</a>
+        {% endif %}
+      </div>
+      <div class="section-stack">
+        {% if latest_session_row %}
+          <div class="meta-block">
+            <div class="meta-primary">{{ (latest_session_row.ended_at or latest_session_row.started_at or latest_session_row.created_at)|display_dt }}</div>
+            {% if latest_session_row.urgent_escalation %}
+              <div class="meta-secondary">Urgent escalation</div>
+            {% endif %}
+          </div>
+          {% if latest_summary %}
+            <div class="summary-card">
+              <h3>Brief summary</h3>
+              <div class="summary-copy">{{ latest_summary.brief_overview or latest_summary.overview or "No brief summary stored." }}</div>
+            </div>
+            {% if latest_summary.full_summary %}
+              <div class="summary-card">
+                <h3>Full summary</h3>
+                <div class="summary-copy summary-scroll">{{ latest_summary.full_summary }}</div>
+              </div>
+            {% endif %}
+          {% endif %}
+          {% if latest_biomarker_highlights %}
+            <div class="summary-card">
+              <h3>Latest biomarkers</h3>
+              <div class="compact-metric-grid">
+                {% for item in latest_biomarker_highlights %}
+                  <div class="compact-metric-item">
+                    <span class="compact-metric-label">{{ item.label }}</span>
+                    <strong>{{ item.value }}</strong>
+                  </div>
+                {% endfor %}
+              </div>
+            </div>
+            {% if latest_biomarkers %}
+              <details class="biomarker-section">
+                <summary class="details-summary">
+                  <strong>More detail</strong>
+                  <span class="muted">Expand</span>
+                </summary>
+                <div class="biomarker-section-body">
+                  {% for section in latest_biomarker_sections %}
+                    <div class="summary-card">
+                      <h3>{{ section.title }}</h3>
+                      <div class="biomarker-grid" style="margin-top: 10px;">
+                        {% for row in section.rows %}
+                          <div class="biomarker-row">
+                            <strong>{{ row.label }}</strong>
+                            <div>{{ row.triplet }}</div>
+                          </div>
+                        {% endfor %}
+                      </div>
+                    </div>
+                  {% endfor %}
+                </div>
+              </details>
+            {% endif %}
+          {% endif %}
+          {% if latest_summary and latest_summary.risk_overview %}
+            <div class="summary-card">
+              <h3>Risk</h3>
+              <div class="summary-copy">{{ latest_summary.risk_overview }}</div>
+            </div>
+          {% else %}
+            {% if not latest_summary %}
+              <div class="muted">No summary stored yet.</div>
+            {% endif %}
+          {% endif %}
+        {% else %}
+          <div class="muted">No sessions yet.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card panel-equal">
+      <div class="panel-head tight">
+        <div class="panel-title">
+          <div class="panel-kicker">Notes And Direction</div>
+        </div>
+      </div>
+      <div class="section-stack">
+        <form method="post">
+          <input type="hidden" name="form_name" value="save_context">
+          <label class="field-label">Notes <span class="tooltip" tabindex="0" data-tooltip="Background context for the AI. Keep this general rather than overly specific.">?</span></label>
+          <textarea name="notes" class="compact-context">{{ client.notes_current or '' }}</textarea>
+          <label class="field-label">Direction <span class="tooltip" tabindex="0" data-tooltip="How you want the next AI session to be guided. This is injected into the next session context.">?</span></label>
+          <textarea name="direction" class="compact-context">{{ client.direction_current or '' }}</textarea>
+          <button type="submit">Save notes and direction</button>
+        </form>
+        <div class="summary-card">
+          <h3>Biomarker baseline</h3>
+          {% if baseline %}
+            <div class="meta-secondary">Window: {{ baseline.window_sessions or 0 }} sessions</div>
+            {% if baseline.averages %}
+              <div class="compact-metric-grid">
+                {% for key in preferred_biomarker_keys %}
+                  {% if baseline.averages[key] is defined %}
+                    <div class="compact-metric-item">
+                      <span class="compact-metric-label">{{ key.replace('_', ' ') }}</span>
+                      <strong>{{ baseline.averages[key] }}</strong>
+                    </div>
+                  {% endif %}
+                {% endfor %}
+              </div>
+            {% else %}
+              <div class="muted">No baseline averages stored yet.</div>
+            {% endif %}
+          {% else %}
+            <div class="muted">No biomarker baseline stored yet.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="card chat-panel panel-equal" id="client-thread">
+      <div class="panel-head tight">
+        <div class="panel-title">
+          <div class="panel-kicker">Messages</div>
+        </div>
+      </div>
+      <div
+        class="chat-thread chat-thread-scroll"
+        data-message-thread
+        data-thread-endpoint="/consultant/clients/{{ client.id }}/messages/thread"
+        data-thread-ws="/ws/consultant/clients/{{ client.id }}/messages"
+        data-empty-text="No client messages yet."
+      >
+        {% for message in messages %}
+          <div class="chat-row {% if message.direction == 'outbound' %}chat-row-outbound{% else %}chat-row-inbound{% endif %}">
+            <div class="chat-bubble {% if message.direction == 'outbound' %}chat-bubble-outbound{% else %}chat-bubble-inbound{% endif %}">
+              <div class="row" style="justify-content: space-between;">
+                <div class="chat-header">{{ "Consultant" if message.direction == "outbound" else "Client" }} · {{ message.created_at|display_dt }}</div>
+              </div>
+              <div class="chat-body">{{ message.body }}</div>
+              {% if message.delivery_error and message.delivery_status != "sent" %}
+                <div class="muted" style="margin-top: 8px;">Delivery: {{ message.delivery_error }}</div>
+              {% endif %}
+            </div>
+          </div>
+        {% else %}
+          <div class="muted">No client messages yet.</div>
+        {% endfor %}
+      </div>
+      <form class="chat-compose" data-message-compose="/consultant/clients/{{ client.id }}/messages/send">
+        <label class="field-label">New message</label>
+        <textarea name="message_body" class="chat-compose-box" placeholder="Write a message to the client"></textarea>
+        <div class="row" style="justify-content: space-between;">
+          <div class="chat-status-note" data-compose-status>Messages are sent through MindFix and clients reply through a secure web link.</div>
+          <button type="submit">Send message</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card history-card">
+    <div class="history-toolbar">
+      <div class="panel-title">
+        <div class="panel-kicker">Previous sessions</div>
+      </div>
+      <div class="history-search">
+        <input id="session-search" type="search" placeholder="Search session date or summary">
+      </div>
+    </div>
+    <div class="list" id="session-history-list">
+      {% for session_row in sessions %}
+        {% set session_summary = session_summaries.get(session_row.id, {}) %}
+        {% set brief_summary = session_summary.brief_overview or session_summary.overview or session_summary.full_summary or '' %}
+        <a
+          class="item session-history-item session-history-link"
+          href="/consultant/sessions/{{ session_row.id }}"
+          data-search="{{ (session_row.ended_at or session_row.started_at or session_row.created_at)|display_dt }} {{ session_row.status }} {{ brief_summary }}"
+        >
+          <div class="details-summary">
+            <div class="session-history-summary">
+              <strong>{{ (session_row.ended_at or session_row.started_at or session_row.created_at)|display_dt }}</strong>
+              {% if brief_summary %}
+                <span class="muted summary-copy">{{ brief_summary }}</span>
+              {% endif %}
+            </div>
+            <div class="actions">
+              {% if session_row.urgent_escalation %}<span class="muted">Urgent</span>{% endif %}
+              <span class="subtle-link">Open</span>
+            </div>
+          </div>
+        </a>
+      {% else %}
+        <div class="muted">No sessions yet.</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <dialog class="modal" id="client-contact-edit">
+    <div class="modal-shell">
+      <div class="modal-head">
+        <div class="panel-title">
+          <div class="panel-kicker">Client access</div>
+          <h2>Edit Contact Details</h2>
+        </div>
+        <button type="button" class="modal-close" data-close-contact-editor>Close</button>
+      </div>
+      <div class="muted">Clients sign in with email or Google plus SMS, so changing email or phone here changes who can access this record.</div>
+      <form method="post">
+        <label class="field-label">Client Name</label>
+        <input name="display_name" value="{{ client.display_name }}" required>
+
+        <label class="field-label">Email</label>
+        <input name="email" type="email" value="{{ client.email or '' }}">
+        <div class="field-help">Used for client sign-in. Gmail users can still use Google sign-in if the email matches.</div>
+
+        <label class="field-label">Set Temporary Password <span class="tooltip" tabindex="0" data-tooltip="Optional. If filled, the client can sign in with email, password, and SMS. This replaces any existing client password.">?</span></label>
+        <input name="reset_password" type="password" placeholder="Leave blank to keep current password">
+
+        <label class="field-label">Phone Number</label>
+        <div class="phone-row">
+          <div>
+            <label class="field-label" for="phone_country_code">Country</label>
+            <select id="phone_country_code" name="phone_country_code">
+              {% for phone_country in phone_countries %}
+                <option value="{{ phone_country.code }}" {% if phone_form.country_code == phone_country.code %}selected{% endif %}>{{ phone_country.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="field-label" for="phone_number">Number</label>
+            <input id="phone_number" name="phone_number" value="{{ phone_form.local_number }}">
+          </div>
+        </div>
+        <div class="field-help">Only US and UK numbers are supported for now. This is the client's 2FA number for login verification.</div>
+
+        <label class="field-label">Notification Email <span class="tooltip" tabindex="0" data-tooltip="Receives session-complete and urgent escalation notifications for this client.">?</span></label>
+        <input name="notification_email" type="email" value="{{ client.notification_email or '' }}">
+
+        <label class="field-label">Escalation Phone Number <span class="tooltip" tabindex="0" data-tooltip="Used if the system needs to reach a human quickly for an urgent escalation.">?</span></label>
+        <div class="phone-row">
+          <div>
+            <label class="field-label" for="escalation_phone_country_code">Country</label>
+            <select id="escalation_phone_country_code" name="escalation_phone_country_code">
+              {% for phone_country in phone_countries %}
+                <option value="{{ phone_country.code }}" {% if escalation_phone_form.country_code == phone_country.code %}selected{% endif %}>{{ phone_country.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="field-label" for="escalation_phone_number">Number</label>
+            <input id="escalation_phone_number" name="escalation_phone_number" value="{{ escalation_phone_form.local_number }}">
+          </div>
+        </div>
+
+        <div class="actions">
+          <button type="submit">Save contact details</button>
+          <button type="button" class="button-secondary" data-close-contact-editor>Cancel</button>
+        </div>
+      </form>
+      <div class="section-divider"></div>
+      <form method="post" action="/consultant/clients/{{ client.id }}/delete" onsubmit="return confirm('Delete this client?');">
+        <button type="submit" class="button-danger">Delete client</button>
+      </form>
+    </div>
+  </dialog>
+
+  <script>
+    (() => {
+      const thread = document.querySelector('[data-message-thread]');
+      const contactDialog = document.getElementById('client-contact-edit');
+      document.querySelectorAll('[data-open-contact-editor]').forEach((button) => {
+        button.addEventListener('click', () => contactDialog?.showModal());
+      });
+      document.querySelectorAll('[data-close-contact-editor]').forEach((button) => {
+        button.addEventListener('click', () => contactDialog?.close());
+      });
+      if (!thread) return;
+      const endpoint = thread.dataset.threadEndpoint;
+      const wsPath = thread.dataset.threadWs;
+      const emptyText = thread.dataset.emptyText || 'No messages yet.';
+      const composeForm = document.querySelector('[data-message-compose]');
+      const composeStatus = composeForm?.querySelector('[data-compose-status]');
+      const sessionSearch = document.getElementById('session-search');
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#39;');
+      }
+
+      function formatDateTime(value) {
+        if (!value) return '';
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) return value;
+        return new Intl.DateTimeFormat('en-GB', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        }).format(parsed);
+      }
+
+      function renderMessages(messages) {
+        if (!messages.length) {
+          thread.innerHTML = `<div class="muted">${escapeHtml(emptyText)}</div>`;
+          return;
+        }
+        thread.innerHTML = messages.map((message) => {
+          const outbound = message.direction === 'outbound';
+          const rowClass = outbound ? 'chat-row-outbound' : 'chat-row-inbound';
+          const bubbleClass = outbound ? 'chat-bubble-outbound' : 'chat-bubble-inbound';
+          const label = outbound ? 'Consultant' : 'Client';
+          const error = message.delivery_error && message.delivery_status !== 'sent'
+            ? `<div class="muted" style="margin-top: 8px;">Delivery: ${escapeHtml(message.delivery_error)}</div>`
+            : '';
+          return `
+            <div class="chat-row ${rowClass}">
+              <div class="chat-bubble ${bubbleClass}">
+                <div class="row" style="justify-content: space-between;">
+                  <div class="chat-header">${label} · ${escapeHtml(formatDateTime(message.created_at))}</div>
+                </div>
+                <div class="chat-body">${escapeHtml(message.body)}</div>
+                ${error}
+              </div>
+            </div>`;
+        }).join('');
+        thread.scrollTop = thread.scrollHeight;
+      }
+
+      async function refreshThread() {
+        const response = await fetch(endpoint, { credentials: 'same-origin' });
+        if (!response.ok) return;
+        const data = await response.json();
+        renderMessages(data.messages || []);
+      }
+
+      function connect() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const socket = new WebSocket(`${protocol}//${window.location.host}${wsPath}`);
+        socket.onmessage = async (event) => {
+          const payload = JSON.parse(event.data);
+          if (payload.type === 'thread_updated') {
+            await refreshThread();
+          }
+        };
+        socket.onclose = () => window.setTimeout(connect, 1500);
+      }
+
+      if (composeForm) {
+        composeForm.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const textarea = composeForm.querySelector('textarea[name="message_body"]');
+          const body = textarea.value.trim();
+          if (!body) return;
+          const response = await fetch(composeForm.dataset.messageCompose, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ body }),
+          });
+          if (!response.ok) {
+            if (composeStatus) composeStatus.textContent = 'Message failed to send.';
+            return;
+          }
+          const data = await response.json();
+          textarea.value = '';
+          renderMessages(data.messages || []);
+          if (composeStatus) {
+            if (data.delivery_status === 'sent') {
+              composeStatus.textContent = 'Message sent.';
+            } else if (data.delivery_status === 'not_sent') {
+              composeStatus.textContent = 'Message saved, but notifications are not configured yet.';
+            } else {
+              composeStatus.textContent = 'Message saved, but delivery failed.';
+            }
+          }
+        });
+      }
+
+      if (sessionSearch) {
+        sessionSearch.addEventListener('input', () => {
+          const term = sessionSearch.value.trim().toLowerCase();
+          document.querySelectorAll('.session-history-item').forEach((item) => {
+            const haystack = (item.dataset.search || '').toLowerCase();
+            item.style.display = !term || haystack.includes(term) ? '' : 'none';
+          });
+        });
+      }
+
+      connect();
+      window.setTimeout(refreshThread, 50);
+    })();
+  </script>
 {% endblock %}

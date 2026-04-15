@@ -1,0 +1,107 @@
+{% extends "shared/base.html" %}
+{% block body %}
+  <div class="auth-shell" style="max-width: 760px;">
+    <div class="card grid">
+      <div>
+        <div class="label">{{ brand }}</div>
+        <h1>Client Reply</h1>
+        {% if expired %}
+          <p class="muted">This reply link has expired. Please contact your consultant for a new message link.</p>
+        {% else %}
+          <p class="muted">You are replying here as the client. Consultants continue the conversation from the dashboard.</p>
+          <p class="muted">Conversation for {{ client.display_name if client else "this client" }} with {{ client.consultant_name or "your consultant" }}.</p>
+        {% endif %}
+      </div>
+
+      {% if not expired %}
+        <div
+          class="chat-thread"
+          data-message-thread
+          data-thread-endpoint="/client/messages/{{ request.view_args['token'] }}/thread"
+          data-thread-ws="/ws/client/messages/{{ request.view_args['token'] }}"
+        >
+          {% for message in messages %}
+            <div class="chat-row {% if message.direction == 'inbound' %}chat-row-outbound{% else %}chat-row-inbound{% endif %}">
+              <div class="chat-bubble {% if message.direction == 'inbound' %}chat-bubble-outbound{% else %}chat-bubble-inbound{% endif %}">
+                <div class="row" style="justify-content: space-between;">
+                  <strong>{{ "You" if message.direction == "inbound" else message.consultant_name or "Consultant" }}</strong>
+                  <span class="muted">{{ message.created_at }}</span>
+                </div>
+                <div class="summary-copy" style="margin-top: 8px;">{{ message.body }}</div>
+              </div>
+            </div>
+          {% else %}
+            <div class="muted">No messages yet.</div>
+          {% endfor %}
+        </div>
+
+        <form method="post">
+          <label class="field-label">Reply as client</label>
+          <textarea name="body" placeholder="Write your reply"></textarea>
+          <button type="submit">Send reply</button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+  <script>
+    (() => {
+      const thread = document.querySelector('[data-message-thread]');
+      if (!thread) return;
+      const endpoint = thread.dataset.threadEndpoint;
+      const wsPath = thread.dataset.threadWs;
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#39;');
+      }
+
+      function renderMessages(messages) {
+        if (!messages.length) {
+          thread.innerHTML = '<div class="muted">No messages yet.</div>';
+          return;
+        }
+        thread.innerHTML = messages.map((message) => {
+          const outbound = message.direction === 'inbound';
+          const rowClass = outbound ? 'chat-row-outbound' : 'chat-row-inbound';
+          const bubbleClass = outbound ? 'chat-bubble-outbound' : 'chat-bubble-inbound';
+          const label = outbound ? 'You' : (message.consultant_name || 'Consultant');
+          return `
+            <div class="chat-row ${rowClass}">
+              <div class="chat-bubble ${bubbleClass}">
+                <div class="row" style="justify-content: space-between;">
+                  <strong>${escapeHtml(label)}</strong>
+                  <span class="muted">${escapeHtml(message.created_at)}</span>
+                </div>
+                <div class="summary-copy" style="margin-top: 8px;">${escapeHtml(message.body)}</div>
+              </div>
+            </div>`;
+        }).join('');
+      }
+
+      async function refreshThread() {
+        const response = await fetch(endpoint, { credentials: 'same-origin' });
+        if (!response.ok) return;
+        const data = await response.json();
+        renderMessages(data.messages || []);
+      }
+
+      function connect() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const socket = new WebSocket(`${protocol}//${window.location.host}${wsPath}`);
+        socket.onmessage = async (event) => {
+          const payload = JSON.parse(event.data);
+          if (payload.type === 'thread_updated') {
+            await refreshThread();
+          }
+        };
+        socket.onclose = () => window.setTimeout(connect, 1500);
+      }
+
+      connect();
+    })();
+  </script>
+{% endblock %}

@@ -13,6 +13,7 @@ It owns:
 - session index and therapist/consultant-facing review pages
 - audit log storage
 - encrypted storage references for summaries, biomarker aggregates, and alerts
+- client messaging threads and secure reply links
 - internal APIs for:
   - client resolution
   - start-of-session context fetch
@@ -35,6 +36,7 @@ simple-backend ----signed GET----> consultant-dashboard /internal/client-context
 server-custom-llm -signed POST---> consultant-dashboard /internal/session-complete
 
 consultant/admin browser ---> consultant-dashboard web routes
+client secure reply link -> consultant-dashboard /client/messages/<token>
 client browser -----------> simple-backend auth + react client
 
 consultant-dashboard
@@ -84,6 +86,12 @@ This is how the consultant influences the next AI session:
 - `latest_summary` gives the AI a generalized view of the last session
 - `baseline` gives the AI the client biomarker reference point
 
+Ownership rule:
+
+- each client belongs to one consultant at a time
+- the DB enforces one `consultant_clients` row per `client_id`
+- reassignment should be treated as changing the owner, not as concurrent multi-consultant access
+
 ### End-of-call ingestion
 
 1. `server-custom-llm` sends signed `POST /internal/session-complete`.
@@ -98,6 +106,17 @@ Current end-of-call split:
 
 - continuity memory: private AI follow-up summary stored by `server-custom-llm`
 - consultant summary: generalized dashboard summary with overview, biomarker summary, risk overview, and follow-up guidance
+
+### Consultant messaging
+
+1. Consultant composes an email, SMS, or meeting invite from the client record.
+2. Service creates a secure access token in `client_access_links`.
+3. Service stores the outbound record in `client_messages`.
+4. If configured:
+   - email is delivered through SendGrid
+   - SMS is delivered through Twilio Messaging
+5. The outbound message includes a secure reply URL hosted by this service.
+6. Client replies through the hosted UI instead of inbound SMS, and the reply is stored in `client_messages` as an inbound `portal` message.
 
 ## Storage Model
 

@@ -12,7 +12,7 @@ This repo documents the product/admin layer. Client session boot, Agora channel 
 - Auth:
   - consultant login = email/password + OTP
   - admin login = file-based email/password
-  - clients do not log into this service; they authenticate through `simple-backend` with Google + phone verification
+  - clients do not use normal dashboard logins; they authenticate through `simple-backend`, and can also open secure message links hosted here
 - Tests:
   - `tests/test_smoke.py`
   - `tests/test_internal_api.py`
@@ -61,12 +61,19 @@ Important optional config:
 
 - `CONSULTANT_DASHBOARD_HOST`
 - `CONSULTANT_DASHBOARD_PORT`
+- `CONSULTANT_PUBLIC_BASE_URL`
 - `CONSULTANT_SESSION_TTL`
 - `CONSULTANT_AUTH_DEV_MODE`
 - `THERAPY_DASHBOARD_BRAND_NAME`
 - `CONSULTANT_TWILIO_ACCOUNT_SID`
 - `CONSULTANT_TWILIO_AUTH_TOKEN`
 - `CONSULTANT_TWILIO_VERIFY_SERVICE_SID`
+- `CONSULTANT_TWILIO_MESSAGING_SERVICE_SID`
+- `CONSULTANT_TWILIO_FROM_NUMBER`
+- `CONSULTANT_SENDGRID_API_KEY`
+- `CONSULTANT_EMAIL_FROM`
+- `CONSULTANT_EMAIL_REPLY_TO`
+- `CONSULTANT_OUTBOUND_REQUEST_TIMEOUT_SECONDS`
 
 ## Admin Auth File
 
@@ -101,6 +108,15 @@ python run.py create-client --consultant-id ... --name ... --email ... --phone .
 ```
 
 Normal product flow does not require a CLI link step. When a consultant creates a client in the dashboard UI with name, email, and phone, the service creates the hashed identity rows that `simple-backend` later resolves after Google + SMS login.
+
+Messaging flow:
+
+- consultants send email/SMS/meeting-invite messages from the client detail page
+- the system stores the message in `client_messages`
+- outbound email uses SendGrid when configured
+- outbound SMS uses Twilio Messaging when configured
+- outbound messages include a secure link back to `/client/messages/<token>`
+- client replies are captured through that hosted UI instead of inbound SMS
 
 `link-client-auth` still exists as a low-level helper for tests, fixtures, or repair work.
 

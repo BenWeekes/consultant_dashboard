@@ -20,6 +20,24 @@ Purpose: provide fast paths for common maintenance and feature work.
 5. Avoid putting business logic in Jinja templates.
 6. Update `03_code_map.md` if the page adds a new stable area.
 
+For biomarker-heavy consultant pages, keep the overview page compact:
+
+- show only a few headline biomarker values by default
+- use expandable grouped sections for the full metric set
+- keep baseline comparison on the session detail page where there is more room
+
+## Extend Client Messaging
+
+1. Keep consultant-owned messaging in `core/web.py` and `core/messaging.py`.
+2. Store outbound and inbound records in `client_messages` through `core/db.py`.
+3. Reuse `client_access_links` for secure reply URLs instead of exposing consultant email addresses or phone numbers.
+4. Preserve the current delivery split:
+   - email through SendGrid when configured
+   - SMS through Twilio Messaging when configured
+   - secure web reply UI for inbound client messages
+5. Add or extend tests in `tests/test_web_dashboard.py`.
+6. Update `06_interfaces.md` and setup docs when the messaging contract changes.
+
 ## Change Client Identity Matching
 
 1. Keep the normal flow UI-driven: consultant creates or edits the client in the dashboard.

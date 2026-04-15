@@ -103,6 +103,8 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
         self.assertEqual(response.json["notes"], "Generalized notes only.")
         self.assertEqual(response.json["direction"], "Check stress and routines.")
         self.assertIsNotNone(response.json["latest_summary"])
+        self.assertEqual(response.json["latest_summary"]["full_summary"], "Generalized summary.")
+        self.assertEqual(len(response.json["recent_summaries"]), 1)
         self.assertIsNotNone(response.json["baseline"])
         self.assertEqual(response.json["baseline"]["window_sessions"], 1)
         self.assertEqual(len(response.json["alerts"]), 2)

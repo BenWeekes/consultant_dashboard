@@ -41,6 +41,9 @@ CREATE TABLE IF NOT EXISTS consultant_clients (
     UNIQUE (consultant_id, client_id)
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_consultant_clients_client_id
+ON consultant_clients(client_id);
+
 CREATE TABLE IF NOT EXISTS client_auth_identities (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
     client_id TEXT NOT NULL,
@@ -107,6 +110,31 @@ CREATE TABLE IF NOT EXISTS client_access_links (
     used_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_client_access_links_token_hash
+ON client_access_links(token_hash);
+
+CREATE TABLE IF NOT EXISTS client_messages (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    client_id TEXT NOT NULL,
+    consultant_id TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    subject TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL,
+    delivery_status TEXT NOT NULL DEFAULT 'draft',
+    delivery_error TEXT NOT NULL DEFAULT '',
+    access_link_id TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    read_by_client_at TEXT,
+    read_by_consultant_at TEXT,
+    notification_pending INTEGER NOT NULL DEFAULT 0,
+    notified_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY (consultant_id) REFERENCES consultants(id) ON DELETE CASCADE,
+    FOREIGN KEY (access_link_id) REFERENCES client_access_links(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS client_policy (

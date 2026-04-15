@@ -1,0 +1,61 @@
+{% extends "shared/base.html" %}
+{% block body %}
+  <div class="nav">
+    <a href="/consultant/dashboard">Overview</a>
+    <a href="/consultant/clients">Clients</a>
+    <a href="/consultant/sessions">Sessions</a>
+    <a href="/consultant/account">Account</a>
+  </div>
+  <div class="split">
+    <div class="card">
+      <div class="label">Messaging</div>
+      <h1>{{ client.display_name }}</h1>
+      <p class="muted">{{ client.email or "" }}{% if client.email and client.phone_number %} · {% endif %}{{ client.phone_number or "" }}</p>
+      <form method="post">
+        <label class="field-label">Channel</label>
+        <select name="channel">
+          <option value="email" {% if form_defaults.channel == "email" %}selected{% endif %}>Email</option>
+          <option value="sms" {% if form_defaults.channel == "sms" %}selected{% endif %}>SMS</option>
+          <option value="meeting_invite" {% if form_defaults.channel == "meeting_invite" %}selected{% endif %}>Meeting Invite</option>
+        </select>
+
+        <label class="field-label">Subject</label>
+        <input name="subject" value="{{ form_defaults.subject }}" placeholder="Optional subject for email or meeting invite">
+
+        <label class="field-label">Message</label>
+        <textarea name="body" placeholder="Write the message the client should receive.">{{ form_defaults.body }}</textarea>
+
+        <label class="field-label">Meeting Link</label>
+        <input name="meeting_link" value="{{ form_defaults.meeting_link }}" placeholder="Optional meeting URL">
+        <div class="field-help">A secure reply link is automatically added for the client.</div>
+
+        <div class="actions">
+          <button type="submit">Send message</button>
+          <a href="/consultant/clients/{{ client.id }}" class="button-secondary button-link">Back to client</a>
+        </div>
+      </form>
+    </div>
+    <div class="card">
+      <div class="label">Recent Thread</div>
+      <h2>Messages</h2>
+      <div class="list">
+        {% for message in messages %}
+          <div class="item">
+            <div class="row" style="justify-content: space-between;">
+              <strong>{{ "Client" if message.direction == "inbound" else "Consultant" }}</strong>
+              <span class="muted">{{ message.created_at }}</span>
+            </div>
+            <div class="muted">{{ message.channel.replace('_', ' ') }} · {{ message.delivery_status }}</div>
+            {% if message.subject %}
+              <div style="height: 8px;"></div>
+              <div><strong>{{ message.subject }}</strong></div>
+            {% endif %}
+            <div class="muted summary-copy">{{ message.body }}</div>
+          </div>
+        {% else %}
+          <div class="muted">No messages yet.</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+{% endblock %}

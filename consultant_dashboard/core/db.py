@@ -25,6 +25,27 @@ def _ensure_migrations(db: sqlite3.Connection) -> None:
     client_columns = {row["name"] for row in db.execute("PRAGMA table_info(clients)").fetchall()}
     if "password_hash" not in client_columns:
         db.execute("ALTER TABLE clients ADD COLUMN password_hash TEXT")
+    message_columns = {row["name"] for row in db.execute("PRAGMA table_info(client_messages)").fetchall()}
+    if "read_by_client_at" not in message_columns:
+        db.execute("ALTER TABLE client_messages ADD COLUMN read_by_client_at TEXT")
+    if "read_by_consultant_at" not in message_columns:
+        db.execute("ALTER TABLE client_messages ADD COLUMN read_by_consultant_at TEXT")
+    if "notification_pending" not in message_columns:
+        db.execute("ALTER TABLE client_messages ADD COLUMN notification_pending INTEGER NOT NULL DEFAULT 0")
+    if "notified_at" not in message_columns:
+        db.execute("ALTER TABLE client_messages ADD COLUMN notified_at TEXT")
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_consultant_clients_client_id
+        ON consultant_clients(client_id)
+        """
+    )
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_client_access_links_token_hash
+        ON client_access_links(token_hash)
+        """
+    )
 
 
 def create_consultant(
@@ -186,6 +207,74 @@ def update_client_password(
     )
 
 
+def update_client_context(
+    db: sqlite3.Connection,
+    *,
+    client_id: str,
+    notes: str,
+    direction: str,
+) -> None:
+    db.execute(
+        """
+        UPDATE clients
+        SET notes_current = ?,
+            direction_current = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (notes.strip(), direction.strip(), client_id),
+    )
+
+
+def deactivate_client(
+    db: sqlite3.Connection,
+    *,
+    client_id: str,
+) -> None:
+    db.execute(
+        """
+        UPDATE clients
+        SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (client_id,),
+    )
+
+
+def delete_session(
+    db: sqlite3.Connection,
+    *,
+    session_id: str,
+) -> None:
+    db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+
+
+def get_latest_session_artifacts(db: sqlite3.Connection, client_id: str):
+    return db.execute(
+        """
+        SELECT summary_storage_key, biomarker_storage_key
+        FROM sessions
+        WHERE client_id = ?
+        ORDER BY COALESCE(ended_at, started_at, created_at) DESC
+        LIMIT 1
+        """,
+        (client_id,),
+    ).fetchone()
+
+
+def list_recent_biomarker_keys(db: sqlite3.Connection, client_id: str, limit: int = 5):
+    return db.execute(
+        """
+        SELECT biomarker_storage_key
+        FROM sessions
+        WHERE client_id = ? AND biomarker_storage_key IS NOT NULL
+        ORDER BY COALESCE(ended_at, started_at, created_at) DESC
+        LIMIT ?
+        """,
+        (client_id, limit),
+    ).fetchall()
+
+
 def list_consultants(db: sqlite3.Connection):
     return db.execute(
         """
@@ -238,10 +327,14 @@ def create_client(
     client_id = db.execute("SELECT id FROM clients WHERE rowid = last_insert_rowid()").fetchone()["id"]
     db.execute(
         """
-        INSERT OR IGNORE INTO consultant_clients (consultant_id, client_id, role)
-        VALUES (?, ?, 'primary')
+        INSERT OR REPLACE INTO consultant_clients (id, consultant_id, client_id, role, created_at)
+        VALUES (
+            COALESCE((SELECT id FROM consultant_clients WHERE client_id = ?), lower(hex(randomblob(16)))),
+            ?, ?, 'primary',
+            COALESCE((SELECT created_at FROM consultant_clients WHERE client_id = ?), CURRENT_TIMESTAMP)
+        )
         """,
-        (consultant_id, client_id),
+        (client_id, consultant_id, client_id, client_id),
     )
     identity_hashes = build_identity_hashes(display_name, email, phone_number)
     if any(identity_hashes.values()):
@@ -267,6 +360,188 @@ def get_client_by_email(db: sqlite3.Connection, email: str):
         """,
         (email.lower().strip(),),
     ).fetchone()
+
+
+def create_client_access_link(
+    db: sqlite3.Connection,
+    *,
+    client_id: str,
+    created_by: str,
+    token_hash: str,
+    expires_at: str,
+) -> str:
+    db.execute(
+        """
+        INSERT INTO client_access_links (client_id, created_by, token_hash, expires_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        (client_id, created_by, token_hash, expires_at),
+    )
+    return db.execute("SELECT id FROM client_access_links WHERE rowid = last_insert_rowid()").fetchone()["id"]
+
+
+def get_client_access_link_by_hash(db: sqlite3.Connection, token_hash: str):
+    return db.execute(
+        """
+        SELECT cal.*, c.display_name, c.email, c.phone_number, c.notification_email,
+               co.id AS consultant_id, co.name AS consultant_name, co.email AS consultant_email
+        FROM client_access_links cal
+        JOIN clients c ON c.id = cal.client_id
+        LEFT JOIN consultant_clients cc ON cc.client_id = c.id
+        LEFT JOIN consultants co ON co.id = cc.consultant_id
+        WHERE cal.token_hash = ? AND c.is_active = 1
+        ORDER BY cal.created_at DESC
+        LIMIT 1
+        """,
+        (token_hash,),
+    ).fetchone()
+
+
+def mark_client_access_link_used(db: sqlite3.Connection, link_id: str) -> None:
+    db.execute(
+        """
+        UPDATE client_access_links
+        SET used_at = COALESCE(used_at, CURRENT_TIMESTAMP)
+        WHERE id = ?
+        """,
+        (link_id,),
+    )
+
+
+def create_client_message(
+    db: sqlite3.Connection,
+    *,
+    client_id: str,
+    consultant_id: str,
+    direction: str,
+    channel: str,
+    subject: str,
+    body: str,
+    delivery_status: str,
+    delivery_error: str = "",
+    access_link_id: str = "",
+    metadata: Optional[Dict] = None,
+    read_by_client_at: str = "",
+    read_by_consultant_at: str = "",
+    notification_pending: int = 0,
+    notified_at: str = "",
+) -> str:
+    db.execute(
+        """
+        INSERT INTO client_messages (
+            client_id, consultant_id, direction, channel, subject, body,
+            delivery_status, delivery_error, access_link_id, metadata_json,
+            read_by_client_at, read_by_consultant_at, notification_pending, notified_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            client_id,
+            consultant_id,
+            direction,
+            channel,
+            subject.strip(),
+            body.strip(),
+            delivery_status.strip(),
+            delivery_error.strip(),
+            access_link_id or None,
+            json.dumps(metadata or {}),
+            read_by_client_at or None,
+            read_by_consultant_at or None,
+            int(notification_pending),
+            notified_at or None,
+        ),
+    )
+    return db.execute("SELECT id FROM client_messages WHERE rowid = last_insert_rowid()").fetchone()["id"]
+
+
+def list_client_messages(
+    db: sqlite3.Connection,
+    *,
+    client_id: str,
+    consultant_id: Optional[str] = None,
+    limit: int = 100,
+):
+    params: List[object] = [client_id]
+    consultant_sql = ""
+    if consultant_id:
+        consultant_sql = "AND m.consultant_id = ?"
+        params.append(consultant_id)
+    params.append(limit)
+    return db.execute(
+        f"""
+        SELECT m.*, co.name AS consultant_name
+        FROM client_messages m
+        LEFT JOIN consultants co ON co.id = m.consultant_id
+        WHERE m.client_id = ?
+        {consultant_sql}
+        ORDER BY m.created_at DESC
+        LIMIT ?
+        """,
+        params,
+    ).fetchall()
+
+
+def get_client_message(db: sqlite3.Connection, message_id: str):
+    return db.execute(
+        """
+        SELECT m.*, co.name AS consultant_name, co.notification_email AS consultant_notification_email
+        FROM client_messages m
+        LEFT JOIN consultants co ON co.id = m.consultant_id
+        WHERE m.id = ?
+        """,
+        (message_id,),
+    ).fetchone()
+
+
+def mark_client_messages_read(
+    db: sqlite3.Connection,
+    *,
+    client_id: str,
+    reader: str,
+    consultant_id: str = "",
+) -> int:
+    if reader == "client":
+        cursor = db.execute(
+            """
+            UPDATE client_messages
+            SET read_by_client_at = COALESCE(read_by_client_at, CURRENT_TIMESTAMP)
+            WHERE client_id = ? AND direction = 'outbound' AND read_by_client_at IS NULL
+            """,
+            (client_id,),
+        )
+        return cursor.rowcount
+    if reader == "consultant":
+        cursor = db.execute(
+            """
+            UPDATE client_messages
+            SET read_by_consultant_at = COALESCE(read_by_consultant_at, CURRENT_TIMESTAMP)
+            WHERE client_id = ? AND consultant_id = ? AND direction = 'inbound' AND read_by_consultant_at IS NULL
+            """,
+            (client_id, consultant_id),
+        )
+        return cursor.rowcount
+    return 0
+
+
+def mark_client_message_notification(
+    db: sqlite3.Connection,
+    *,
+    message_id: str,
+    delivery_status: str,
+    delivery_error: str = "",
+    notified: bool = False,
+) -> None:
+    db.execute(
+        """
+        UPDATE client_messages
+        SET delivery_status = ?,
+            delivery_error = ?,
+            notification_pending = 0,
+            notified_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE notified_at END
+        WHERE id = ?
+        """,
+        (delivery_status.strip(), delivery_error.strip(), 1 if notified else 0, message_id),
+    )
 
 
 def upsert_client_auth_identity(
@@ -553,7 +828,8 @@ def get_session_detail(db: sqlite3.Connection, session_id: str, consultant_id: O
         params.append(consultant_id)
     return db.execute(
         f"""
-        SELECT s.*, c.display_name, c.email, c.phone_number, co.name AS consultant_name
+        SELECT s.*, c.display_name, c.email, c.phone_number, c.notes_current, c.direction_current,
+               c.baseline_storage_key, co.name AS consultant_name
         FROM sessions s
         JOIN clients c ON c.id = s.client_id
         LEFT JOIN consultants co ON co.id = s.consultant_id

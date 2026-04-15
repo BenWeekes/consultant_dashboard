@@ -38,6 +38,7 @@ def load_config() -> dict:
     return {
         "HOST": os.environ.get("CONSULTANT_DASHBOARD_HOST", "127.0.0.1"),
         "PORT": int(os.environ.get("CONSULTANT_DASHBOARD_PORT", "8090")),
+        "PUBLIC_BASE_URL": os.environ.get("CONSULTANT_PUBLIC_BASE_URL", ""),
         "DB_PATH": db_path,
         "STORAGE_ROOT": storage_root,
         "STORAGE_BACKEND": os.environ.get("THERAPY_STORAGE_BACKEND", "filesystem"),
@@ -50,5 +51,11 @@ def load_config() -> dict:
         "TWILIO_ACCOUNT_SID": os.environ.get("CONSULTANT_TWILIO_ACCOUNT_SID", ""),
         "TWILIO_AUTH_TOKEN": os.environ.get("CONSULTANT_TWILIO_AUTH_TOKEN", ""),
         "TWILIO_VERIFY_SERVICE_SID": os.environ.get("CONSULTANT_TWILIO_VERIFY_SERVICE_SID", ""),
+        "TWILIO_MESSAGING_SERVICE_SID": os.environ.get("CONSULTANT_TWILIO_MESSAGING_SERVICE_SID", ""),
+        "TWILIO_FROM_NUMBER": os.environ.get("CONSULTANT_TWILIO_FROM_NUMBER", ""),
+        "SENDGRID_API_KEY": os.environ.get("CONSULTANT_SENDGRID_API_KEY", ""),
+        "EMAIL_FROM": os.environ.get("CONSULTANT_EMAIL_FROM", ""),
+        "EMAIL_REPLY_TO": os.environ.get("CONSULTANT_EMAIL_REPLY_TO", ""),
+        "OUTBOUND_REQUEST_TIMEOUT_SECONDS": int(os.environ.get("CONSULTANT_OUTBOUND_REQUEST_TIMEOUT_SECONDS", "8")),
         "BRAND_NAME": os.environ.get("THERAPY_DASHBOARD_BRAND_NAME", "mindfix.me"),
     }

@@ -12,6 +12,7 @@ This service owns:
 - client resolution APIs
 - start-of-session context APIs
 - end-of-call ingestion APIs
+- consultant-to-client messaging with secure reply links
 
 It does **not** start Agora sessions directly. `simple-backend` stays responsible for that path.
 
@@ -50,11 +51,27 @@ Open:
 Normal dashboard behavior:
 
 - consultants and admins have different login URLs
-- clients do not log into this service directly
+- clients do not use normal dashboard logins, but they can open secure message links hosted by this service
 - client access is controlled by the client record email + phone number, with optional client password support
+- each client belongs to one consultant at a time
 - only US and UK phone numbers are supported right now
 - admins can set or reset consultant passwords from the consultant detail page
 - consultants manage client access by updating the client email, phone, and optional password fields
+- consultants can send email, SMS, and meeting-invite messages from the client detail flow
+- client replies are expected through secure web links, not inbound SMS
+
+Messaging delivery config:
+
+- SendGrid email:
+  - `CONSULTANT_SENDGRID_API_KEY`
+  - `CONSULTANT_EMAIL_FROM`
+  - optional `CONSULTANT_EMAIL_REPLY_TO`
+- Twilio outbound messaging:
+  - `CONSULTANT_TWILIO_ACCOUNT_SID`
+  - `CONSULTANT_TWILIO_AUTH_TOKEN`
+  - `CONSULTANT_TWILIO_MESSAGING_SERVICE_SID` or `CONSULTANT_TWILIO_FROM_NUMBER`
+- secure link host:
+  - `CONSULTANT_PUBLIC_BASE_URL`
 
 ## Internal APIs
 
@@ -111,6 +128,7 @@ Coverage currently includes:
 - admin consultant creation, editing, and duplicate handling
 - consultant/admin password change flows
 - client password create/reset flows
+- consultant outbound messaging and secure client replies
 
 Optional live stack smoke test:
 

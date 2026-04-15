@@ -11,17 +11,48 @@
       <div>
         <div class="label">Session</div>
         <h1>{{ session_row.display_name }}</h1>
-        <p class="muted mono">{{ session_row.id }}</p>
+        <p class="muted">{{ (session_row.ended_at or session_row.started_at or session_row.created_at)|display_dt }}</p>
       </div>
       <div class="row">
-        <span class="pill">{{ session_row.status }}</span>
         <span class="pill">{{ session_row.duration_seconds }} seconds</span>
         {% if session_row.urgent_escalation %}<span class="pill">Urgent escalation</span>{% endif %}
+      </div>
+      <form method="post" action="/consultant/sessions/{{ session_row.id }}/delete" onsubmit="return confirm('Delete this session?');">
+        <button type="submit" class="button-danger">Delete session</button>
+      </form>
+      <div class="item">
+        <div class="label">Notes And Direction</div>
+        <form method="post">
+          <label class="field-label">Notes</label>
+          <textarea name="notes">{{ client_notes or '' }}</textarea>
+          <label class="field-label">Direction</label>
+          <textarea name="direction">{{ client_direction or '' }}</textarea>
+          <button type="submit">Save notes and direction</button>
+        </form>
       </div>
       <div class="item">
         <div class="label">Summary</div>
         {% if summary %}
-          <pre>{{ summary | tojson(indent=2) }}</pre>
+          <div><strong>Brief Summary</strong></div>
+          <div class="muted summary-copy">{{ summary.brief_overview or summary.overview or "No brief summary stored." }}</div>
+          <div style="height: 12px;"></div>
+          <div><strong>Full Summary</strong></div>
+          <div class="muted summary-copy summary-scroll">{{ summary.full_summary or summary.overview or "No full summary stored." }}</div>
+          {% if summary.biomarker_summary %}
+            <div style="height: 12px;"></div>
+            <div><strong>Biomarker Summary</strong></div>
+            <div class="muted summary-copy">{{ summary.biomarker_summary }}</div>
+          {% endif %}
+          {% if summary.risk_overview %}
+            <div style="height: 12px;"></div>
+            <div><strong>Risk Overview</strong></div>
+            <div class="muted summary-copy">{{ summary.risk_overview }}</div>
+          {% endif %}
+          {% if summary.follow_up %}
+            <div style="height: 12px;"></div>
+            <div><strong>Follow Up</strong></div>
+            <div class="muted summary-copy">{{ summary.follow_up }}</div>
+          {% endif %}
         {% else %}
           <div class="muted">No summary stored.</div>
         {% endif %}
@@ -29,7 +60,37 @@
       <div class="item">
         <div class="label">Biomarkers</div>
         {% if biomarkers %}
-          <pre>{{ biomarkers | tojson(indent=2) }}</pre>
+          {% if biomarker_headlines %}
+            <div class="biomarker-headline-grid">
+              {% for item in biomarker_headlines %}
+                <div class="biomarker-headline-item">
+                  <span class="compact-metric-label">{{ item.label }}</span>
+                  <strong>{{ item.value }}</strong>
+                </div>
+              {% endfor %}
+            </div>
+          {% endif %}
+          {% for section in biomarker_sections %}
+            <details class="biomarker-section" {% if loop.first %}open{% endif %} style="margin-top: 12px;">
+              <summary class="details-summary">
+                <strong>{{ section.title }}</strong>
+                <span class="muted">Expand</span>
+              </summary>
+              <div class="biomarker-section-body">
+                <div class="biomarker-grid">
+                  {% for row in section.rows %}
+                    <div class="biomarker-row">
+                      <strong>{{ row.label }}</strong>
+                      <div>{{ row.triplet }}</div>
+                      {% if row.baseline %}
+                        <div class="biomarker-meta">Baseline: {{ row.baseline }}</div>
+                      {% endif %}
+                    </div>
+                  {% endfor %}
+                </div>
+              </div>
+            </details>
+          {% endfor %}
         {% else %}
           <div class="muted">No biomarker aggregates stored.</div>
         {% endif %}

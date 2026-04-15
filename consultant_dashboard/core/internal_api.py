@@ -90,17 +90,22 @@ def client_context():
         return jsonify({"error": "client_id required"}), 400
     db = get_db(current_app.config)
     result = get_client_context(db, client_id)
-    db.close()
     if not result:
+        db.close()
         return jsonify({"error": "client not found"}), 404
     client, alerts = result
     storage = EncryptedStorage(current_app.config["STORAGE_ROOT"], current_app.config["MASTER_KEY"])
     latest_summary = None
     baseline = None
+    recent_summaries = []
     if client["latest_summary_storage_key"]:
-        latest_summary = storage.get_json(client["latest_summary_storage_key"], client_id)
+        latest_summary = _normalize_summary_payload(
+            storage.get_json(client["latest_summary_storage_key"], client_id)
+        )
     if client["baseline_storage_key"]:
         baseline = storage.get_json(client["baseline_storage_key"], client_id)
+    recent_summaries = _load_recent_summaries(storage, db, client_id)
+    db.close()
     return {
         "client_id": client["id"],
         "display_name": client["display_name"],
@@ -109,6 +114,7 @@ def client_context():
         "notes": client["notes_current"],
         "direction": client["direction_current"],
         "latest_summary": latest_summary,
+        "recent_summaries": recent_summaries,
         "baseline": baseline,
         "alerts": [dict(a) for a in alerts],
     }
@@ -173,6 +179,57 @@ def _compute_baseline(storage: EncryptedStorage, db, client_id: str):
     }
 
 
+def _load_recent_summaries(storage: EncryptedStorage, db, client_id: str, limit: int = 5):
+    rows = db.execute(
+        """
+        SELECT id, ended_at, started_at, created_at, summary_storage_key
+        FROM sessions
+        WHERE client_id = ? AND summary_storage_key IS NOT NULL
+        ORDER BY COALESCE(ended_at, started_at, created_at) DESC
+        LIMIT ?
+        """,
+        (client_id, limit),
+    ).fetchall()
+    summaries = []
+    for row in rows:
+        payload = _normalize_summary_payload(storage.get_json(row["summary_storage_key"], client_id))
+        if not payload:
+            continue
+        summaries.append(
+            {
+                "session_id": row["id"],
+                "ended_at": row["ended_at"] or row["started_at"] or row["created_at"],
+                "brief_overview": payload.get("brief_overview") or payload.get("overview") or "",
+                "full_summary": payload.get("full_summary") or payload.get("overview") or "",
+                "biomarker_summary": payload.get("biomarker_summary") or "",
+                "risk_overview": payload.get("risk_overview") or "",
+                "follow_up": payload.get("follow_up") or "",
+            }
+        )
+    return summaries
+
+
+def _normalize_summary_payload(summary):
+    if isinstance(summary, str):
+        brief_overview = summary
+        full_summary = summary
+        summary = {}
+    elif isinstance(summary, dict):
+        brief_overview = summary.get("brief_overview") or summary.get("overview") or ""
+        full_summary = summary.get("full_summary") or summary.get("overview") or ""
+    else:
+        return None
+    return {
+        "brief_overview": brief_overview,
+        "overview": brief_overview,
+        "full_summary": full_summary,
+        "biomarker_summary": summary.get("biomarker_summary") or "",
+        "risk_overview": summary.get("risk_overview") or "",
+        "follow_up": summary.get("follow_up") or "",
+        "source": summary.get("source") or "custom-llm",
+    }
+
+
 @internal_bp.post("/session-complete")
 def session_complete():
     payload = request.get_json(force=True)
@@ -190,7 +247,7 @@ def session_complete():
     alert_keys = []
     if payload.get("summary"):
         summary_key = f"clients/{client_id}/sessions/{session_id}/summary.json.enc"
-        storage.put_json(summary_key, client_id, payload["summary"])
+        storage.put_json(summary_key, client_id, _normalize_summary_payload(payload["summary"]))
     if payload.get("biomarkers"):
         biomarker_key = f"clients/{client_id}/sessions/{session_id}/biomarkers.json.enc"
         storage.put_json(biomarker_key, client_id, payload["biomarkers"])

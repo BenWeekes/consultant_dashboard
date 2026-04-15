@@ -11,9 +11,10 @@ Consultant routes:
 - `GET/POST /consultant/account`
 - `GET /consultant/dashboard`
 - `GET/POST /consultant/clients`
-- `GET /consultant/clients/<client_id>`
+- `GET/POST /consultant/clients/<client_id>`
+- `GET/POST /consultant/clients/<client_id>/messages/new`
 - `GET /consultant/sessions`
-- `GET /consultant/sessions/<session_id>`
+- `GET/POST /consultant/sessions/<session_id>`
 
 Admin routes:
 
@@ -27,16 +28,19 @@ Shared routes:
 
 - `GET /`
 - `GET /home`
+- `GET/POST /client/messages/<token>`
 - `POST /logout`
 - `GET /health`
 
 Notes:
 
 - consultants and admins have separate login URLs
-- clients are not expected to log into this service
+- clients do not use normal dashboard logins, but they can open secure message links hosted by this service
 - client authentication happens in `simple-backend`, then identity is resolved into this service over internal APIs
 - client access is controlled by the client record email plus phone number, with optional client password support
+- each client is assigned to one consultant at a time
 - only US and UK phone numbers are supported right now
+- the client overview page shows compact latest-session biomarker highlights and keeps the full grouped biomarker breakdown on the session detail page
 
 ## Internal Service Interfaces
 
@@ -130,6 +134,11 @@ Normal caller:
 
 - `simple-backend` when a client uses email/password login before SMS verification
 
+Implementation note:
+
+- phone normalization currently exists in both `consultant-dashboard` and `simple-backend`
+- behavior must stay aligned across both repos until that helper is extracted into shared code
+
 ### `POST /internal/session-complete`
 
 Signature required.
@@ -169,10 +178,13 @@ Summary boundary:
 
 - this endpoint is for consultant-facing generalized session summaries and biomarker aggregates
 - live continuity memory for future AI sessions remains owned by `server-custom-llm`
+- the dashboard stores all biomarker aggregates it receives, but the consultant UI should default to a compact subset and reveal the full grouped set on demand
 
 Current `summary` object shape:
 
+- `brief_overview`
 - `overview`
+- `full_summary`
 - `biomarker_summary`
 - `risk_overview`
 - `follow_up`
@@ -204,6 +216,27 @@ Consultant password management:
 - consultants can set or reset a client password from `/consultant/clients/<client_id>`
 - client sign-in supports email/password + SMS, and can also support Google + SMS when the email matches the client record
 
+## Messaging Interface
+
+Web behavior:
+
+- consultants send messages from `/consultant/clients/<client_id>/messages/new`
+- client replies are collected at `/client/messages/<token>`
+- outbound messages are stored even when delivery is not configured
+
+Delivery config:
+
+- SendGrid:
+  - `CONSULTANT_SENDGRID_API_KEY`
+  - `CONSULTANT_EMAIL_FROM`
+  - optional `CONSULTANT_EMAIL_REPLY_TO`
+- Twilio Messaging:
+  - `CONSULTANT_TWILIO_ACCOUNT_SID`
+  - `CONSULTANT_TWILIO_AUTH_TOKEN`
+  - `CONSULTANT_TWILIO_MESSAGING_SERVICE_SID` or `CONSULTANT_TWILIO_FROM_NUMBER`
+- public reply-link host:
+  - `CONSULTANT_PUBLIC_BASE_URL`
+
 ## Data Model Boundaries
 
 Core tables:
@@ -216,6 +249,7 @@ Core tables:
 - `session_alerts`
 - `client_note_revisions`
 - `client_access_links`
+- `client_messages`
 - `client_policy`
 - `audit_log`
 

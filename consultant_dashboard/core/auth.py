@@ -109,15 +109,36 @@ def _verify_code(phone_number: str, code: str) -> bool:
     )
 
 
-def _require_role(role: str):
-    def decorator(fn):
-        @wraps(fn)
-        def wrapped(*args, **kwargs):
-            if session.get("role") != role:
-                return redirect(url_for(f"auth.{role}_login"))
-            return fn(*args, **kwargs)
-        return wrapped
-    return decorator
+def _clear_consultant_pending_session() -> None:
+    for key in ("pending_role", "pending_consultant_id", "pending_phone", "pending_code", "pending_code_exp"):
+        session.pop(key, None)
+
+
+def _clear_consultant_session() -> None:
+    _clear_consultant_pending_session()
+    session.pop("consultant_id", None)
+
+
+def _clear_admin_session() -> None:
+    session.pop("admin_email", None)
+
+
+def _require_consultant(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        if not session.get("consultant_id"):
+            return redirect(url_for("auth.consultant_login"))
+        return fn(*args, **kwargs)
+    return wrapped
+
+
+def _require_admin(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        if not session.get("admin_email"):
+            return redirect(url_for("auth.admin_login"))
+        return fn(*args, **kwargs)
+    return wrapped
 
 
 def _record_audit(actor_type: str, actor_id: str, action: str, details: Optional[Dict] = None) -> None:
@@ -151,7 +172,7 @@ def consultant_login():
         return render_template("consultant/login.html", brand=current_app.config["BRAND_NAME"], theme="consultant"), 401
 
     code = "000000" if current_app.config["AUTH_DEV_MODE"] else f"{random.randint(0, 999999):06d}"
-    session.clear()
+    _clear_consultant_pending_session()
     session["pending_role"] = "consultant"
     session["pending_consultant_id"] = consultant["id"]
     session["pending_phone"] = consultant["phone_number"]
@@ -183,8 +204,7 @@ def consultant_verify():
         return render_template("consultant/verify.html", brand=current_app.config["BRAND_NAME"], theme="consultant"), 401
 
     consultant_id = session["pending_consultant_id"]
-    session.clear()
-    session["role"] = "consultant"
+    _clear_consultant_pending_session()
     session["consultant_id"] = consultant_id
     session.permanent = True
     _record_audit("consultant", consultant_id, "login_success")
@@ -204,8 +224,6 @@ def admin_login():
         _record_audit("admin", email or "unknown", "login_failed")
         flash("Invalid email or password", "error")
         return render_template("admin/login.html", brand=current_app.config["BRAND_NAME"]), 401
-    session.clear()
-    session["role"] = "admin"
     session["admin_email"] = email
     session.permanent = True
     _record_audit("admin", email, "login_success")
@@ -213,14 +231,14 @@ def admin_login():
 
 
 @auth_bp.route("/consultant/account", methods=["GET", "POST"])
-@_require_role("consultant")
+@_require_consultant
 def consultant_account():
     consultant_id = session.get("consultant_id")
     db = get_db(current_app.config)
     consultant = get_consultant_by_id(db, consultant_id)
     if not consultant:
         db.close()
-        session.clear()
+        _clear_consultant_session()
         return redirect(url_for("auth.consultant_login"))
 
     if request.method == "POST":
@@ -253,7 +271,7 @@ def consultant_account():
 
 
 @auth_bp.route("/admin/account", methods=["GET", "POST"])
-@_require_role("admin")
+@_require_admin
 def admin_account():
     admin_email = session.get("admin_email", "")
     users, secret, ttl = _load_admin_users(current_app.config["ADMIN_AUTH_FILE"])
@@ -280,21 +298,37 @@ def admin_account():
     )
 
 
+@auth_bp.route("/consultant/logout", methods=["POST"])
+def consultant_logout():
+    consultant_id = session.get("consultant_id") or "unknown"
+    _clear_consultant_session()
+    _record_audit("consultant", str(consultant_id), "logout")
+    return redirect(url_for("web.home"))
+
+
+@auth_bp.route("/admin/logout", methods=["POST"])
+def admin_logout():
+    admin_email = session.get("admin_email") or "unknown"
+    _clear_admin_session()
+    _record_audit("admin", str(admin_email), "logout")
+    return redirect(url_for("web.home"))
+
+
 @auth_bp.route("/logout", methods=["POST"])
 def logout():
-    actor_type = session.get("role", "unknown")
     actor_id = session.get("consultant_id") or session.get("admin_email") or "unknown"
-    session.clear()
-    _record_audit(actor_type, str(actor_id), "logout")
+    _clear_consultant_session()
+    _clear_admin_session()
+    _record_audit("unknown", str(actor_id), "logout")
     return redirect(url_for("web.home"))
 
 
 def require_consultant(fn):
-    return _require_role("consultant")(fn)
+    return _require_consultant(fn)
 
 
 def require_admin(fn):
-    return _require_role("admin")(fn)
+    return _require_admin(fn)
 
 
 def configure_session(app) -> None:

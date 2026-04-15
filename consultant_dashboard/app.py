@@ -2,6 +2,7 @@ import argparse
 import hashlib
 import os
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -12,6 +13,7 @@ from .core.auth import auth_bp, configure_session, require_admin_auth_file
 from .core.config import load_config
 from .core.db import create_client, create_consultant, get_db, init_db, upsert_client_auth_identity
 from .core.internal_api import internal_bp
+from .core.realtime import configure_realtime
 from .core.web import web_bp
 
 PASSWORD_HASH_METHOD = "pbkdf2:sha256"
@@ -19,6 +21,16 @@ PASSWORD_HASH_METHOD = "pbkdf2:sha256"
 
 def _hash_value(value: str) -> str:
     return hashlib.sha256(value.strip().lower().encode("utf-8")).hexdigest()
+
+
+def _format_display_datetime(value: str) -> str:
+    if not value:
+        return ""
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    return dt.strftime("%d %b %Y, %H:%M")
 
 
 def create_app() -> Flask:
@@ -31,6 +43,7 @@ def create_app() -> Flask:
     app.config.update(config)
     app.secret_key = config["SESSION_SECRET"]
     configure_session(app)
+    configure_realtime(app)
 
     require_admin_auth_file(config["ADMIN_AUTH_FILE"])
 
@@ -42,6 +55,7 @@ def create_app() -> Flask:
     app.register_blueprint(auth_bp)
     app.register_blueprint(internal_bp)
     app.register_blueprint(web_bp)
+    app.jinja_env.filters["display_dt"] = _format_display_datetime
 
     @app.route("/")
     def root():
