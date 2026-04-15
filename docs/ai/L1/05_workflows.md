@@ -31,12 +31,14 @@ For biomarker-heavy consultant pages, keep the overview page compact:
 1. Keep consultant-owned messaging in `core/web.py` and `core/messaging.py`.
 2. Store outbound and inbound records in `client_messages` through `core/db.py`.
 3. Reuse `client_access_links` for secure reply URLs instead of exposing consultant email addresses or phone numbers.
-4. Preserve the current delivery split:
+4. Keep a single send path for outbound consultant messages; avoid duplicating delivery + access-link creation logic across multiple routes.
+5. Preserve the current delivery split:
    - email through SendGrid when configured
    - SMS through Twilio Messaging when configured
    - secure web reply UI for inbound client messages
-5. Add or extend tests in `tests/test_web_dashboard.py`.
-6. Update `06_interfaces.md` and setup docs when the messaging contract changes.
+6. If realtime behavior changes, update both the JSON thread endpoints and the WebSocket token/session checks together.
+7. Add or extend tests in `tests/test_web_dashboard.py`.
+8. Update `06_interfaces.md` and setup docs when the messaging contract changes.
 
 ## Change Client Identity Matching
 
@@ -59,7 +61,7 @@ For biomarker-heavy consultant pages, keep the overview page compact:
 
 1. Extend the payload handling in `core/internal_api.py`.
 2. Decide whether it belongs in:
-  - `sessions` row
+   - `sessions` row
    - `session_alerts`
    - encrypted artifact payload
 3. Preserve idempotent `upsert_session()` behavior.
@@ -79,6 +81,18 @@ If the field is derived from live safety or biomarker streams, document whether 
 3. Update audit logging for success/failure cases.
 4. If Twilio behavior changes, test both dev-mode and production-style branches conceptually.
 5. Update `07_gotchas.md` if the change is easy to misconfigure.
+
+## Deferred Hardening / Roadmap Work
+
+Keep deferred security and data-integrity items visible here until they are implemented.
+
+Current notable deferred items:
+
+- add CSRF protection for dashboard write routes
+- move session deletion from hard delete to soft delete with audit-friendly semantics
+- add admin OTP / second factor
+- add rate limiting or brute-force throttling
+- add notification presence/unread-aware delivery so every live chat message is not immediately emailed/SMSed
 
 ## Run a Basic Local Verification
 

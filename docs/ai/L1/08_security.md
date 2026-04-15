@@ -117,6 +117,18 @@ Be careful not to add raw personal or clinical detail into audit payloads unless
 - admin login does not yet use OTP
 - there is no key rotation mechanism yet for `THERAPY_MASTER_KEY`
 - there is no outbox/retry queue yet for failed external event delivery because this repo currently only receives events
+- session deletion is still a hard delete; soft-delete plus preserved audit semantics is still pending
+
+## Roadmap Security / Integrity Items
+
+These are not implemented yet, but they are the current intended hardening direction:
+
+- add CSRF protection for consultant/admin write routes
+- change session deletion to soft-delete instead of hard delete
+- add admin OTP / second factor
+- add rate limiting and brute-force protection
+- add key rotation support for encrypted artifacts
+- add a delivery outbox / retry model for outbound notifications and internal event forwarding
 
 ## Security-Sensitive Changes
 
@@ -133,4 +145,3 @@ When changing any of these, update this file:
 - [02 Architecture](02_architecture.md)
 - [06 Interfaces](06_interfaces.md)
 - [07 Gotchas](07_gotchas.md)
-

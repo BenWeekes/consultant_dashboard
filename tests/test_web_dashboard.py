@@ -1,9 +1,16 @@
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
+from consultant_dashboard.core import realtime
 from tests.support import ConsultantDashboardTestCase
 from consultant_dashboard.core.auth import _load_admin_users
-from consultant_dashboard.core.db import get_consultant_by_email, get_db
+from consultant_dashboard.core.db import (
+    create_client_access_link,
+    get_consultant_by_email,
+    get_db,
+)
+from consultant_dashboard.core.messaging import hash_access_token
 
 
 class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
@@ -255,6 +262,31 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertEqual(row["delivery_status"], "sent")
         self.assertIsNotNone(link)
 
+    @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
+    def test_message_metadata_does_not_store_plaintext_reply_link(self, mocked_deliver_email):
+        self.consultant_login()
+        response = self.client.post(
+            f"/consultant/clients/{self.client_id}",
+            data={
+                "form_name": "send_message",
+                "message_body": "Security test message.",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        reply_link = mocked_deliver_email.call_args.kwargs["reply_link"]
+        token = reply_link.rsplit("/", 1)[-1]
+
+        db = get_db(self.app.config)
+        row = db.execute(
+            "SELECT metadata_json, access_link_id FROM client_messages WHERE client_id = ? ORDER BY created_at DESC LIMIT 1",
+            (self.client_id,),
+        ).fetchone()
+        db.close()
+        self.assertNotIn(token, row["metadata_json"] or "")
+        self.assertNotIn("reply_link", row["metadata_json"] or "")
+        self.assertTrue(row["access_link_id"])
+
     @mock.patch("consultant_dashboard.core.web.deliver_sms", return_value=("not_sent", "twilio_messaging_not_configured"))
     def test_consultant_can_send_sms_message(self, mocked_deliver_sms):
         db = get_db(self.app.config)
@@ -364,6 +396,23 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         payload = response.get_json()
         self.assertTrue(payload["messages"])
         self.assertEqual(payload["messages"][-1]["body"], "Client thread refresh test.")
+
+    def test_expired_client_message_link_is_rejected_for_realtime(self):
+        db = get_db(self.app.config)
+        token = "expired-access-token"
+        create_client_access_link(
+            db,
+            client_id=self.client_id,
+            created_by=self.consultant_id,
+            token_hash=hash_access_token(token),
+            expires_at=(datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(),
+        )
+        db.commit()
+        db.close()
+
+        with self.app.app_context():
+            link = realtime.get_active_client_link(self.app.config, token)
+        self.assertIsNone(link)
 
     def test_client_can_only_have_one_consultant_assignment(self):
         db = get_db(self.app.config)

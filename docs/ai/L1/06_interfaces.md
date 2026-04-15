@@ -13,6 +13,8 @@ Consultant routes:
 - `GET/POST /consultant/clients`
 - `GET/POST /consultant/clients/<client_id>`
 - `GET/POST /consultant/clients/<client_id>/messages/new`
+- `POST /consultant/clients/<client_id>/messages/send`
+- `GET /consultant/clients/<client_id>/messages/thread`
 - `GET /consultant/sessions`
 - `GET/POST /consultant/sessions/<session_id>`
 
@@ -29,6 +31,7 @@ Shared routes:
 - `GET /`
 - `GET /home`
 - `GET/POST /client/messages/<token>`
+- `GET /client/messages/<token>/thread`
 - `POST /logout`
 - `GET /health`
 
@@ -41,6 +44,18 @@ Notes:
 - each client is assigned to one consultant at a time
 - only US and UK phone numbers are supported right now
 - the client overview page shows compact latest-session biomarker highlights and keeps the full grouped biomarker breakdown on the session detail page
+- secure message links are valid for both the hosted reply page and the client realtime thread only until `expires_at`
+
+Realtime routes:
+
+- `GET /ws/consultant/clients/<client_id>/messages`
+- `GET /ws/client/messages/<token>`
+
+Realtime notes:
+
+- consultant realtime requires an authenticated consultant session
+- client realtime requires an unexpired secure access token
+- realtime currently sends `thread_updated` notifications and the page re-fetches thread JSON
 
 ## Internal Service Interfaces
 
@@ -110,6 +125,7 @@ Influence on the next AI session:
 - `latest_summary` = previous generalized session summary
 - `baseline` = biomarker averages from recent sessions
 - `alerts` = open human follow-up signals
+- `recent_summaries` are truncated in `simple-backend` before prompt injection to avoid consuming too much context window
 
 ### `POST /internal/verify-client-password`
 
@@ -220,9 +236,11 @@ Consultant password management:
 
 Web behavior:
 
-- consultants send messages from `/consultant/clients/<client_id>/messages/new`
+- consultants send messages from the client detail page or `/consultant/clients/<client_id>/messages/new`
 - client replies are collected at `/client/messages/<token>`
 - outbound messages are stored even when delivery is not configured
+- outbound message rows store `access_link_id`; they do not store the raw secure reply URL in SQLite metadata
+- consultant and client thread views use JSON thread endpoints plus WebSocket notifications for live refresh
 
 Delivery config:
 
@@ -236,6 +254,12 @@ Delivery config:
   - `CONSULTANT_TWILIO_MESSAGING_SERVICE_SID` or `CONSULTANT_TWILIO_FROM_NUMBER`
 - public reply-link host:
   - `CONSULTANT_PUBLIC_BASE_URL`
+
+Current delivery policy:
+
+- if the client has an email address, outbound notification prefers email
+- otherwise, if the client has a phone number, outbound notification falls back to SMS
+- otherwise the message is stored in the thread only
 
 ## Data Model Boundaries
 

@@ -329,7 +329,7 @@ def _send_client_message(db, *, consultant_id: str, client, client_id: str, mess
         delivery_status=delivery_status,
         delivery_error=delivery_error,
         access_link_id=access_link_id,
-        metadata={"reply_link": reply_link},
+        metadata={"delivery_kind": delivery_channel},
     )
     log_audit(
         db,
@@ -359,6 +359,11 @@ def _refresh_client_derived_state(db, storage: EncryptedStorage, client_id: str)
         for key, value in payload.get("averages", {}).items():
             if isinstance(value, (int, float)):
                 metrics.setdefault(key, []).append(float(value))
+                continue
+            if isinstance(value, dict):
+                avg_value = value.get("avg")
+                if isinstance(avg_value, (int, float)):
+                    metrics.setdefault(key, []).append(float(avg_value))
 
     if biomarker_rows:
         baseline = {
@@ -851,68 +856,13 @@ def consultant_client_message_new(client_id: str):
         if not form_defaults["body"]:
             flash("Message body is required", "error")
         else:
-            token = new_access_token()
-            access_link_id = create_client_access_link(
+            delivery_status, delivery_error = _send_client_message(
                 db,
-                client_id=client_id,
-                created_by=consultant_id,
-                token_hash=hash_access_token(token),
-                expires_at=default_expiry(),
-            )
-            reply_link = build_reply_link(current_app.config, token)
-            delivery_channel = choose_delivery_channel(
-                client_email=client["email"] or "",
-                client_phone=client["phone_number"] or "",
-            )
-            _subject, message_body = build_delivery_content(
-                channel=delivery_channel if delivery_channel != "portal" else "email",
-                brand=current_app.config["BRAND_NAME"],
-                client_name=client["display_name"],
-                body=form_defaults["body"],
-            )
-            if delivery_channel == "email":
-                delivery_status, delivery_error = deliver_email(
-                    current_app.config,
-                    to_email=client["email"] or "",
-                    subject=f"{current_app.config['BRAND_NAME']} message",
-                    body=message_body,
-                    reply_link=reply_link,
-                    kind="message",
-                )
-            elif delivery_channel == "sms":
-                delivery_status, delivery_error = deliver_sms(
-                    current_app.config,
-                    to_phone=client["phone_number"] or "",
-                    body=message_body,
-                    reply_link=reply_link,
-                )
-            else:
-                delivery_status, delivery_error = "not_sent", "no_client_delivery_channel"
-
-            create_client_message(
-                db,
-                client_id=client_id,
                 consultant_id=consultant_id,
-                direction="outbound",
-                channel=delivery_channel,
-                subject="",
-                body=form_defaults["body"],
-                delivery_status=delivery_status,
-                delivery_error=delivery_error,
-                access_link_id=access_link_id,
-                metadata={"reply_link": reply_link},
+                client=client,
+                client_id=client_id,
+                message_body=form_defaults["body"],
             )
-            log_audit(
-                db,
-                actor_type="consultant",
-                    actor_id=consultant_id,
-                    action="client_message_sent",
-                    target_type="client",
-                    target_id=client_id,
-                    ip_address=request.headers.get("X-Forwarded-For", request.remote_addr or ""),
-                    user_agent=request.headers.get("User-Agent", ""),
-                    details={"channel": delivery_channel, "delivery_status": delivery_status},
-                )
             db.commit()
             db.close()
             if delivery_status == "sent":

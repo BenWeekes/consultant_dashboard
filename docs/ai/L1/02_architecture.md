@@ -109,14 +109,22 @@ Current end-of-call split:
 
 ### Consultant messaging
 
-1. Consultant composes an email, SMS, or meeting invite from the client record.
+1. Consultant composes a message from the client record.
 2. Service creates a secure access token in `client_access_links`.
 3. Service stores the outbound record in `client_messages`.
 4. If configured:
-   - email is delivered through SendGrid
-   - SMS is delivered through Twilio Messaging
-5. The outbound message includes a secure reply URL hosted by this service.
+   - email is delivered through SendGrid when the client has an email address
+   - SMS is delivered through Twilio Messaging when the client has no email address but does have a phone number
+5. The outbound notification includes a secure reply URL hosted by this service.
 6. Client replies through the hosted UI instead of inbound SMS, and the reply is stored in `client_messages` as an inbound `portal` message.
+7. Consultant and client pages subscribe to realtime thread updates over WebSocket.
+
+Important current behavior:
+
+- secure reply links are only stored hashed in `client_access_links`
+- outbound message metadata does not store the raw reply URL
+- the client WebSocket path now enforces the same access-link expiry rule as the HTTP reply page
+- the current chat UI auto-refreshes on thread updates, but notification delivery is still immediate rather than presence-aware
 
 ## Storage Model
 

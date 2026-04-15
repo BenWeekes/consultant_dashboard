@@ -1,6 +1,7 @@
 import json
 import threading
 from collections import defaultdict
+from datetime import datetime, timezone
 from queue import Queue
 
 from flask import current_app, session
@@ -41,6 +42,35 @@ class _RealtimeHub:
 hub = _RealtimeHub()
 
 
+def _parse_iso_datetime(value: str):
+    if not value:
+        return None
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def get_active_client_link(config: dict, token: str):
+    db = get_db(config)
+    try:
+        link = get_client_access_link_by_hash(db, hash_access_token(token))
+    finally:
+        db.close()
+    if not link:
+        return None
+    expires_at = _parse_iso_datetime(link["expires_at"])
+    if expires_at and expires_at < datetime.now(timezone.utc):
+        return None
+    return link
+
+
 def publish_client_thread_update(client_id: str) -> None:
     hub.publish(client_id, {"type": "thread_updated", "client_id": client_id})
 
@@ -75,9 +105,7 @@ def consultant_messages_ws(ws, client_id: str):
 
 @sock.route("/ws/client/messages/<token>")
 def client_messages_ws(ws, token: str):
-    db = get_db(current_app.config)
-    link = get_client_access_link_by_hash(db, hash_access_token(token))
-    db.close()
+    link = get_active_client_link(current_app.config, token)
     if not link:
         ws.close()
         return

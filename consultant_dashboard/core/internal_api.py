@@ -168,6 +168,11 @@ def _compute_baseline(storage: EncryptedStorage, db, client_id: str):
         for key, value in payload.get("averages", {}).items():
             if isinstance(value, (int, float)):
                 metrics.setdefault(key, []).append(float(value))
+                continue
+            if isinstance(value, dict):
+                avg_value = value.get("avg")
+                if isinstance(avg_value, (int, float)):
+                    metrics.setdefault(key, []).append(float(avg_value))
     averages = {
         key: round(sum(values) / len(values), 4)
         for key, values in metrics.items()
