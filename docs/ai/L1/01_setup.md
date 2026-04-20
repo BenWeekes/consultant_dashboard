@@ -228,6 +228,37 @@ Required discipline before telling the user a local fix is live:
 
 Do not trust template files or a normal browser refresh by themselves.
 
+## Public Website (www/mindfix)
+
+Static marketing site at `www/mindfix/`. Files are prod-ready in git — all links point to production URLs (`https://app.mindfix.me`, `https://dashboard.mindfix.me`).
+
+### Local Development
+
+When opened from `localhost` or `127.0.0.1`, URLs are automatically rewritten to local ports (`http://localhost:8084` for the client, `http://127.0.0.1:8090` for the dashboard).
+
+To override manually, use query params:
+
+```
+www/mindfix/index.html?client_base=http://localhost:8084&dashboard_base=http://127.0.0.1:8090
+```
+
+No build step needed.
+
+### Structure
+
+```
+www/mindfix/
+  index.html      — single-page site (all sections)
+  privacy.html    — privacy policy
+  terms.html      — terms of service
+  css/style.css   — custom styles (Bootstrap 5 + teal palette)
+  img/            — avatar placeholders (replace with real images)
+```
+
+### Production Deployment
+
+Serve `www/mindfix/` from the same domain as the dashboard. Links use relative paths (`/app`, `/consultant/login`, `/admin/login`) so no sed, no build, no env vars needed.
+
 ## See Also
 
 - [02 Architecture](02_architecture.md)

@@ -15,6 +15,14 @@
   <!-- Custom CSS -->
   <link href="css/style.css" rel="stylesheet">
 
+  <!--
+    URL Configuration:
+    - Production: relative URLs (/app, /consultant/login, /admin/login)
+      work when served from the same domain as the dashboard.
+    - Local dev: auto-detected when hostname is localhost/127.0.0.1,
+      or override with query params:
+        index.html?client_base=http://localhost:8084&dashboard_base=http://127.0.0.1:8090
+  -->
 </head>
 <body data-bs-spy="scroll" data-bs-target="#mainNav" data-bs-offset="80">
 
@@ -272,6 +280,9 @@
 
   <script>
     document.addEventListener("DOMContentLoaded", function () {
+      // URL override for local development.
+      // Auto-detects localhost, or use query params:
+      //   ?client_base=http://localhost:8084&dashboard_base=http://127.0.0.1:8090
       var params = new URLSearchParams(window.location.search);
       var hostname = window.location.hostname;
       var isLocal = hostname === "localhost" || hostname === "127.0.0.1";
