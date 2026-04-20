@@ -15,11 +15,6 @@
   <!-- Custom CSS -->
   <link href="css/style.css" rel="stylesheet">
 
-  <!--
-    Deploy-time config: replace http://localhost:8084 and http://127.0.0.1:8090
-    with real values during deployment. For example:
-      sed -i 's|http://localhost:8084|https://app.mindfix.me|g; s|http://127.0.0.1:8090|https://dashboard.mindfix.me|g' index.html
-  -->
 </head>
 <body data-bs-spy="scroll" data-bs-target="#mainNav" data-bs-offset="80">
 
@@ -40,8 +35,8 @@
           <li class="nav-item"><a class="nav-link" href="#contact">Contact</a></li>
         </ul>
         <div class="navbar-buttons">
-          <a id="consultantLoginBtn" href="http://127.0.0.1:8090/consultant/login" class="btn btn-outline-light btn-sm me-2">Consultant Login</a>
-          <a id="adminLoginBtn" href="http://127.0.0.1:8090/admin/login" class="btn btn-outline-light btn-sm">Admin Login</a>
+          <a id="consultantLoginBtn" href="/consultant/login" class="btn btn-outline-light btn-sm me-2">Consultant Login</a>
+          <a id="adminLoginBtn" href="/admin/login" class="btn btn-outline-light btn-sm">Admin Login</a>
         </div>
       </div>
     </div>
@@ -54,16 +49,16 @@
       <h1 class="hero-title">AI Mental Wellness, Guided by a Human Therapist</h1>
       <p class="hero-subtitle">Start an AI wellness session</p>
       <div class="hero-avatars mt-4">
-        <a href="http://localhost:8084/?profile=therapy&autoconnect=true" class="hero-avatar-link">
+        <a href="/app?profile=therapy&autoconnect=true&returnurl=/" class="hero-avatar-link">
           <img src="img/avatar-1.png" alt="AI wellness companion" class="hero-avatar">
         </a>
-        <a href="http://localhost:8084/?profile=therapy&autoconnect=true" class="hero-avatar-link">
+        <a href="/app?profile=therapy&autoconnect=true&returnurl=/" class="hero-avatar-link">
           <img src="img/avatar-2.png" alt="AI wellness companion" class="hero-avatar">
         </a>
-        <a href="http://localhost:8084/?profile=therapy&autoconnect=true" class="hero-avatar-link">
+        <a href="/app?profile=therapy&autoconnect=true&returnurl=/" class="hero-avatar-link">
           <img src="img/avatar-3.png" alt="AI wellness companion" class="hero-avatar">
         </a>
-        <a href="http://localhost:8084/?profile=therapy&autoconnect=true" class="hero-avatar-link">
+        <a href="/app?profile=therapy&autoconnect=true&returnurl=/" class="hero-avatar-link">
           <img src="img/avatar-4.png" alt="AI wellness companion" class="hero-avatar">
         </a>
       </div>
@@ -146,7 +141,7 @@
         </div>
       </div>
       <div class="text-center mt-5">
-        <a id="howItWorksCta" href="http://localhost:8084/?profile=therapy&autoconnect=true" class="btn btn-accent">
+        <a id="howItWorksCta" href="/app?profile=therapy&autoconnect=true&returnurl=/" class="btn btn-accent">
           <i class="fa-solid fa-comments me-2"></i>Start an AI Session
         </a>
       </div>
@@ -168,7 +163,7 @@
             <li><i class="fa-solid fa-compass me-2"></i> Provide direction to the AI between sessions</li>
             <li><i class="fa-solid fa-message me-2"></i> Secure client messaging</li>
           </ul>
-          <a id="consultantCta" href="http://127.0.0.1:8090/consultant/login" class="btn btn-accent mt-3">
+          <a id="consultantCta" href="/consultant/login" class="btn btn-accent mt-3">
             <i class="fa-solid fa-right-to-bracket me-2"></i>Log in to your dashboard
           </a>
         </div>
@@ -277,6 +272,49 @@
 
   <script>
     document.addEventListener("DOMContentLoaded", function () {
+      var params = new URLSearchParams(window.location.search);
+      var hostname = window.location.hostname;
+      var isLocal = hostname === "localhost" || hostname === "127.0.0.1";
+      var clientBase = params.get("client_base") || (isLocal ? "http://localhost:8084" : "/app");
+      var dashboardBase = params.get("dashboard_base") || (isLocal ? "http://127.0.0.1:8090" : "");
+      var currentUrl = window.location.href;
+      var joinParams = new URLSearchParams({
+        profile: "therapy",
+        autoconnect: "true",
+        returnurl: currentUrl,
+      });
+      var clientJoinUrl = clientBase.startsWith("http")
+        ? clientBase.replace(/\/$/, "") + "/?" + joinParams.toString()
+        : clientBase + "?" + joinParams.toString();
+
+      document.querySelectorAll(".hero-avatar-link").forEach(function (link) {
+        link.setAttribute("href", clientJoinUrl);
+      });
+
+      var howItWorksCta = document.getElementById("howItWorksCta");
+      if (howItWorksCta) {
+        howItWorksCta.setAttribute("href", clientJoinUrl);
+      }
+
+      if (dashboardBase) {
+        var normalizedDashboardBase = dashboardBase.replace(/\/$/, "");
+        var consultantLoginUrl = normalizedDashboardBase + "/consultant/login";
+        var adminLoginUrl = normalizedDashboardBase + "/admin/login";
+        var consultantLoginBtn = document.getElementById("consultantLoginBtn");
+        var adminLoginBtn = document.getElementById("adminLoginBtn");
+        var consultantCta = document.getElementById("consultantCta");
+
+        if (consultantLoginBtn) {
+          consultantLoginBtn.setAttribute("href", consultantLoginUrl);
+        }
+        if (adminLoginBtn) {
+          adminLoginBtn.setAttribute("href", adminLoginUrl);
+        }
+        if (consultantCta) {
+          consultantCta.setAttribute("href", consultantLoginUrl);
+        }
+      }
+
       // Smooth scroll for nav links
       document.querySelectorAll('a.nav-link[href^="#"]').forEach(function (link) {
         link.addEventListener("click", function (e) {
