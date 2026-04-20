@@ -1,0 +1,30 @@
+{% extends "shared/base.html" %}
+{% block body %}
+  <div class="card" style="max-width: 720px; margin: 32px auto;">
+    <div class="panel-title">
+      <div class="panel-kicker">Meeting</div>
+      <h1>{{ heading }}</h1>
+    </div>
+    <div class="summary-card" style="margin-top: 16px;">
+      <div class="summary-copy">{{ detail }}</div>
+    </div>
+    <div class="actions" style="margin-top: 18px;">
+      <a href="{{ join_url }}" class="button-secondary" target="_blank" rel="noopener">Open Meeting</a>
+      <a href="{{ return_url }}" class="button-secondary">Continue</a>
+    </div>
+  </div>
+  <script>
+    (() => {
+      const joinUrl = {{ join_url|tojson }};
+      const returnUrl = {{ return_url|tojson }};
+      try {
+        window.open(joinUrl, "_blank", "noopener");
+      } catch (_err) {
+        // The fallback button stays visible if the browser blocks popups.
+      }
+      window.setTimeout(() => {
+        window.location.replace(returnUrl);
+      }, 300);
+    })();
+  </script>
+{% endblock %}

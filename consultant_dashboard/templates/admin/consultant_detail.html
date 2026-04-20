@@ -1,10 +1,6 @@
 {% extends "shared/base.html" %}
 {% block body %}
-  <div class="nav">
-    <a href="/admin/dashboard">Overview</a>
-    <a href="/admin/consultants">Consultants</a>
-    <a href="/admin/account">Account</a>
-  </div>
+  {% include "admin/_nav.html" %}
   <div class="split">
     <div class="card">
       <div class="label">{{ brand }}</div>
@@ -63,11 +59,11 @@
         <label class="field-label">Set Temporary Password <span class="tooltip" tabindex="0" data-tooltip="Optional. If filled, this replaces the consultant password immediately. Use this for admin-initiated resets.">?</span></label>
         <input name="reset_password" type="password" placeholder="Leave blank to keep current password">
 
-        <button type="submit">Save changes</button>
+        <button type="submit">Save Changes</button>
       </form>
       <p class="muted">Delete hides this consultant from the dashboard and blocks future login, but keeps existing records.</p>
       <form method="post" action="/admin/consultants/{{ consultant.id }}/delete" onsubmit="return confirm('Delete this consultant?');">
-        <button type="submit" class="button-danger">Delete consultant</button>
+        <button type="submit" class="button-danger">Delete Consultant</button>
       </form>
     </div>
   </div>

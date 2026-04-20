@@ -1,10 +1,6 @@
 {% extends "shared/base.html" %}
 {% block body %}
-  <div class="nav">
-    <a href="/admin/dashboard">Overview</a>
-    <a href="/admin/consultants">Consultants</a>
-    <a href="/admin/account">Account</a>
-  </div>
+  {% include "admin/_nav.html" %}
   <div class="split">
     <div class="card">
       <div class="label">{{ brand }}</div>
@@ -82,7 +78,7 @@
 
         <label class="field-label">Temporary Password <span class="tooltip" tabindex="0" data-tooltip="Initial password for the consultant. They can change it later from their account page.">?</span></label>
         <input name="password" type="password" placeholder="Temporary password" value="{{ form_defaults.password or '' }}" required>
-        <button type="submit">Create consultant</button>
+        <button type="submit">Create Consultant</button>
       </form>
     </div>
   </div>

@@ -32,6 +32,18 @@
       .stat { background: var(--accent-soft-solid); border-radius: 14px; padding: 16px; }
       .label { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); }
       .field-label { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: var(--text-main); }
+      .toggle-row { display: flex; gap: 12px; flex-wrap: wrap; }
+      .toggle-option {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        border: 1px solid #bfd0c3;
+        border-radius: 12px;
+        background: #fff;
+        font-size: 14px;
+      }
+      .toggle-option input { width: auto; margin: 0; }
       .field-help { margin-top: -6px; font-size: 12px; color: var(--text-muted); }
       .phone-row { display: grid; gap: 12px; grid-template-columns: 200px 1fr; align-items: end; }
       .tooltip {
@@ -119,12 +131,26 @@
       .client-bottom-grid { display: grid; gap: 16px; grid-template-columns: 1.1fr 0.9fr; margin-top: 16px; align-items: start; }
       .client-bottom-grid.single-column { grid-template-columns: 1fr; }
       .panel-equal { display: grid; grid-template-rows: auto 1fr; align-content: start; }
-      .panel-head { display: flex; justify-content: space-between; align-items: start; gap: 12px; margin-bottom: 14px; }
+      .panel-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; margin-bottom: 14px; }
       .panel-head.tight { margin-bottom: 10px; }
       .panel-title { display: grid; gap: 4px; }
       .panel-title h2 { margin: 0; font-size: 20px; line-height: 1.2; }
-      .panel-kicker { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); }
+      .panel-kicker { font-size: 12px; letter-spacing: .04em; color: var(--text-muted); font-weight: 700; }
       .subtle-link { font-size: 14px; font-weight: 600; text-decoration: none; }
+      .titlebar-link-button {
+        background: transparent;
+        color: var(--accent);
+        border: 0;
+        padding: 0;
+        margin: 0;
+        display: inline-block;
+        font-size: 14px;
+        font-weight: 600;
+        font-family: inherit;
+        line-height: 1.2;
+        text-decoration: none;
+        cursor: pointer;
+      }
       .section-stack { display: grid; gap: 14px; align-content: start; }
       .section-stack.compact { gap: 10px; }
       .meta-block { display: grid; gap: 4px; }
@@ -179,13 +205,17 @@
       details > summary::-webkit-details-marker { display: none; }
       .split { display: grid; gap: 16px; grid-template-columns: 1.2fr .8fr; }
       .nav { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
-      .nav a { display: inline-block; padding: 10px 14px; border-radius: 999px; background: var(--accent-soft); text-decoration: none; }
+      .nav a { display: inline-block; padding: 10px 14px; border-radius: 999px; background: var(--accent-soft); text-decoration: none; transition: background-color .15s ease, color .15s ease, box-shadow .15s ease; }
+      .nav a:hover { background: color-mix(in srgb, var(--accent) 18%, white); box-shadow: 0 4px 10px rgba(0,0,0,.05); }
+      .nav a.nav-active { background: var(--accent); color: white; box-shadow: 0 6px 14px rgba(0,0,0,.08); }
+      .actions a.nav-active { display: inline-block; padding: 8px 12px; border-radius: 999px; background: var(--accent); color: white; text-decoration: none; }
       .stack { display: grid; gap: 12px; }
       .list { display: grid; gap: 12px; }
       .item { padding: 14px; border: 1px solid #d8e6db; border-radius: 14px; background: #fbfdfb; }
       .history-card { margin-top: 0; position: relative; z-index: 0; }
       .history-toolbar { display: flex; justify-content: space-between; align-items: end; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
       .history-search { min-width: 280px; max-width: 360px; }
+      .history-list-scroll { max-height: 520px; overflow: auto; padding-right: 4px; }
       .session-history-item { background: #fbfdfd; }
       .session-history-link { display: grid; gap: 0; text-decoration: none; color: inherit; transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
       .session-history-link:hover { border-color: color-mix(in srgb, var(--accent) 30%, #d8e6db); box-shadow: 0 8px 18px rgba(0,0,0,.04); transform: translateY(-1px); }
@@ -209,6 +239,9 @@
       .biomarker-row strong { font-size: 14px; }
       .biomarker-meta { font-size: 12px; color: var(--text-muted); }
       .chat-status-note { font-size: 12px; color: var(--text-muted); line-height: 1.45; }
+      .status-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--accent-soft-solid); color: var(--text-muted); font-size: 12px; font-weight: 700; }
+      .status-chip.live { background: #e7f7eb; color: #14743c; }
+      .status-chip.unread { background: #edf4fd; color: #1f4f8e; }
       .dialog-backdrop {
         position: fixed;
         inset: 0;
@@ -227,7 +260,26 @@
       .modal-head h2 { margin: 0; font-size: 22px; }
       .modal-close { background: transparent; color: var(--text-muted); border: 1px solid #d7e0ea; }
       .table { width: 100%; border-collapse: collapse; }
-      .table th, .table td { text-align: left; padding: 12px; border-bottom: 1px solid #e3ece4; vertical-align: top; }
+      .table th {
+        text-align: left;
+        padding: 12px;
+        border-bottom: 1px solid #e3ece4;
+        vertical-align: top;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: .08em;
+        color: var(--text-muted);
+        font-weight: 700;
+      }
+      .table td {
+        text-align: left;
+        padding: 12px;
+        border-bottom: 1px solid #e3ece4;
+        vertical-align: top;
+        font-size: 14px;
+        line-height: 1.45;
+      }
+      .table td a { font-weight: 600; text-decoration: none; }
       .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
       form { display: grid; gap: 12px; }
       a { color: var(--accent); }
@@ -282,6 +334,129 @@
       {% block body %}{% endblock %}
     </div>
     <script>
+      function initMindfixMessageThreads(root = document) {
+        const threads = root.querySelectorAll('[data-message-thread]');
+        threads.forEach((thread) => {
+          if (thread.dataset.messageInitialized === '1') return;
+          thread.dataset.messageInitialized = '1';
+          const endpoint = thread.dataset.threadEndpoint;
+          const wsPath = thread.dataset.threadWs;
+          const emptyText = thread.dataset.emptyText || 'No messages yet.';
+          const container = thread.closest('.chat-panel') || thread.parentElement || document;
+          const composeForm = container.querySelector('[data-message-compose]');
+          const composeStatus = composeForm?.querySelector('[data-compose-status]');
+          if (composeForm && composeForm.dataset.messageInitialized === '1') return;
+          if (composeForm) composeForm.dataset.messageInitialized = '1';
+
+          function escapeHtml(value) {
+            return String(value)
+              .replaceAll('&', '&amp;')
+              .replaceAll('<', '&lt;')
+              .replaceAll('>', '&gt;')
+              .replaceAll('"', '&quot;')
+              .replaceAll("'", '&#39;');
+          }
+
+          function formatDateTime(value) {
+            if (!value) return '';
+            const parsed = new Date(value);
+            if (Number.isNaN(parsed.getTime())) return value;
+            return new Intl.DateTimeFormat('en-GB', {
+              day: '2-digit',
+              month: 'short',
+              year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false,
+            }).format(parsed);
+          }
+
+          function renderMessages(messages) {
+            if (!messages.length) {
+              thread.innerHTML = `<div class="muted">${escapeHtml(emptyText)}</div>`;
+              return;
+            }
+            thread.innerHTML = messages.map((message) => {
+              const outbound = message.direction === 'outbound';
+              const rowClass = outbound ? 'chat-row-outbound' : 'chat-row-inbound';
+              const bubbleClass = outbound ? 'chat-bubble-outbound' : 'chat-bubble-inbound';
+              const label = outbound ? 'Consultant' : 'Client';
+              const error = message.delivery_error && message.delivery_status !== 'sent'
+                ? `<div class="muted" style="margin-top: 8px;">Delivery: ${escapeHtml(message.delivery_error)}</div>`
+                : '';
+              return `
+                <div class="chat-row ${rowClass}">
+                  <div class="chat-bubble ${bubbleClass}">
+                    <div class="row" style="justify-content: space-between;">
+                      <div class="chat-header">${label} · ${escapeHtml(formatDateTime(message.created_at))}</div>
+                    </div>
+                    <div class="chat-body">${escapeHtml(message.body)}</div>
+                    ${error}
+                  </div>
+                </div>`;
+            }).join('');
+            thread.scrollTop = thread.scrollHeight;
+          }
+
+          async function refreshThread() {
+            const response = await fetch(endpoint, { credentials: 'same-origin' });
+            if (!response.ok) return;
+            const data = await response.json();
+            renderMessages(data.messages || []);
+          }
+
+          function connect() {
+            if (!wsPath) return;
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const socket = new WebSocket(`${protocol}//${window.location.host}${wsPath}`);
+            socket.onmessage = async (event) => {
+              const payload = JSON.parse(event.data);
+              if (payload.type === 'thread_updated') {
+                await refreshThread();
+              }
+            };
+            socket.onclose = () => window.setTimeout(connect, 1500);
+          }
+
+          if (composeForm) {
+            composeForm.addEventListener('submit', async (event) => {
+              event.preventDefault();
+              const textarea = composeForm.querySelector('textarea[name="message_body"]');
+              const body = textarea?.value.trim() || '';
+              if (!body) return;
+              const response = await fetch(composeForm.dataset.messageCompose, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ body }),
+              });
+              if (!response.ok) {
+                if (composeStatus) composeStatus.textContent = 'Message failed to send.';
+                return;
+              }
+              const data = await response.json();
+              textarea.value = '';
+              renderMessages(data.messages || []);
+              if (composeStatus) {
+                if (data.delivery_status === 'sent') {
+                  composeStatus.textContent = 'Message sent.';
+                } else if (data.delivery_status === 'not_sent') {
+                  composeStatus.textContent = 'Message saved, but notifications are not configured yet.';
+                } else {
+                  composeStatus.textContent = 'Message saved, but delivery failed.';
+                }
+              }
+            });
+          }
+
+          connect();
+          window.setTimeout(refreshThread, 50);
+        });
+      }
+
+      window.initMindfixMessageThreads = initMindfixMessageThreads;
+      initMindfixMessageThreads();
+
       const toasts = document.querySelectorAll('[data-toast]');
       toasts.forEach((toast, index) => {
         const delay = 2200 + (index * 250);

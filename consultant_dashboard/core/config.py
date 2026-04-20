@@ -58,4 +58,6 @@ def load_config() -> dict:
         "EMAIL_REPLY_TO": os.environ.get("CONSULTANT_EMAIL_REPLY_TO", ""),
         "OUTBOUND_REQUEST_TIMEOUT_SECONDS": int(os.environ.get("CONSULTANT_OUTBOUND_REQUEST_TIMEOUT_SECONDS", "8")),
         "BRAND_NAME": os.environ.get("THERAPY_DASHBOARD_BRAND_NAME", "mindfix.me"),
+        "CLIENT_APP_URL": os.environ.get("THERAPY_CLIENT_APP_URL", "http://localhost:8084"),
+        "CLIENT_PROFILE": os.environ.get("THERAPY_CLIENT_PROFILE", "therapy"),
     }

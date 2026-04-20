@@ -40,6 +40,34 @@ For biomarker-heavy consultant pages, keep the overview page compact:
 7. Add or extend tests in `tests/test_web_dashboard.py`.
 8. Update `06_interfaces.md` and setup docs when the messaging contract changes.
 
+## Extend Meeting Lifecycle
+
+1. Keep consultant-facing meeting UX in `core/web.py` and the `templates/consultant/meeting_*.html` files.
+2. Put meeting schema/query work in `core/db.py` and `core/schema.sql`.
+3. Keep shared meeting helpers in `core/meetings.py`.
+4. Treat `client_access_links` as the hosted client response trust anchor for phase 1; do not add raw meeting tokens to browser forms or SQLite metadata.
+5. Keep live media authorization in `POST /internal/authorize-meeting-join`, not in the public web routes.
+6. Preserve the current split:
+   - dashboard web routes schedule, resend, cancel, and host the client response page
+   - `simple-backend` mints RTC/RTM only after signed internal authorization succeeds
+   - `server-custom-llm` posts deterministic meeting artifacts back through `POST /internal/session-complete`
+   - reminder delivery is triggered by `POST /internal/run-reminders`, usually via `scripts/run_reminders.py` from cron
+7. Add or extend tests in both:
+   - `tests/test_web_dashboard.py`
+   - `tests/test_internal_api.py`
+8. Update `06_interfaces.md` and `02_architecture.md` when the meeting contract changes.
+
+## Run Meeting Reminders
+
+1. Keep reminder logic inside the dashboard service.
+2. Trigger it through the signed internal endpoint:
+   - `POST /internal/run-reminders`
+3. Use the checked-in helper:
+   - `scripts/run_reminders.py`
+4. Run it from cron or another scheduler every minute.
+5. Keep sends idempotent through `reminder_24h_sent_at` and `reminder_1m_sent_at`.
+6. Do not rely on an in-process sleep loop inside the Flask web server.
+
 ## Change Client Identity Matching
 
 1. Keep the normal flow UI-driven: consultant creates or edits the client in the dashboard.
@@ -108,8 +136,10 @@ Then exercise:
 - consultant login
 - admin login
 - signed `GET /internal/resolve-client`
+- signed `POST /internal/authorize-meeting-join`
 - signed `POST /internal/session-complete`
 - signed `GET /internal/client-context`
+- consultant meeting scheduling and hosted response pages
 
 Targeted runs:
 

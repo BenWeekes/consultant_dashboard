@@ -1,0 +1,7 @@
+<div class="nav">
+  <a href="/consultant/dashboard" class="{% if request.path == '/consultant/dashboard' %}nav-active{% endif %}">Overview</a>
+  <a href="/consultant/clients" class="{% if request.path.startswith('/consultant/clients') %}nav-active{% endif %}">Clients</a>
+  <a href="/consultant/meetings" class="{% if request.path.startswith('/consultant/meetings') %}nav-active{% endif %}">Meetings</a>
+  <a href="/consultant/sessions" class="{% if request.path.startswith('/consultant/sessions') %}nav-active{% endif %}">Sessions</a>
+  <a href="/consultant/account" class="{% if request.path == '/consultant/account' %}nav-active{% endif %}">Account</a>
+</div>

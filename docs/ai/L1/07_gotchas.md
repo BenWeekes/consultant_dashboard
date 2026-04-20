@@ -14,6 +14,21 @@ Purpose: preserve the practical traps that are easy to rediscover the hard way.
 - **The repo currently uses direct schema initialization, not migrations.** Changing `schema.sql` is simple now, but production-safe schema evolution will need a migration story later.
 - **Encrypted artifacts and SQLite must stay logically aligned.** A session row may point at storage keys; if callers change key formats without updating readers, dashboards break.
 - **Current UI is server-rendered Flask templates.** Do not assume a JS app/router exists.
+- **If local changes do not appear, you may still be hitting an old bound process.**
+  - dashboard/template drift: check which PID is listening on `127.0.0.1:8090`, kill that specific process, and restart the dashboard cleanly
+  - backend/join-flow drift: check which PID is listening on `127.0.0.1:8082`, kill that specific process, and restart `simple-backend` cleanly
+  - do not trust a browser refresh alone when behavior looks impossible for the current code
+  - verify the replacement process with `/health` before continuing
+- **Do not tell the user a UI/template fix is live until you have restarted the exact bound PID and rechecked the rendered page.**
+  - stale `:8090` has repeatedly served old templates and wasted review cycles
+  - stale `:8082` has repeatedly served old join-flow behavior and produced misleading 500/403 errors
+  - required discipline:
+    1. change the code
+    2. `lsof` the exact listening PID
+    3. kill that PID
+    4. restart the service cleanly
+    5. verify `/health`
+    6. only then claim the fix is live
 
 ## Integration Caveats
 
@@ -40,4 +55,3 @@ Update this file when:
 - [01 Setup](01_setup.md)
 - [05 Workflows](05_workflows.md)
 - [08 Security](08_security.md)
-

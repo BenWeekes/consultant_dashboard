@@ -3,7 +3,7 @@ import hashlib
 import json
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Tuple
+from typing import Dict, List, Optional, Tuple
 from urllib import error, parse, request
 
 
@@ -32,6 +32,60 @@ def build_reply_link(config: dict, token: str) -> str:
     return build_public_url(config, f"/client/messages/{token}")
 
 
+def build_meeting_response_link(config: dict, token: str) -> str:
+    return build_public_url(config, f"/meetings/respond/{token}")
+
+
+def build_meeting_ics(
+    *,
+    uid: str,
+    title: str,
+    description: str,
+    start_at: str,
+    end_at: str,
+    hosted_url: str,
+    organizer_email: str = "",
+    attendee_email: str = "",
+) -> str:
+    def _fmt(value: str) -> str:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+        return dt.strftime("%Y%m%dT%H%M%SZ")
+
+    def _escape_text(value: str) -> str:
+        return (value or "").replace("\\", "\\\\").replace(";", r"\;").replace(",", r"\,").replace("\n", r"\n")
+
+    safe_description = _escape_text(description)
+    safe_title = _escape_text(title)
+    safe_url = hosted_url.replace("\n", "")
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//MindFix//Consultant Dashboard//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:REQUEST",
+        "BEGIN:VEVENT",
+        f"UID:{uid}",
+        f"DTSTAMP:{_fmt(datetime.now(timezone.utc).isoformat())}",
+        f"DTSTART:{_fmt(start_at)}",
+        f"DTEND:{_fmt(end_at)}",
+        f"SUMMARY:{safe_title}",
+        f"DESCRIPTION:{safe_description}\\n\\nJoin / respond here: {safe_url}",
+        f"URL:{safe_url}",
+    ]
+    if organizer_email:
+        lines.append(f"ORGANIZER:mailto:{organizer_email}")
+    if attendee_email:
+        lines.append(f"ATTENDEE:mailto:{attendee_email}")
+    lines.extend(
+        [
+            "END:VEVENT",
+            "END:VCALENDAR",
+            "",
+        ]
+    )
+    return "\r\n".join(lines)
+
+
 def is_sendgrid_enabled(config: dict) -> bool:
     return bool(config.get("SENDGRID_API_KEY") and config.get("EMAIL_FROM"))
 
@@ -47,19 +101,30 @@ def is_twilio_messaging_enabled(config: dict) -> bool:
     )
 
 
-def deliver_email(config: dict, *, to_email: str, subject: str, body: str, reply_link: str, kind: str) -> Tuple[str, str]:
+def deliver_email(
+    config: dict,
+    *,
+    to_email: str,
+    subject: str,
+    body: str,
+    reply_link: str,
+    kind: str,
+    plain_text_override: str = "",
+    html_override: str = "",
+    attachments: Optional[List[dict]] = None,
+) -> Tuple[str, str]:
     if not to_email:
         return "not_sent", "client_email_missing"
     if not is_sendgrid_enabled(config):
         return "not_sent", "sendgrid_not_configured"
 
-    plain_text = (
+    plain_text = plain_text_override or (
         f"{body}\n\n"
         f"This secure link is for the client to read and reply: {reply_link}\n"
         f"Consultants should continue the conversation from the {config['BRAND_NAME']} dashboard.\n\n"
         f"Sent by {config['BRAND_NAME']}."
     )
-    html_body = (
+    html_body = html_override or (
         f"<p>{body.replace(chr(10), '<br>')}</p>"
         f"<p><strong>This secure link is for the client to read and reply.</strong></p>"
         f"<p><a href=\"{reply_link}\">Open secure client reply</a></p>"
@@ -76,6 +141,8 @@ def deliver_email(config: dict, *, to_email: str, subject: str, body: str, reply
         ],
         "custom_args": {"kind": kind},
     }
+    if attachments:
+        payload["attachments"] = attachments
     if config.get("EMAIL_REPLY_TO"):
         payload["reply_to"] = {"email": config["EMAIL_REPLY_TO"]}
     req = request.Request(

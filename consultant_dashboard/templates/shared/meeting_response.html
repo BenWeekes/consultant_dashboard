@@ -1,0 +1,53 @@
+{% extends "shared/base.html" %}
+{% block body %}
+  <div class="card" style="max-width: 760px; margin: 32px auto;">
+    {% if expired %}
+      <div class="panel-title">
+        <div class="panel-kicker">Meeting link expired</div>
+        <h1>{{ brand }}</h1>
+      </div>
+      <div class="muted">This meeting link is no longer active.</div>
+    {% else %}
+      <div class="panel-title">
+        <h1>{{ meeting.title }}</h1>
+      </div>
+      <div class="section-stack" style="margin-top: 18px;">
+        <div class="summary-card">
+          <h3>With</h3>
+          <div class="summary-copy">{{ meeting.consultant_name if meeting_type_display == "Human" else "AI Consultant" }}</div>
+        </div>
+        <div class="summary-card">
+          <h3>When</h3>
+          <div class="summary-copy">{{ meeting.scheduled_start_at|display_dt }}</div>
+        </div>
+      </div>
+      {% if meeting.invite_message %}
+        <div class="summary-card" style="margin-top: 14px;">
+          <h3>Message</h3>
+          <div class="summary-copy">{{ meeting.invite_message }}</div>
+        </div>
+      {% endif %}
+
+      <div class="actions" style="margin-top: 22px;">
+        {% if meeting.status in ['scheduled', 'client_viewed'] and not is_ai_meeting %}
+          <form method="post">
+            <input type="hidden" name="action" value="{{ 'accept_join' if immediate_join else 'accept' }}">
+            <button type="submit">{{ "Accept and join now" if immediate_join else "Accept" }}</button>
+          </form>
+          <form method="post">
+            <input type="hidden" name="action" value="decline">
+            <button type="submit" class="button-secondary">Decline</button>
+          </form>
+        {% endif %}
+        {% if join_url %}
+          <a href="{{ join_url }}" class="button-secondary" target="_blank" rel="noopener">{{ join_label }}</a>
+        {% endif %}
+        {% if add_to_calendar_url %}
+          <a href="{{ add_to_calendar_url }}" class="button-secondary">Add to calendar</a>
+        {% endif %}
+      </div>
+
+      <div class="muted" style="margin-top: 18px;">Status: {{ meeting.status.replace('_', ' ') }}</div>
+    {% endif %}
+  </div>
+{% endblock %}

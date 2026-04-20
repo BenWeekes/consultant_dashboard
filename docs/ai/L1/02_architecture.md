@@ -14,9 +14,11 @@ It owns:
 - audit log storage
 - encrypted storage references for summaries, biomarker aggregates, and alerts
 - client messaging threads and secure reply links
+- meeting scheduling, hosted meeting response pages, and meeting review pages
 - internal APIs for:
   - client resolution
   - start-of-session context fetch
+  - meeting join authorization
   - end-of-call ingestion
 
 It does not own:
@@ -33,10 +35,12 @@ Those stay in sibling services such as `simple-backend` and `server-custom-llm`.
 ```text
 simple-backend ----signed GET----> consultant-dashboard /internal/resolve-client
 simple-backend ----signed GET----> consultant-dashboard /internal/client-context
+simple-backend ----signed POST---> consultant-dashboard /internal/authorize-meeting-join
 server-custom-llm -signed POST---> consultant-dashboard /internal/session-complete
 
 consultant/admin browser ---> consultant-dashboard web routes
 client secure reply link -> consultant-dashboard /client/messages/<token>
+client meeting link -----> consultant-dashboard /meetings/respond/<token>
 client browser -----------> simple-backend auth + react client
 
 consultant-dashboard
@@ -125,6 +129,27 @@ Important current behavior:
 - outbound message metadata does not store the raw reply URL
 - the client WebSocket path now enforces the same access-link expiry rule as the HTTP reply page
 - the current chat UI auto-refreshes on thread updates, but notification delivery is still immediate rather than presence-aware
+
+### Consultant live meetings
+
+1. Consultant schedules a meeting from the client detail page.
+2. Service creates:
+   - a `scheduled_meetings` row
+   - the associated `client_access_links` row used by the hosted response page
+   - an invite email with ICS when delivery is configured
+3. Client opens `/meetings/respond/<token>` and accepts or declines.
+4. Consultant join goes through a short-lived signed bootstrap URL back into the React client.
+5. Client join goes through the hosted response page token.
+6. `simple-backend` sends signed `POST /internal/authorize-meeting-join`.
+7. This service authorizes join based on current meeting state, time window, participant role, and ownership.
+8. `simple-backend` mints RTC/RTM tokens only after authorization succeeds.
+9. `server-custom-llm` runs in generic `meeting_mode` and posts deterministic completion artifacts back through `/internal/session-complete`.
+
+Phase-1 meeting behavior:
+
+- consultant and client both see the client's biomarkers
+- consultant biomarkers are not captured
+- meetings remain first-class records and also create linked `sessions` rows on completion
 
 ## Storage Model
 

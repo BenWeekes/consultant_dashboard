@@ -9,6 +9,8 @@ consultant-dashboard/
 ├── AGENTS.md
 ├── CLAUDE.md
 ├── docs/ai/
+├── scripts/
+│   └── run_reminders.py
 ├── config/
 │   └── admin_auth.conf.example
 ├── consultant_dashboard/
@@ -18,6 +20,7 @@ consultant-dashboard/
 │   │   ├── config.py
 │   │   ├── db.py
 │   │   ├── internal_api.py
+│   │   ├── meetings.py
 │   │   ├── schema.sql
 │   │   ├── storage.py
 │   │   └── web.py
@@ -81,8 +84,26 @@ Use for:
 - signed service-to-service APIs
 - client resolution
 - client context reads
+- meeting join authorization
+- reminder sweep trigger
 - end-of-call session ingestion
 - baseline computation during ingestion
+
+### `consultant_dashboard/core/meetings.py`
+
+Use for:
+
+- meeting channel generation
+- join-window math
+- signed consultant join bootstrap creation and verification
+- signed meeting-response token helpers
+
+### `scripts/run_reminders.py`
+
+Use for:
+
+- signed cron/scheduler-triggered reminder runs
+- local manual reminder sweeps against `/internal/run-reminders`
 
 ### `consultant_dashboard/core/storage.py`
 
@@ -98,6 +119,7 @@ Use for:
 
 - consultant/admin dashboards
 - client list/detail pages
+- meeting scheduling/detail/response pages
 - session list/detail pages
 - admin consultant management
 
@@ -107,6 +129,7 @@ Shared layout:
 
 - `templates/shared/base.html`
 - `templates/shared/home.html`
+- `templates/shared/meeting_response.html`
 
 Consultant views:
 
@@ -115,6 +138,9 @@ Consultant views:
 - `templates/consultant/dashboard.html`
 - `templates/consultant/clients.html`
 - `templates/consultant/client_detail.html`
+- `templates/consultant/meeting_new.html`
+- `templates/consultant/meeting_detail.html`
+- `templates/consultant/meetings.html`
 - `templates/consultant/sessions.html`
 - `templates/consultant/session_detail.html`
 
@@ -136,6 +162,8 @@ Best first stops:
 - broad sanity check: `tests/test_smoke.py`
 - internal signing/ingestion work: `tests/test_internal_api.py`
 - login and dashboard flow work: `tests/test_web_dashboard.py`
+- meeting scheduling and hosted response page flow: `tests/test_web_dashboard.py`
+- meeting authorization and completion linkage: `tests/test_internal_api.py`
 
 ## Where To Edit
 

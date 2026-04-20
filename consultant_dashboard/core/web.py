@@ -1,15 +1,23 @@
+import base64
 import sqlite3
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+from zoneinfo import ZoneInfo
 
-from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, session, url_for
+from flask import Blueprint, Response, abort, current_app, flash, redirect, render_template, request, session, url_for
 from flask import jsonify
 
 from .auth import require_admin, require_consultant
 from .db import (
+    cancel_scheduled_meeting,
+    complete_scheduled_meeting,
     create_client_access_link,
     create_client_message,
     create_client,
     create_consultant,
+    create_scheduled_meeting,
+    delete_scheduled_meeting,
     deactivate_client,
     deactivate_consultant,
     delete_session,
@@ -18,15 +26,31 @@ from .db import (
     get_consultant_by_id,
     get_db,
     get_latest_session_artifacts,
+    get_meeting_by_response_access_link_id,
+    get_scheduled_meeting_detail,
+    get_scheduled_meeting,
     get_session_detail,
+    find_open_meeting_for_pair,
+    get_client_access_link_by_id,
+    list_meeting_events,
+    list_active_meetings_for_reminders,
+    list_meetings_for_client,
     list_recent_biomarker_keys,
     list_clients_for_consultant,
     list_client_messages,
+    list_meetings_for_consultant,
     list_consultants,
     list_sessions,
     list_sessions_for_client,
     log_audit,
+    mark_meeting_no_show,
     mark_client_access_link_used,
+    mark_client_messages_read,
+    record_meeting_event,
+    update_meeting_invite_delivery,
+    update_meeting_response_status,
+    mark_meeting_participant_left,
+    mark_meeting_reminder_sent,
     update_client,
     update_client_context,
     update_client_password,
@@ -37,6 +61,8 @@ from .db import (
 from .client_identity import build_identity_hashes
 from .messaging import (
     build_delivery_content,
+    build_meeting_ics,
+    build_meeting_response_link,
     build_reply_link,
     choose_delivery_channel,
     default_expiry,
@@ -44,6 +70,15 @@ from .messaging import (
     deliver_sms,
     hash_access_token,
     new_access_token,
+)
+from .meetings import (
+    build_join_window,
+    get_pair_channel,
+    iso_utc,
+    make_signed_join_bootstrap,
+    make_signed_meeting_access_token,
+    utc_now,
+    verify_signed_meeting_access_token,
 )
 from .phone_numbers import country_options, infer_country_code, local_display_number, normalize_phone
 from .realtime import publish_client_thread_update
@@ -60,8 +95,395 @@ def _phone_form_value(phone_number: str):
     }
 
 
+def _parse_iso_utc(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
 def _storage() -> EncryptedStorage:
     return EncryptedStorage(current_app.config["STORAGE_ROOT"], current_app.config["MASTER_KEY"])
+
+
+def _client_app_base_url() -> str:
+    return current_app.config["CLIENT_APP_URL"].rstrip("/")
+
+
+def _client_profile_name() -> str:
+    return current_app.config.get("CLIENT_PROFILE", "therapy").strip() or "therapy"
+
+
+def _build_client_join_bootstrap(meeting_id: str, access_link_id: str) -> str:
+    payload = {
+        "meeting_id": meeting_id,
+        "response_access_link_id": access_link_id,
+        "participant_role": "guest",
+        "exp": int(time.time()) + 300,
+    }
+    return make_signed_join_bootstrap(current_app.config["INTERNAL_SHARED_SECRET"], payload)
+
+
+def _build_client_join_url(token: str) -> str:
+    return url_for("web.meeting_response_join", token=token)
+
+
+def _build_signed_meeting_response_token(link) -> str:
+    expires_at = _parse_iso_datetime(link["expires_at"])
+    exp = int(expires_at.timestamp()) if expires_at else int(time.time()) + (24 * 3600)
+    return make_signed_meeting_access_token(
+        current_app.config["INTERNAL_SHARED_SECRET"],
+        link["id"],
+        exp,
+    )
+
+
+def _resolve_meeting_access(db, token: str):
+    link = get_client_access_link_by_hash(db, hash_access_token(token))
+    if link:
+        expires_at = _parse_iso_datetime(link["expires_at"])
+        if expires_at and expires_at < datetime.now(timezone.utc):
+            return None, None, 410
+        meeting = get_meeting_by_response_access_link_id(db, link["id"])
+        return link, meeting, None
+
+    signed = verify_signed_meeting_access_token(current_app.config["INTERNAL_SHARED_SECRET"], token)
+    if not signed:
+        return None, None, 404
+    link = get_client_access_link_by_id(db, signed.get("response_access_link_id", ""))
+    if not link:
+        return None, None, 404
+    expires_at = _parse_iso_datetime(link["expires_at"])
+    if expires_at and expires_at < datetime.now(timezone.utc):
+        return None, None, 410
+    meeting = get_meeting_by_response_access_link_id(db, link["id"])
+    return link, meeting, None
+
+
+def _build_ai_join_url(meeting_id: str = "") -> str:
+    suffix = f"&scheduled_meeting_id={meeting_id}" if meeting_id else ""
+    return f"{_client_app_base_url()}/?profile={_client_profile_name()}&autoconnect=true{suffix}"
+
+
+def _default_transcription_provider(meeting_type: str) -> str:
+    return "agora_stt" if (meeting_type or "").strip().lower() == "human" else ""
+
+
+def _default_transcription_language() -> str:
+    return "en-US"
+
+
+def _build_consultant_join_bootstrap(meeting_id: str, consultant_id: str, channel_name: str) -> str:
+    payload = {
+        "meeting_id": meeting_id,
+        "consultant_id": consultant_id,
+        "channel_name": channel_name,
+        "participant_role": "host",
+        "exp": int(time.time()) + (8 * 60 * 60),
+    }
+    return make_signed_join_bootstrap(current_app.config["INTERNAL_SHARED_SECRET"], payload)
+
+
+def _meeting_is_open_status(status: str) -> bool:
+    return status in {"scheduled", "client_viewed", "accepted", "in_progress"}
+
+
+def _meeting_type_display(meeting_type: str) -> str:
+    return "AI" if (meeting_type or "").strip().lower() == "ai" else "Human"
+
+
+def _meeting_field(meeting, key: str, default=""):
+    if isinstance(meeting, dict):
+        return meeting.get(key, default)
+    try:
+        return meeting[key]
+    except Exception:
+        return default
+
+
+def _meeting_is_joinable_for_host(meeting, now: Optional[datetime] = None) -> bool:
+    if not meeting or meeting["status"] not in {"scheduled", "client_viewed", "accepted", "in_progress"}:
+        return False
+    now = now or datetime.now(timezone.utc)
+    join_start = _parse_iso_datetime(meeting["join_window_start_at"])
+    join_end = _parse_iso_datetime(meeting["join_window_end_at"])
+    if join_start and now < join_start:
+        return False
+    if join_end and now > join_end:
+        return False
+    return True
+
+
+def _meeting_is_window_expired(meeting, now: Optional[datetime] = None) -> bool:
+    now = now or datetime.now(timezone.utc)
+    join_end = _parse_iso_datetime(meeting["join_window_end_at"])
+    return bool(join_end and now > join_end)
+
+
+def _meeting_is_stale_open(meeting, now: Optional[datetime] = None) -> bool:
+    return _meeting_is_open_status(meeting["status"]) and _meeting_is_window_expired(meeting, now=now)
+
+
+def _meeting_status_display(meeting) -> str:
+    if _meeting_is_stale_open(meeting):
+        return "Expired"
+    status = _meeting_field(meeting, "status", "")
+    if status == "cancelled":
+        return "Cancelled"
+    if status == "declined":
+        return "Declined"
+    if status == "completed":
+        return "Past"
+    start_at = _parse_iso_datetime(_meeting_field(meeting, "scheduled_start_at", ""))
+    end_at = _parse_iso_datetime(_meeting_field(meeting, "scheduled_end_at", ""))
+    now = datetime.now(timezone.utc)
+    if start_at and end_at and start_at <= now <= end_at:
+        return "Meeting now"
+    if start_at and start_at > now:
+        return "Future"
+    if start_at and start_at <= now:
+        return "Past"
+    if status == "completed":
+        return "Past"
+    return status.replace("_", " ").title()
+
+
+def _decorate_meeting(meeting, now: Optional[datetime] = None):
+    status_display = _meeting_status_display(meeting)
+    stale_open = _meeting_is_stale_open(meeting, now=now)
+    decorated = dict(meeting)
+    decorated["status_display"] = status_display
+    decorated["stale_open"] = stale_open
+    decorated["is_live_display"] = status_display == "Meeting now"
+    decorated["meeting_type_display"] = _meeting_type_display(_meeting_field(meeting, "meeting_type", "human"))
+    decorated["repeat_weekly_display"] = bool(_meeting_field(meeting, "repeat_weekly", 0))
+    decorated["transcription_enabled_display"] = bool(_meeting_field(meeting, "transcription_enabled", 0))
+    decorated["audio_biomarkers_enabled_display"] = bool(_meeting_field(meeting, "audio_biomarkers_enabled", 1))
+    decorated["video_biomarkers_enabled_display"] = bool(_meeting_field(meeting, "video_biomarkers_enabled", 1))
+    return decorated
+
+
+def _normalize_next_meeting_fields(row: dict) -> None:
+    next_status = row.get("next_meeting_status")
+    next_time = row.get("next_meeting_at")
+    if next_status and next_time:
+        pseudo_meeting = {
+            "status": next_status,
+            "scheduled_start_at": next_time,
+            "scheduled_end_at": next_time,
+            "join_window_end_at": next_time,
+        }
+        status_display = _meeting_status_display(pseudo_meeting)
+        if status_display in {"Past", "Expired", "Cancelled", "Declined"}:
+            row["next_meeting_at"] = ""
+            row["next_meeting_status_display"] = ""
+        else:
+            row["next_meeting_status_display"] = status_display
+    else:
+        row["next_meeting_status_display"] = ""
+
+
+def _session_kind_display(session_kind: str) -> str:
+    if session_kind == "consultant_live_session":
+        return "Human"
+    if session_kind == "avatar_ai_session":
+        return "AI"
+    return session_kind.replace("_", " ").title()
+
+
+def _build_consultant_join_url(meeting_id: str, consultant_id: str, channel_name: str) -> str:
+    bootstrap = _build_consultant_join_bootstrap(meeting_id, consultant_id, channel_name)
+    return (
+        f"{_client_app_base_url()}/?meeting_mode=true&autoconnect=true"
+        f"&profile={_client_profile_name()}"
+        f"&join_bootstrap={bootstrap}"
+    )
+
+
+def _meeting_type_join_label(meeting_type: str) -> str:
+    return "Join AI Meeting" if (meeting_type or "").strip().lower() == "ai" else "Join Meeting"
+
+
+def _render_meeting_launch_page(*, join_url: str, return_url: str, heading: str, detail: str):
+    return render_template(
+        "shared/meeting_launch.html",
+        brand=current_app.config["BRAND_NAME"],
+        theme="consultant",
+        title=f"{current_app.config['BRAND_NAME']} | Opening Meeting",
+        join_url=join_url,
+        return_url=return_url,
+        heading=heading,
+        detail=detail,
+    )
+
+
+def _consultant_join_route(meeting_id: str) -> str:
+    return url_for("web.consultant_meeting_join", meeting_id=meeting_id)
+
+
+def _default_meeting_start_value(timezone_name: str) -> str:
+    tz_name = timezone_name or "Europe/London"
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = timezone.utc
+    local_now = datetime.now(tz).replace(second=0, microsecond=0)
+    return local_now.strftime("%Y-%m-%dT%H:%M")
+
+
+def _parse_meeting_schedule_form(form_defaults: dict):
+    timezone_name = form_defaults["timezone_name"] or "Europe/London"
+    start_at = datetime.fromisoformat(form_defaults["scheduled_start_at"])
+    if start_at.tzinfo is None:
+        try:
+            start_at = start_at.replace(tzinfo=ZoneInfo(timezone_name))
+        except Exception:
+            start_at = start_at.replace(tzinfo=timezone.utc)
+    start_at = start_at.astimezone(timezone.utc)
+    duration_minutes = int(form_defaults["duration_minutes"] or "30")
+    if duration_minutes < 5 or duration_minutes > 240:
+        raise ValueError("Meeting duration must be between 5 and 240 minutes.")
+    end_at = start_at + timedelta(minutes=duration_minutes)
+    return timezone_name, start_at, end_at
+
+
+def _is_immediate_schedule(start_at: datetime) -> bool:
+    return start_at <= (datetime.now(timezone.utc) + timedelta(minutes=1))
+
+
+def _create_meeting_from_form(db, *, consultant_id: str, client_id: str, form_defaults: dict):
+    timezone_name, start_at, end_at = _parse_meeting_schedule_form(form_defaults)
+    meeting_type = (form_defaults.get("meeting_type") or "human").strip().lower()
+    transcription_enabled = bool(form_defaults.get("transcription_enabled")) or meeting_type == "ai"
+    audio_biomarkers_enabled = bool(form_defaults.get("audio_biomarkers_enabled"))
+    video_biomarkers_enabled = bool(form_defaults.get("video_biomarkers_enabled"))
+    transcription_provider = (form_defaults.get("transcription_provider") or "").strip() if transcription_enabled else ""
+    transcription_language = (form_defaults.get("transcription_language") or "").strip() if transcription_enabled else ""
+    default_title = "MindFix AI session" if meeting_type == "ai" else "MindFix session"
+    existing_open = find_open_meeting_for_pair(
+        db,
+        consultant_id=consultant_id,
+        client_id=client_id,
+        meeting_type=meeting_type,
+    )
+    if existing_open:
+        existing_join_end = _parse_iso_utc(existing_open["join_window_end_at"]) or _parse_iso_utc(existing_open["scheduled_end_at"])
+        if existing_join_end and existing_join_end < utc_now():
+            complete_scheduled_meeting(
+                db,
+                meeting_id=existing_open["id"],
+                attendance_outcome=existing_open["attendance_outcome"] or "expired",
+                ended_by_role=existing_open["ended_by_role"] or "system",
+                ended_by_id=existing_open["ended_by_id"] or "",
+            )
+            existing_open = None
+        if existing_open:
+            if _is_immediate_schedule(start_at):
+                return existing_open["id"], True
+            raise ValueError("This client already has an active meeting. Complete or cancel it before scheduling another.")
+    access_token = new_access_token()
+    access_link_id = create_client_access_link(
+        db,
+        client_id=client_id,
+        created_by=consultant_id,
+        token_hash=hash_access_token(access_token),
+        expires_at=default_expiry(hours=24 * 30),
+    )
+    join_window_start_at, join_window_end_at = build_join_window(start_at, end_at)
+    meeting_id = create_scheduled_meeting(
+        db,
+        client_id=client_id,
+        consultant_id=consultant_id,
+        meeting_type=meeting_type,
+        repeat_weekly=bool(form_defaults.get("repeat_weekly")),
+        transcription_enabled=transcription_enabled,
+        audio_biomarkers_enabled=audio_biomarkers_enabled,
+        video_biomarkers_enabled=video_biomarkers_enabled,
+        transcription_provider=transcription_provider,
+        transcription_language=transcription_language,
+        title=form_defaults["title"] or default_title,
+        invite_message=form_defaults["invite_message"],
+        timezone_name=timezone_name,
+        scheduled_start_at=iso_utc(start_at),
+        scheduled_end_at=iso_utc(end_at),
+        join_window_start_at=iso_utc(join_window_start_at),
+        join_window_end_at=iso_utc(join_window_end_at),
+        channel_name=get_pair_channel(consultant_id, client_id, meeting_type),
+        response_access_link_id=access_link_id,
+    )
+    meeting = get_scheduled_meeting_detail(db, meeting_id, consultant_id=consultant_id)
+    delivery_status, delivery_error, _hosted_link = _send_meeting_invite(db, meeting, access_token)
+    record_meeting_event(
+        db,
+        meeting_id=meeting_id,
+        actor_type="consultant",
+        actor_id=consultant_id,
+        event_type="scheduled",
+        details={"delivery_status": delivery_status, "delivery_error": delivery_error},
+    )
+    return meeting_id, False
+
+
+def _refresh_meeting_invite_for_immediate_use(
+    db,
+    *,
+    meeting_id: str,
+    consultant_id: str,
+    client_id: str,
+    form_defaults: dict,
+):
+    timezone_name, start_at, end_at = _parse_meeting_schedule_form(form_defaults)
+    meeting_type = (form_defaults.get("meeting_type") or "human").strip().lower()
+    default_title = "MindFix AI session" if meeting_type == "ai" else "MindFix session"
+    access_token = new_access_token()
+    access_link_id = create_client_access_link(
+        db,
+        client_id=client_id,
+        created_by=consultant_id,
+        token_hash=hash_access_token(access_token),
+        expires_at=default_expiry(hours=24 * 30),
+    )
+    join_window_start_at, join_window_end_at = build_join_window(start_at, end_at)
+    db.execute(
+        """
+        UPDATE scheduled_meetings
+        SET title = ?,
+            invite_message = ?,
+            timezone_name = ?,
+            scheduled_start_at = ?,
+            scheduled_end_at = ?,
+            join_window_start_at = ?,
+            join_window_end_at = ?,
+            response_access_link_id = ?,
+            invite_delivery_status = 'pending',
+            invite_delivery_error = '',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (
+            form_defaults["title"] or default_title,
+            form_defaults["invite_message"],
+            timezone_name,
+            iso_utc(start_at),
+            iso_utc(end_at),
+            iso_utc(join_window_start_at),
+            iso_utc(join_window_end_at),
+            access_link_id,
+            meeting_id,
+        ),
+    )
+    meeting = get_scheduled_meeting_detail(db, meeting_id, consultant_id=consultant_id)
+    _send_meeting_invite(db, meeting, access_token)
+    record_meeting_event(
+        db,
+        meeting_id=meeting_id,
+        actor_type="consultant",
+        actor_id=consultant_id,
+        event_type="invite_resent",
+        details={"mode": "immediate_reuse"},
+    )
 
 
 def _message_preview_rows(db, client_id: str, consultant_id: str, limit: int = 20):
@@ -73,9 +495,202 @@ def _parse_iso_datetime(value: str):
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
     except ValueError:
         return None
+
+
+def _meeting_delivery_content(meeting, hosted_link: str, *, reminder_kind: str = ""):
+    start_label = _parse_iso_datetime(meeting["scheduled_start_at"])
+    start_text = start_label.strftime("%d %b %Y, %H:%M UTC") if start_label else meeting["scheduled_start_at"]
+    immediate = _is_immediate_meeting(meeting)
+    meeting_type = (meeting["meeting_type"] or "human").strip().lower()
+    if meeting_type == "ai":
+        if immediate:
+            body = (
+                f"{current_app.config['BRAND_NAME']} AI invites you to start a session now.\n\n"
+                f"Title: {meeting['title']}\n"
+                f"You can join the AI session any time using the meeting link below.\n"
+            )
+        else:
+            body = (
+                f"{current_app.config['BRAND_NAME']} AI has invited you to an AI session.\n\n"
+                f"When: {start_text}\n"
+                f"Title: {meeting['title']}\n"
+            )
+    elif immediate:
+        body = (
+            f"{meeting['consultant_name']} invites you to meet now.\n\n"
+            f"Title: {meeting['title']}\n"
+            f"They are waiting in the meeting now.\n"
+        )
+    else:
+        body = (
+            f"{meeting['consultant_name']} has invited you to a meeting.\n\n"
+            f"When: {start_text}\n"
+            f"Title: {meeting['title']}\n"
+        )
+    if meeting["invite_message"]:
+        body += f"\n{meeting['invite_message']}\n"
+    if reminder_kind == "24h":
+        body += "\nReminder: your meeting is within the next 24 hours.\n"
+    elif reminder_kind == "1m":
+        body += "\nReminder: it is time to join now.\n"
+    if not immediate:
+        body += f"\nOpen meeting details: {hosted_link}"
+    return body
+
+
+def _is_immediate_meeting(meeting) -> bool:
+    start_at = _parse_iso_datetime(meeting["scheduled_start_at"])
+    if not start_at:
+        return False
+    return start_at <= (datetime.now(timezone.utc) + timedelta(minutes=1))
+
+
+def _send_meeting_invite(db, meeting, access_token: str = "", *, reminder_kind: str = ""):
+    link = get_client_access_link_by_id(db, meeting["response_access_link_id"])
+    response_token = access_token or (_build_signed_meeting_response_token(link) if link else "")
+    hosted_link = build_meeting_response_link(current_app.config, response_token)
+    immediate = _is_immediate_meeting(meeting)
+    consultant_name = meeting["consultant_name"] or current_app.config["BRAND_NAME"]
+    meeting_type = (meeting["meeting_type"] or "human").strip().lower()
+    if meeting_type == "ai":
+        subject = (
+            f"Join {current_app.config['BRAND_NAME']} AI Now"
+            if immediate
+            else f"AI Meeting Invite from {current_app.config['BRAND_NAME']} AI"
+        )
+    else:
+        subject = (
+            f"Meet {consultant_name} Now"
+            if immediate
+            else f"Meeting Invite from {consultant_name}"
+        )
+    if reminder_kind == "24h":
+        subject = f"Reminder: {subject}"
+    elif reminder_kind == "1m":
+        subject = f"Join now: {subject}"
+    delivery_status = "not_sent"
+    delivery_error = "no_client_delivery_channel"
+    if meeting["client_email"]:
+        plain_text = _meeting_delivery_content(meeting, hosted_link, reminder_kind=reminder_kind)
+        if meeting_type == "ai":
+            cta = "Join AI Meeting"
+        else:
+            cta = "Join Meeting" if immediate else "Review and respond"
+        html_body = (
+            f"<p>{plain_text.replace(chr(10), '<br>')}</p>"
+            f"<p><a href=\"{hosted_link}\">{cta}</a></p>"
+            f"<p>Sent by {current_app.config['BRAND_NAME']}.</p>"
+        )
+        attachments = None
+        if not immediate and meeting_type == "human":
+            ics = build_meeting_ics(
+                uid=f"{meeting['id']}@mindfix.me",
+                title=meeting["title"],
+                description=_meeting_delivery_content(meeting, hosted_link, reminder_kind=reminder_kind),
+                start_at=meeting["scheduled_start_at"],
+                end_at=meeting["scheduled_end_at"],
+                hosted_url=hosted_link,
+                organizer_email=meeting["consultant_email"] or current_app.config["EMAIL_FROM"],
+                attendee_email=meeting["client_email"] or meeting["client_notification_email"] or "",
+            )
+            attachments = [
+                {
+                    "content": base64.b64encode(ics.encode("utf-8")).decode("ascii"),
+                    "filename": "mindfix-meeting.ics",
+                    "type": "text/calendar",
+                    "disposition": "attachment",
+                }
+            ]
+        delivery_status, delivery_error = deliver_email(
+            current_app.config,
+            to_email=meeting["client_email"],
+            subject=subject,
+            body=plain_text,
+            reply_link=hosted_link,
+            kind="meeting_invite",
+            html_override=html_body,
+            plain_text_override=plain_text,
+            attachments=attachments,
+        )
+    elif meeting["client_phone_number"]:
+        delivery_status, delivery_error = deliver_sms(
+            current_app.config,
+            to_phone=meeting["client_phone_number"],
+            body=f"You have a {current_app.config['BRAND_NAME']} {'meet now' if immediate else 'meeting invite'}.",
+            reply_link=hosted_link,
+        )
+    update_meeting_invite_delivery(
+        db,
+        meeting_id=meeting["id"],
+        delivery_status=delivery_status,
+        delivery_error=delivery_error,
+    )
+    record_meeting_event(
+        db,
+        meeting_id=meeting["id"],
+        actor_type="system",
+        actor_id="invite-delivery",
+        event_type=("invite_sent" if delivery_status == "sent" else "invite_failed") if not reminder_kind else ("reminder_sent" if delivery_status == "sent" else "reminder_failed"),
+        details={"delivery_status": delivery_status, "delivery_error": delivery_error, "reminder_kind": reminder_kind},
+    )
+    return delivery_status, delivery_error, hosted_link
+
+
+def run_due_meeting_reminders():
+    db = get_db(current_app.config)
+    now = datetime.now(timezone.utc)
+    sent = {"24h": 0, "1m": 0}
+    failed = {"24h": 0, "1m": 0}
+    skipped = 0
+
+    for meeting in list_active_meetings_for_reminders(db):
+        start_at = _parse_iso_datetime(meeting["scheduled_start_at"])
+        created_at = _parse_iso_datetime(meeting["created_at"])
+        if not start_at or not created_at:
+            continue
+        # Skip immediate/meet-now invites; reminders are only for scheduled meetings.
+        if start_at <= (created_at + timedelta(minutes=2)):
+            skipped += 1
+            continue
+
+        reminder_kind = ""
+        if not meeting["reminder_24h_sent_at"] and now >= (start_at - timedelta(hours=24)) and now < start_at:
+            reminder_kind = "24h"
+        elif not meeting["reminder_1m_sent_at"] and now >= (start_at - timedelta(minutes=1)) and now <= (start_at + timedelta(minutes=5)):
+            reminder_kind = "1m"
+        if not reminder_kind:
+            continue
+
+        delivery_status, delivery_error, _ = _send_meeting_invite(db, meeting, reminder_kind=reminder_kind)
+        if delivery_status == "sent" and mark_meeting_reminder_sent(db, meeting_id=meeting["id"], reminder_kind=reminder_kind):
+            sent[reminder_kind] += 1
+        else:
+            failed[reminder_kind] += 1
+            record_meeting_event(
+                db,
+                meeting_id=meeting["id"],
+                actor_type="system",
+                actor_id="reminder-runner",
+                event_type="reminder_failed",
+                details={"delivery_status": delivery_status, "delivery_error": delivery_error, "reminder_kind": reminder_kind},
+            )
+
+    db.commit()
+    db.close()
+    return {
+        "ok": True,
+        "sent_24h": sent["24h"],
+        "sent_1m": sent["1m"],
+        "failed_24h": failed["24h"],
+        "failed_1m": failed["1m"],
+        "skipped_immediate": skipped,
+    }
 
 
 def _serialize_message_rows(rows):
@@ -423,7 +1038,51 @@ def _consultant_dashboard_stats(db, consultant_id: str):
             """,
             (consultant_id,),
         ).fetchone()["c"],
+        "unread_messages": db.execute(
+            """
+            SELECT COUNT(*) AS c
+            FROM client_messages m
+            WHERE m.consultant_id = ?
+              AND m.direction = 'inbound'
+              AND m.read_by_consultant_at IS NULL
+            """,
+            (consultant_id,),
+        ).fetchone()["c"],
+        "avg_ai_duration_seconds": db.execute(
+            """
+            SELECT CAST(AVG(duration_seconds) AS INTEGER) AS avg_duration
+            FROM sessions
+            WHERE consultant_id = ?
+              AND session_kind = 'avatar_ai_session'
+              AND duration_seconds IS NOT NULL
+              AND duration_seconds > 0
+            """,
+            (consultant_id,),
+        ).fetchone()["avg_duration"],
+        "avg_human_duration_seconds": db.execute(
+            """
+            SELECT CAST(AVG(duration_seconds) AS INTEGER) AS avg_duration
+            FROM sessions
+            WHERE consultant_id = ?
+              AND session_kind = 'consultant_live_session'
+              AND duration_seconds IS NOT NULL
+              AND duration_seconds > 0
+            """,
+            (consultant_id,),
+        ).fetchone()["avg_duration"],
     }
+
+
+def _format_duration_stat(duration_seconds):
+    if not duration_seconds or duration_seconds <= 0:
+        return "—"
+    minutes, seconds = divmod(int(duration_seconds), 60)
+    if minutes >= 60:
+        hours, minutes = divmod(minutes, 60)
+        return f"{hours}h {minutes}m"
+    if seconds == 0:
+        return f"{minutes}m"
+    return f"{minutes}m {seconds}s"
 
 
 @web_bp.get("/home")
@@ -438,23 +1097,55 @@ def consultant_dashboard():
     db = get_db(current_app.config)
     consultant = get_consultant_by_id(db, consultant_id)
     stats = _consultant_dashboard_stats(db, consultant_id)
-    recent_clients = list_clients_for_consultant(db, consultant_id)[:5]
-    recent_sessions = list_sessions(db, consultant_id=consultant_id, limit=5)
     db.close()
+    stats["avg_ai_duration_display"] = _format_duration_stat(stats.get("avg_ai_duration_seconds"))
+    stats["avg_human_duration_display"] = _format_duration_stat(stats.get("avg_human_duration_seconds"))
     return render_template(
         "consultant/dashboard.html",
         brand=current_app.config["BRAND_NAME"],
         theme="consultant",
         stats=stats,
         consultant=consultant,
-        recent_clients=recent_clients,
-        recent_sessions=recent_sessions,
     )
 
 
 @web_bp.route("/consultant/clients", methods=["GET", "POST"])
 @require_consultant
 def consultant_clients():
+    consultant_id = session.get("consultant_id")
+    db = get_db(current_app.config)
+    clients = list_clients_for_consultant(db, consultant_id)
+    db.close()
+    decorated_clients = []
+    for client in clients:
+        row = dict(client)
+        _normalize_next_meeting_fields(row)
+        decorated_clients.append(row)
+    return render_template(
+        "consultant/clients.html",
+        brand=current_app.config["BRAND_NAME"],
+        theme="consultant",
+        clients=decorated_clients,
+    )
+
+
+def _render_consultant_client_new_form(*, form_defaults=None):
+    form_defaults = form_defaults or {
+        "phone_country_code": "US",
+        "escalation_phone_country_code": "US",
+    }
+    return render_template(
+        "consultant/client_new.html",
+        brand=current_app.config["BRAND_NAME"],
+        theme="consultant",
+        phone_countries=country_options(),
+        form_defaults=form_defaults,
+    )
+
+
+@web_bp.route("/consultant/clients/new", methods=["GET", "POST"])
+@require_consultant
+def consultant_client_new():
     consultant_id = session.get("consultant_id")
     db = get_db(current_app.config)
     form_defaults = {
@@ -472,54 +1163,26 @@ def consultant_clients():
             raw_phone_number = request.form.get("phone_number", "").strip()
             raw_escalation_phone = request.form.get("escalation_phone_number", "").strip()
             initial_password = request.form.get("initial_password", "").strip()
+            form_defaults = {
+                "display_name": display_name,
+                "email": email,
+                "initial_password": initial_password,
+                "phone_number": raw_phone_number,
+                "phone_country_code": phone_country_code,
+                "notification_email": request.form.get("notification_email", "").strip(),
+                "escalation_phone_number": raw_escalation_phone,
+                "escalation_phone_country_code": escalation_phone_country_code,
+                "notes": request.form.get("notes", "").strip(),
+                "direction": request.form.get("direction", "").strip(),
+            }
             if initial_password and (not email or not raw_phone_number):
                 flash("Email and phone number are required when setting a client password.", "error")
-                clients = list_clients_for_consultant(db, consultant_id)
-                form_defaults = {
-                    "display_name": display_name,
-                    "email": email,
-                    "initial_password": initial_password,
-                    "phone_number": raw_phone_number,
-                    "phone_country_code": phone_country_code,
-                    "notification_email": request.form.get("notification_email", "").strip(),
-                    "escalation_phone_number": raw_escalation_phone,
-                    "escalation_phone_country_code": escalation_phone_country_code,
-                    "notes": request.form.get("notes", "").strip(),
-                    "direction": request.form.get("direction", "").strip(),
-                }
                 db.close()
-                return render_template(
-                    "consultant/clients.html",
-                    brand=current_app.config["BRAND_NAME"],
-                    theme="consultant",
-                    clients=clients,
-                    phone_countries=country_options(),
-                    form_defaults=form_defaults,
-                )
+                return _render_consultant_client_new_form(form_defaults=form_defaults)
             if initial_password and len(initial_password) < 8:
                 flash("Initial password must be at least 8 characters.", "error")
-                clients = list_clients_for_consultant(db, consultant_id)
-                form_defaults = {
-                    "display_name": display_name,
-                    "email": email,
-                    "initial_password": initial_password,
-                    "phone_number": raw_phone_number,
-                    "phone_country_code": phone_country_code,
-                    "notification_email": request.form.get("notification_email", "").strip(),
-                    "escalation_phone_number": raw_escalation_phone,
-                    "escalation_phone_country_code": escalation_phone_country_code,
-                    "notes": request.form.get("notes", "").strip(),
-                    "direction": request.form.get("direction", "").strip(),
-                }
                 db.close()
-                return render_template(
-                    "consultant/clients.html",
-                    brand=current_app.config["BRAND_NAME"],
-                    theme="consultant",
-                    clients=clients,
-                    phone_countries=country_options(),
-                    form_defaults=form_defaults,
-                )
+                return _render_consultant_client_new_form(form_defaults=form_defaults)
             try:
                 phone_number = normalize_phone(raw_phone_number, phone_country_code) if raw_phone_number else ""
                 escalation_phone_number = (
@@ -529,28 +1192,8 @@ def consultant_clients():
                 )
             except ValueError as exc:
                 flash(str(exc), "error")
-                form_defaults = {
-                    "display_name": display_name,
-                    "email": email,
-                    "initial_password": initial_password,
-                    "phone_number": raw_phone_number,
-                    "phone_country_code": phone_country_code,
-                    "notification_email": request.form.get("notification_email", "").strip(),
-                    "escalation_phone_number": raw_escalation_phone,
-                    "escalation_phone_country_code": escalation_phone_country_code,
-                    "notes": request.form.get("notes", "").strip(),
-                    "direction": request.form.get("direction", "").strip(),
-                }
-                clients = list_clients_for_consultant(db, consultant_id)
                 db.close()
-                return render_template(
-                    "consultant/clients.html",
-                    brand=current_app.config["BRAND_NAME"],
-                    theme="consultant",
-                    clients=clients,
-                    phone_countries=country_options(),
-                    form_defaults=form_defaults,
-                )
+                return _render_consultant_client_new_form(form_defaults=form_defaults)
             notification_email = request.form.get("notification_email", "").strip() or email
             notes = request.form.get("notes", "").strip()
             direction = request.form.get("direction", "").strip()
@@ -580,16 +1223,8 @@ def consultant_clients():
             db.close()
             flash("Client created", "muted")
             return redirect(url_for("web.consultant_client_detail", client_id=client_id))
-    clients = list_clients_for_consultant(db, consultant_id)
     db.close()
-    return render_template(
-        "consultant/clients.html",
-        brand=current_app.config["BRAND_NAME"],
-        theme="consultant",
-        clients=clients,
-        phone_countries=country_options(),
-        form_defaults=form_defaults,
-    )
+    return _render_consultant_client_new_form(form_defaults=form_defaults)
 
 
 @web_bp.route("/consultant/clients/<client_id>", methods=["GET", "POST"])
@@ -601,6 +1236,13 @@ def consultant_client_detail(client_id: str):
     if not client:
         db.close()
         abort(404)
+    mark_client_messages_read(
+        db,
+        client_id=client_id,
+        reader="consultant",
+        consultant_id=consultant_id,
+    )
+    db.commit()
 
     if request.method == "POST":
         if request.form.get("form_name") == "send_message":
@@ -726,6 +1368,9 @@ def consultant_client_detail(client_id: str):
                 client = get_client_detail(db, client_id, consultant_id=consultant_id)
 
     sessions = list_sessions_for_client(db, client_id, limit=20)
+    meetings = list_meetings_for_client(db, client_id=client_id, consultant_id=consultant_id, limit=20)
+    now = datetime.now(timezone.utc)
+    meetings = [_decorate_meeting(meeting, now=now) for meeting in meetings]
     open_alerts = db.execute(
         """
         SELECT *
@@ -773,6 +1418,7 @@ def consultant_client_detail(client_id: str):
         theme="consultant",
         client=client,
         sessions=sessions,
+        meetings=meetings,
         open_alerts=open_alerts,
         auth_identity=auth_identity,
         latest_summary=latest_summary,
@@ -785,6 +1431,433 @@ def consultant_client_detail(client_id: str):
         phone_countries=country_options(),
         phone_form=_phone_form_value(client["phone_number"]),
         escalation_phone_form=_phone_form_value(client["escalation_phone_number"]),
+    )
+
+
+def _consultant_meeting_new_page(*, preselected_client_id: str = ""):
+    consultant_id = session.get("consultant_id")
+    db = get_db(current_app.config)
+    clients = list_clients_for_consultant(db, consultant_id)
+    selected_client_id = (request.values.get("client_id", "") or preselected_client_id or "").strip()
+    client = get_client_detail(db, selected_client_id, consultant_id=consultant_id) if selected_client_id else None
+    if selected_client_id and not client:
+        db.close()
+        abort(404)
+
+    form_defaults = {
+        "client_id": selected_client_id,
+        "title": "MindFix session",
+        "meeting_type": "human",
+        "repeat_weekly": False,
+        "transcription_enabled": True,
+        "audio_biomarkers_enabled": True,
+        "video_biomarkers_enabled": True,
+        "transcription_provider": _default_transcription_provider("human"),
+        "transcription_language": _default_transcription_language(),
+        "timezone_name": "Europe/London",
+        "duration_minutes": "30",
+        "invite_message": "",
+        "scheduled_start_at": _default_meeting_start_value("Europe/London"),
+    }
+    if request.method == "POST":
+        audio_biomarkers_enabled = (
+            "1" in request.form.getlist("audio_biomarkers_enabled")
+            if "audio_biomarkers_enabled" in request.form
+            else True
+        )
+        video_biomarkers_enabled = (
+            "1" in request.form.getlist("video_biomarkers_enabled")
+            if "video_biomarkers_enabled" in request.form
+            else True
+        )
+        transcription_enabled = (
+            "1" in request.form.getlist("transcription_enabled")
+            if "transcription_enabled" in request.form
+            else True
+        )
+        form_defaults.update({
+            "client_id": request.form.get("client_id", "").strip() or selected_client_id,
+            "title": request.form.get("title", "").strip(),
+            "meeting_type": (request.form.get("meeting_type", "human").strip() or "human").lower(),
+            "repeat_weekly": request.form.get("repeat_weekly") == "1",
+            "transcription_enabled": transcription_enabled,
+            "audio_biomarkers_enabled": audio_biomarkers_enabled,
+            "video_biomarkers_enabled": video_biomarkers_enabled,
+            "transcription_provider": request.form.get("transcription_provider", "").strip() or _default_transcription_provider("human"),
+            "transcription_language": request.form.get("transcription_language", "").strip() or _default_transcription_language(),
+            "timezone_name": request.form.get("timezone_name", "").strip() or "Europe/London",
+            "duration_minutes": request.form.get("duration_minutes", "30").strip(),
+            "invite_message": request.form.get("invite_message", "").strip(),
+            "scheduled_start_at": request.form.get("scheduled_start_at", "").strip(),
+        })
+        if form_defaults["meeting_type"] == "ai":
+            form_defaults["transcription_enabled"] = True
+            form_defaults["transcription_provider"] = request.form.get("transcription_provider", "").strip() or _default_transcription_provider("human")
+            form_defaults["transcription_language"] = request.form.get("transcription_language", "").strip() or _default_transcription_language()
+        try:
+            selected_client_id = form_defaults["client_id"].strip()
+            if not selected_client_id:
+                raise ValueError("Select a client before scheduling the meeting.")
+            client = get_client_detail(db, selected_client_id, consultant_id=consultant_id)
+            if not client:
+                raise ValueError("Selected client was not found.")
+            current_app.logger.info(
+                "meeting_form_submit consultant_id=%s client_id=%s type=%s start=%s repeat_weekly=%s stt=%s audio=%s video=%s",
+                consultant_id,
+                selected_client_id,
+                form_defaults.get("meeting_type"),
+                form_defaults.get("scheduled_start_at"),
+                form_defaults.get("repeat_weekly"),
+                form_defaults.get("transcription_enabled"),
+                form_defaults.get("audio_biomarkers_enabled"),
+                form_defaults.get("video_biomarkers_enabled"),
+            )
+            _timezone_name, requested_start_at, _requested_end_at = _parse_meeting_schedule_form(form_defaults)
+            immediate_request = _is_immediate_schedule(requested_start_at)
+            meeting_id, reused_existing = _create_meeting_from_form(
+                db,
+                consultant_id=consultant_id,
+                client_id=selected_client_id,
+                form_defaults=form_defaults,
+            )
+            if not reused_existing:
+                log_audit(
+                    db,
+                    actor_type="consultant",
+                    actor_id=consultant_id,
+                    action="meeting_scheduled",
+                    target_type="meeting",
+                    target_id=meeting_id,
+                    ip_address=request.headers.get("X-Forwarded-For", request.remote_addr or ""),
+                    user_agent=request.headers.get("User-Agent", ""),
+                    details={"client_id": selected_client_id},
+                )
+            db.commit()
+            db.close()
+            if reused_existing:
+                current_app.logger.info(
+                    "meeting_form_reused consultant_id=%s client_id=%s meeting_id=%s immediate=%s",
+                    consultant_id,
+                    selected_client_id,
+                    meeting_id,
+                    immediate_request,
+                )
+                if immediate_request:
+                    db = get_db(current_app.config)
+                    try:
+                        _refresh_meeting_invite_for_immediate_use(
+                            db,
+                            meeting_id=meeting_id,
+                            consultant_id=consultant_id,
+                            client_id=selected_client_id,
+                            form_defaults=form_defaults,
+                        )
+                        db.commit()
+                    except Exception:
+                        db.rollback()
+                        raise
+                    finally:
+                        db.close()
+                flash("This client already has an active meeting. Opening it now.", "muted")
+                if immediate_request and form_defaults.get("meeting_type") != "ai":
+                    launch_db = get_db(current_app.config)
+                    meeting = get_scheduled_meeting(launch_db, meeting_id)
+                    launch_db.close()
+                    if meeting:
+                        join_url = _build_consultant_join_url(meeting_id, consultant_id, meeting["channel_name"])
+                        return _render_meeting_launch_page(
+                            join_url=join_url,
+                            return_url=url_for("web.consultant_meeting_detail", meeting_id=meeting_id),
+                            heading="Opening meeting",
+                            detail="The meeting is opening in a new tab. Stay on this page to manage the meeting.",
+                        )
+                return redirect(url_for("web.consultant_meeting_detail", meeting_id=meeting_id))
+            current_app.logger.info(
+                "meeting_form_created consultant_id=%s client_id=%s meeting_id=%s immediate=%s",
+                consultant_id,
+                selected_client_id,
+                meeting_id,
+                immediate_request,
+            )
+            if immediate_request and form_defaults.get("meeting_type") != "ai":
+                db = get_db(current_app.config)
+                meeting = get_scheduled_meeting(db, meeting_id)
+                db.close()
+                flash("Meeting invite sent. Opening meeting now.", "muted")
+                return _render_meeting_launch_page(
+                    join_url=_build_consultant_join_url(meeting_id, consultant_id, meeting["channel_name"]),
+                    return_url=url_for("web.consultant_meeting_detail", meeting_id=meeting_id),
+                    heading="Opening meeting",
+                    detail="The meeting is opening in a new tab. Stay here to manage the invite and meeting details.",
+                )
+            flash("Meeting scheduled", "muted")
+            return redirect(url_for("web.consultant_meeting_detail", meeting_id=meeting_id))
+        except ValueError as exc:
+            db.rollback()
+            flash(str(exc), "error")
+
+    db.close()
+    return render_template(
+        "consultant/meeting_new.html",
+        brand=current_app.config["BRAND_NAME"],
+        theme="consultant",
+        client=client,
+        clients=clients,
+        form_defaults=form_defaults,
+    )
+
+
+@web_bp.route("/consultant/meetings/new", methods=["GET", "POST"])
+@require_consultant
+def consultant_meeting_new():
+    return _consultant_meeting_new_page()
+
+
+@web_bp.route("/consultant/clients/<client_id>/meetings/new", methods=["GET", "POST"])
+@require_consultant
+def consultant_client_meeting_new(client_id: str):
+    return _consultant_meeting_new_page(preselected_client_id=client_id)
+
+
+@web_bp.get("/consultant/meetings")
+@require_consultant
+def consultant_meetings():
+    consultant_id = session.get("consultant_id")
+    db = get_db(current_app.config)
+    meetings = list_meetings_for_consultant(db, consultant_id=consultant_id, limit=100)
+    db.close()
+    filter_name = (request.args.get("filter") or "all").strip().lower()
+    search = (request.args.get("q") or "").strip().lower()
+    now = datetime.now(timezone.utc)
+    meetings = [_decorate_meeting(meeting, now=now) for meeting in meetings]
+
+    def include(meeting):
+        status = meeting["status"]
+        start_at = _parse_iso_datetime(meeting["scheduled_start_at"])
+        if filter_name == "open":
+            return status in {"scheduled", "client_viewed", "accepted", "in_progress"} and not meeting.get("stale_open")
+        if filter_name == "upcoming":
+            return status in {"scheduled", "client_viewed", "accepted"} and start_at and start_at > now
+        if filter_name == "past":
+            return status == "completed" or meeting.get("stale_open")
+        if filter_name == "cancelled":
+            return status in {"cancelled", "declined"}
+        return True
+
+    meetings = [meeting for meeting in meetings if include(meeting)]
+    if search:
+        filtered = []
+        for meeting in meetings:
+            haystack = " ".join(
+                [
+                    meeting["client_name"] or "",
+                    meeting["title"] or "",
+                    meeting["status"] or "",
+                    meeting["scheduled_start_at"] or "",
+                ]
+            ).lower()
+            if search in haystack:
+                filtered.append(meeting)
+        meetings = filtered
+    return render_template(
+        "consultant/meetings.html",
+        brand=current_app.config["BRAND_NAME"],
+        theme="consultant",
+        meetings=meetings,
+        filter_name=filter_name,
+        search=search,
+    )
+
+
+@web_bp.route("/consultant/meetings/<meeting_id>", methods=["GET", "POST"])
+@require_consultant
+def consultant_meeting_detail(meeting_id: str):
+    consultant_id = session.get("consultant_id")
+    db = get_db(current_app.config)
+    meeting = get_scheduled_meeting_detail(db, meeting_id, consultant_id=consultant_id)
+    if not meeting:
+        db.close()
+        abort(404)
+
+    if request.method == "POST":
+        action = request.form.get("action", "").strip()
+        if action == "cancel":
+            if cancel_scheduled_meeting(db, meeting_id=meeting_id):
+                record_meeting_event(db, meeting_id=meeting_id, actor_type="consultant", actor_id=consultant_id, event_type="cancelled")
+                log_audit(
+                    db,
+                    actor_type="consultant",
+                    actor_id=consultant_id,
+                    action="meeting_cancelled",
+                    target_type="meeting",
+                    target_id=meeting_id,
+                )
+                db.commit()
+                flash("Meeting cancelled", "muted")
+            else:
+                flash("This meeting can no longer be cancelled.", "error")
+        elif action == "resend_invite":
+            access_token = new_access_token()
+            access_link_id = create_client_access_link(
+                db,
+                client_id=meeting["client_id"],
+                created_by=consultant_id,
+                token_hash=hash_access_token(access_token),
+                expires_at=default_expiry(hours=24 * 30),
+            )
+            db.execute(
+                "UPDATE scheduled_meetings SET response_access_link_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (access_link_id, meeting_id),
+            )
+            meeting = get_scheduled_meeting_detail(db, meeting_id, consultant_id=consultant_id)
+            _send_meeting_invite(db, meeting, access_token)
+            record_meeting_event(db, meeting_id=meeting_id, actor_type="consultant", actor_id=consultant_id, event_type="invite_resent")
+            db.commit()
+            flash("Invite resent", "muted")
+        elif action == "mark_no_show":
+            outcome = request.form.get("attendance_outcome", "client_no_show").strip()
+            if mark_meeting_no_show(db, meeting_id=meeting_id, attendance_outcome=outcome):
+                record_meeting_event(
+                    db,
+                    meeting_id=meeting_id,
+                    actor_type="consultant",
+                    actor_id=consultant_id,
+                    event_type="no_show_marked",
+                    details={"attendance_outcome": outcome},
+                )
+                db.commit()
+                flash("No-show recorded", "muted")
+            else:
+                flash("This meeting can no longer be marked as a no-show.", "error")
+        elif action == "delete":
+            if delete_scheduled_meeting(db, meeting_id=meeting_id):
+                log_audit(
+                    db,
+                    actor_type="consultant",
+                    actor_id=consultant_id,
+                    action="meeting_deleted",
+                    target_type="meeting",
+                    target_id=meeting_id,
+                )
+                db.commit()
+                db.close()
+                flash("Meeting deleted", "muted")
+                return redirect(url_for("web.consultant_meetings"))
+            flash("This meeting cannot be deleted right now.", "error")
+        meeting = get_scheduled_meeting_detail(db, meeting_id, consultant_id=consultant_id)
+
+    events = list_meeting_events(db, meeting_id)
+    linked_summary = None
+    linked_biomarkers = None
+    storage = _storage()
+    if meeting["summary_storage_key"]:
+        linked_summary = storage.get_json(meeting["summary_storage_key"], meeting["client_id"])
+    if meeting["biomarker_storage_key"]:
+        linked_biomarkers = storage.get_json(meeting["biomarker_storage_key"], meeting["client_id"])
+    biomarker_headlines = _build_latest_biomarker_highlights(linked_biomarkers)
+    biomarker_sections = _grouped_biomarker_sections(linked_biomarkers)
+    scheduled_start_at = _parse_iso_datetime(meeting["scheduled_start_at"])
+    now = datetime.now(timezone.utc)
+    is_now_meeting = bool(scheduled_start_at and scheduled_start_at <= now and meeting["status"] not in {"completed", "cancelled", "declined"})
+    is_ai_meeting = (meeting["meeting_type"] or "human").strip().lower() == "ai"
+    can_join = (not is_ai_meeting) and _meeting_is_joinable_for_host(meeting, now=now)
+    join_url = _consultant_join_route(meeting_id) if can_join else ""
+    can_cancel = meeting["status"] in {"scheduled", "client_viewed", "accepted"}
+    can_end = meeting["status"] == "in_progress"
+    can_delete = meeting["status"] != "in_progress"
+    db.close()
+    return render_template(
+        "consultant/meeting_detail.html",
+        brand=current_app.config["BRAND_NAME"],
+        theme="consultant",
+        meeting=meeting,
+        events=events,
+        join_url=join_url,
+        linked_summary=linked_summary,
+        biomarker_headlines=biomarker_headlines,
+        biomarker_sections=biomarker_sections,
+        can_join=can_join,
+        can_cancel=can_cancel,
+        can_end=can_end,
+        can_delete=can_delete,
+        is_now_meeting=is_now_meeting,
+        is_ai_meeting=is_ai_meeting,
+        meeting_type_display=_meeting_type_display(meeting["meeting_type"]),
+        join_label=_meeting_type_join_label(meeting["meeting_type"]),
+        status_display=_meeting_status_display(meeting),
+    )
+
+
+@web_bp.get("/consultant/meetings/<meeting_id>/join")
+@require_consultant
+def consultant_meeting_join(meeting_id: str):
+    consultant_id = session.get("consultant_id")
+    db = get_db(current_app.config)
+    meeting = get_scheduled_meeting_detail(db, meeting_id, consultant_id=consultant_id)
+    db.close()
+    if not meeting:
+        abort(404)
+    if (meeting["meeting_type"] or "human").strip().lower() == "ai":
+        flash("AI meetings are joined from the client invite link.", "error")
+        return redirect(url_for("web.consultant_meeting_detail", meeting_id=meeting_id))
+    if not _meeting_is_joinable_for_host(meeting):
+        flash("This meeting is not available to join right now.", "error")
+        return redirect(url_for("web.consultant_meeting_detail", meeting_id=meeting_id))
+    return redirect(_build_consultant_join_url(meeting_id, consultant_id, meeting["channel_name"]))
+
+
+@web_bp.get("/meetings/respond/<token>/join")
+def meeting_response_join(token: str):
+    db = get_db(current_app.config)
+    link, meeting, error_status = _resolve_meeting_access(db, token)
+    if error_status == 404:
+        db.close()
+        abort(404)
+    if error_status == 410:
+        db.close()
+        abort(410)
+    db.close()
+    if not meeting:
+        abort(404)
+    if (meeting["meeting_type"] or "human").strip().lower() == "ai":
+        join_url = _build_ai_join_url(meeting["id"])
+    else:
+        join_url = (
+            f"{_client_app_base_url()}/?meeting_mode=true&autoconnect=true"
+            f"&profile={_client_profile_name()}"
+            f"&join_bootstrap={_build_client_join_bootstrap(meeting['id'], link['id'])}"
+        )
+    return redirect(join_url)
+
+
+@web_bp.get("/meetings/respond/<token>/invite.ics")
+def meeting_response_ics(token: str):
+    db = get_db(current_app.config)
+    link, meeting, error_status = _resolve_meeting_access(db, token)
+    if error_status == 404:
+        db.close()
+        abort(404)
+    if error_status == 410:
+        db.close()
+        abort(410)
+    db.close()
+    if not meeting:
+        abort(404)
+    hosted_link = build_meeting_response_link(current_app.config, token)
+    ics = build_meeting_ics(
+        uid=f"{meeting['id']}@mindfix.me",
+        title=meeting["title"],
+        description=_meeting_delivery_content(meeting, hosted_link),
+        start_at=meeting["scheduled_start_at"],
+        end_at=meeting["scheduled_end_at"],
+        hosted_url=hosted_link,
+        organizer_email=meeting["consultant_email"] or current_app.config["EMAIL_FROM"],
+        attendee_email=meeting["client_email"] or meeting["client_notification_email"] or "",
+    )
+    return Response(
+        ics,
+        mimetype="text/calendar",
+        headers={"Content-Disposition": f'attachment; filename="{meeting["id"]}.ics"'},
     )
 
 
@@ -959,6 +2032,103 @@ def client_message_portal_thread(token: str):
     return jsonify({"messages": messages})
 
 
+@web_bp.route("/meetings/respond/<token>", methods=["GET", "POST"])
+def meeting_response_page(token: str):
+    db = get_db(current_app.config)
+    link, meeting, error_status = _resolve_meeting_access(db, token)
+    if error_status == 404:
+        db.close()
+        abort(404)
+    if error_status == 410:
+        db.close()
+        return render_template(
+            "shared/meeting_response.html",
+            brand=current_app.config["BRAND_NAME"],
+            expired=True,
+            meeting=None,
+            join_url="",
+        ), 410
+    if not meeting:
+        db.close()
+        abort(404)
+
+    if meeting["status"] == "scheduled":
+        db.execute(
+            "UPDATE scheduled_meetings SET status = 'client_viewed', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (meeting["id"],),
+        )
+        record_meeting_event(
+            db,
+            meeting_id=meeting["id"],
+            actor_type="guest",
+            actor_id=meeting["client_id"],
+            event_type="client_viewed",
+        )
+        db.commit()
+        meeting = get_meeting_by_response_access_link_id(db, link["id"])
+
+    is_ai_meeting = (meeting["meeting_type"] or "human").strip().lower() == "ai"
+
+    if request.method == "POST":
+        action = request.form.get("action", "").strip()
+        if action in {"accept", "accept_join"}:
+            if update_meeting_response_status(db, meeting_id=meeting["id"], status="accepted"):
+                record_meeting_event(db, meeting_id=meeting["id"], actor_type="guest", actor_id=meeting["client_id"], event_type="accepted")
+                db.commit()
+                if action == "accept_join":
+                    return _render_meeting_launch_page(
+                        join_url=url_for("web.meeting_response_join", token=token),
+                        return_url=url_for("web.meeting_response_page", token=token),
+                        heading="Opening meeting",
+                        detail="The meeting is opening in a new tab. You can return here if you need the invite details again.",
+                    )
+                flash("Meeting accepted", "muted")
+            else:
+                flash("This meeting can no longer be accepted.", "error")
+        elif action == "decline":
+            if update_meeting_response_status(db, meeting_id=meeting["id"], status="declined"):
+                record_meeting_event(db, meeting_id=meeting["id"], actor_type="guest", actor_id=meeting["client_id"], event_type="declined")
+                db.commit()
+                flash("Meeting declined", "muted")
+            else:
+                flash("This meeting can no longer be declined.", "error")
+        meeting = get_meeting_by_response_access_link_id(db, link["id"])
+
+    now = utc_now()
+    join_start = _parse_iso_datetime(meeting["join_window_start_at"])
+    join_end = _parse_iso_datetime(meeting["join_window_end_at"])
+    guest_join_start = _parse_iso_datetime(meeting["scheduled_start_at"])
+    if guest_join_start:
+        guest_join_start = guest_join_start - timedelta(minutes=10)
+    immediate_join = bool(
+        not is_ai_meeting
+        and meeting["status"] in {"scheduled", "client_viewed"}
+        and (not guest_join_start or now >= guest_join_start)
+        and (not join_end or now <= join_end)
+    )
+    join_url = ""
+    if is_ai_meeting and meeting["status"] not in {"cancelled", "declined", "completed"}:
+        join_url = _build_ai_join_url(meeting["id"])
+    elif meeting["status"] in {"accepted", "in_progress"} and (not guest_join_start or now >= guest_join_start) and (not join_end or now <= join_end):
+        join_url = _build_client_join_url(token)
+    add_to_calendar_url = ""
+    if meeting["status"] in {"accepted", "in_progress"} and not _is_immediate_meeting(meeting) and not is_ai_meeting:
+        add_to_calendar_url = url_for("web.meeting_response_ics", token=token)
+    db.close()
+    return render_template(
+        "shared/meeting_response.html",
+        brand=current_app.config["BRAND_NAME"],
+        expired=False,
+        meeting=meeting,
+        join_url=join_url,
+        immediate_join=immediate_join,
+        add_to_calendar_url=add_to_calendar_url,
+        join_label=_meeting_type_join_label(meeting["meeting_type"]),
+        meeting_type_display=_meeting_type_display(meeting["meeting_type"]),
+        is_ai_meeting=is_ai_meeting,
+    )
+
+
 @web_bp.post("/consultant/clients/<client_id>/delete")
 @require_consultant
 def consultant_client_delete(client_id: str):
@@ -992,11 +2162,16 @@ def consultant_sessions():
     db = get_db(current_app.config)
     sessions = list_sessions(db, consultant_id=consultant_id, limit=100)
     db.close()
+    decorated_sessions = []
+    for session_row in sessions:
+        row = dict(session_row)
+        row["session_kind_display"] = _session_kind_display(row.get("session_kind", ""))
+        decorated_sessions.append(row)
     return render_template(
         "consultant/sessions.html",
         brand=current_app.config["BRAND_NAME"],
         theme="consultant",
-        sessions=sessions,
+        sessions=decorated_sessions,
     )
 
 
@@ -1034,12 +2209,28 @@ def consultant_session_detail(session_id: str):
 
     storage = _storage()
     summary = None
+    transcript = None
+    transcript_text = ""
     biomarkers = None
     baseline = None
     biomarker_sections = []
     biomarker_headlines = []
     if session_row["summary_storage_key"]:
         summary = storage.get_json(session_row["summary_storage_key"], session_row["client_id"])
+    if session_row["transcript_storage_key"]:
+        transcript = storage.get_json(session_row["transcript_storage_key"], session_row["client_id"])
+        if isinstance(transcript, dict):
+            text = transcript.get("text")
+            if isinstance(text, str):
+                transcript_text = text.strip()
+            elif isinstance(transcript.get("lines"), list):
+                transcript_text = "\n".join(
+                    str(line.get("text", "")).strip()
+                    for line in transcript["lines"]
+                    if isinstance(line, dict) and str(line.get("text", "")).strip()
+                ).strip()
+        elif isinstance(transcript, str):
+            transcript_text = transcript.strip()
     if session_row["biomarker_storage_key"]:
         biomarkers = storage.get_json(session_row["biomarker_storage_key"], session_row["client_id"])
         biomarker_headlines = _build_latest_biomarker_highlights(biomarkers)
@@ -1055,13 +2246,20 @@ def consultant_session_detail(session_id: str):
         """,
         (session_id,),
     ).fetchall()
+    messages = _message_preview_rows(db, session_row["client_id"], consultant_id, limit=50)
     db.close()
     return render_template(
         "consultant/session_detail.html",
         brand=current_app.config["BRAND_NAME"],
         theme="consultant",
         session_row=session_row,
+        session_kind_display=_session_kind_display(session_row["session_kind"]),
         summary=summary,
+        transcript=transcript,
+        transcript_text=transcript_text,
+        transcript_enabled=bool(session_row["transcription_enabled"]),
+        audio_biomarkers_enabled=bool(session_row["audio_biomarkers_enabled"]),
+        video_biomarkers_enabled=bool(session_row["video_biomarkers_enabled"]),
         biomarkers=biomarkers,
         baseline=baseline,
         biomarker_headlines=biomarker_headlines,
@@ -1069,6 +2267,7 @@ def consultant_session_detail(session_id: str):
         alerts=alerts,
         client_notes=session_row["notes_current"],
         client_direction=session_row["direction_current"],
+        messages=messages,
     )
 
 

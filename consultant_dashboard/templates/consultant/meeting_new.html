@@ -1,0 +1,188 @@
+{% extends "shared/base.html" %}
+{% block body %}
+  {% include "consultant/_nav.html" %}
+
+  <div class="card" style="max-width: 760px; margin: 0 auto;">
+    <div class="panel-head">
+      <div class="panel-title">
+        <div class="panel-kicker" id="meeting-mode-kicker">New Meeting</div>
+        <h1>{{ client.display_name if client else "New Meeting" }}</h1>
+      </div>
+    </div>
+
+    <style>
+      .meeting-grid-2 {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+        align-items: end;
+      }
+      .meeting-grid-3 {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+        align-items: end;
+      }
+      .meeting-inline-toggles {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px 24px;
+        align-items: center;
+      }
+      .meeting-inline-toggles .toggle-option {
+        margin-top: 0 !important;
+        white-space: nowrap;
+      }
+      @media (max-width: 720px) {
+        .meeting-grid-2,
+        .meeting-grid-3 {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+    <form method="post" class="section-stack">
+      <label class="field-label">Client</label>
+      <select name="client_id" required>
+        <option value="">Select a client</option>
+        {% for row in clients %}
+          <option value="{{ row.id }}" {% if form_defaults.client_id == row.id %}selected{% endif %}>{{ row.display_name }}{% if row.email %} · {{ row.email }}{% elif row.phone_number %} · {{ row.phone_number }}{% endif %}</option>
+        {% endfor %}
+      </select>
+
+      <label class="field-label">Title</label>
+      <input id="meeting_title" name="title" value="{{ form_defaults.title or '' }}" required>
+
+      <label class="field-label">Meeting type</label>
+      <div class="toggle-row">
+        <label class="toggle-option">
+          <input type="radio" name="meeting_type" value="human" {% if form_defaults.meeting_type != 'ai' %}checked{% endif %}>
+          <span>Human</span>
+        </label>
+        <label class="toggle-option">
+          <input type="radio" name="meeting_type" value="ai" {% if form_defaults.meeting_type == 'ai' %}checked{% endif %}>
+          <span>AI</span>
+        </label>
+      </div>
+
+      <div class="meeting-grid-3">
+        <div>
+          <label class="field-label">Date and Time</label>
+          <input id="scheduled_start_at" name="scheduled_start_at" type="datetime-local" value="{{ form_defaults.scheduled_start_at or '' }}" required>
+        </div>
+        <div>
+          <label class="field-label">Duration (minutes)</label>
+          <input name="duration_minutes" type="number" min="5" max="240" value="{{ form_defaults.duration_minutes or '30' }}" required>
+        </div>
+        <div>
+          <label class="toggle-option" style="margin-top: 0;">
+            <input type="checkbox" name="repeat_weekly" value="1" {% if form_defaults.repeat_weekly %}checked{% endif %}>
+            <span>Repeat Weekly</span>
+          </label>
+        </div>
+      </div>
+      <div class="field-help">Defaults to now in Europe/London. Leave it as-is for a meeting that can start right away, or change it to schedule ahead.</div>
+
+      <label class="field-label">Invite message</label>
+      <textarea name="invite_message" rows="2">{{ form_defaults.invite_message or '' }}</textarea>
+      <div class="field-help">For meetings starting now, the email lets the client join right away while you wait in the meeting. For future meetings, they can accept, add to calendar, or decline.</div>
+
+      <div class="meeting-inline-toggles">
+        <label class="toggle-option">
+          <input type="hidden" name="audio_biomarkers_enabled" value="0">
+          <input type="checkbox" name="audio_biomarkers_enabled" value="1" {% if form_defaults.audio_biomarkers_enabled %}checked{% endif %}>
+          <span>Enable Audio Biomarkers</span>
+        </label>
+        <label class="toggle-option">
+          <input type="hidden" name="video_biomarkers_enabled" value="0">
+          <input type="checkbox" name="video_biomarkers_enabled" value="1" {% if form_defaults.video_biomarkers_enabled %}checked{% endif %}>
+          <span>Enable Video Biomarkers</span>
+        </label>
+        <label class="toggle-option">
+          <input id="transcription_enabled_hidden" type="hidden" name="transcription_enabled" value="{{ '1' if form_defaults.transcription_enabled else '0' }}">
+          <input id="transcription_enabled_checkbox" type="checkbox" value="1" {% if form_defaults.transcription_enabled %}checked{% endif %}>
+          <span>Enable Speech-to-Text</span>
+        </label>
+      </div>
+      <div id="transcription-help" class="field-help">On by default. For AI meetings this stays enabled because transcription is required.</div>
+
+      <div id="transcription-settings" class="meeting-grid-2">
+        <div>
+          <label class="field-label">Transcription Provider</label>
+          <input name="transcription_provider" value="{{ form_defaults.transcription_provider or '' }}">
+        </div>
+        <div>
+          <label class="field-label">Transcription Language</label>
+          <input name="transcription_language" value="{{ form_defaults.transcription_language or 'en-US' }}">
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="meeting-submit" type="submit">Send meet now invite</button>
+        <a href="/consultant/meetings" class="button-secondary">Cancel</a>
+      </div>
+    </form>
+  </div>
+  <script>
+    (() => {
+      const input = document.getElementById('scheduled_start_at');
+      const button = document.getElementById('meeting-submit');
+      const kicker = document.getElementById('meeting-mode-kicker');
+      const title = document.getElementById('meeting_title');
+      const typeInputs = Array.from(document.querySelectorAll('input[name="meeting_type"]'));
+      const transcriptionSettings = document.getElementById('transcription-settings');
+      const transcriptionCheckbox = document.getElementById('transcription_enabled_checkbox');
+      const transcriptionHidden = document.getElementById('transcription_enabled_hidden');
+      const transcriptionHelp = document.getElementById('transcription-help');
+      if (!input || !button || !kicker || !title || !typeInputs.length) return;
+
+      function currentType() {
+        const selected = typeInputs.find((item) => item.checked);
+        return selected ? selected.value : 'human';
+      }
+
+      function updateMeetingModeLabel() {
+        const raw = input.value;
+        if (!raw) return;
+        const selected = new Date(raw);
+        const now = new Date();
+        const isNowMeeting = selected.getTime() <= now.getTime() + (60 * 1000);
+        const isAi = currentType() === 'ai';
+        if (transcriptionCheckbox && transcriptionHidden) {
+          if (isAi) {
+            transcriptionCheckbox.checked = true;
+            transcriptionCheckbox.disabled = true;
+            transcriptionHidden.value = '1';
+            if (transcriptionHelp) {
+              transcriptionHelp.textContent = 'Required for AI meetings and enabled automatically.';
+            }
+          } else {
+            transcriptionCheckbox.disabled = false;
+            transcriptionHidden.value = transcriptionCheckbox.checked ? '1' : '0';
+            if (transcriptionHelp) {
+              transcriptionHelp.textContent = 'On by default. Disable this only if you do not want transcription for a human meeting.';
+            }
+          }
+        }
+        button.textContent = isNowMeeting
+          ? (isAi ? 'Send AI invite now' : 'Send meet now invite')
+          : (isAi ? 'Send AI meeting invite' : 'Send meeting invite');
+        kicker.textContent = 'New Meeting';
+        if (!title.dataset.userEdited) {
+          title.value = isAi ? 'MindFix AI session' : 'MindFix session';
+        }
+      }
+
+      input.addEventListener('input', updateMeetingModeLabel);
+      if (transcriptionCheckbox && transcriptionHidden) {
+        transcriptionCheckbox.addEventListener('change', () => {
+          transcriptionHidden.value = transcriptionCheckbox.checked ? '1' : '0';
+        });
+      }
+      title.addEventListener('input', () => {
+        title.dataset.userEdited = title.value.trim() ? '1' : '';
+      });
+      typeInputs.forEach((item) => item.addEventListener('change', updateMeetingModeLabel));
+      updateMeetingModeLabel();
+    })();
+  </script>
+{% endblock %}

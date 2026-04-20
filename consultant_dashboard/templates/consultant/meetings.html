@@ -1,0 +1,43 @@
+{% extends "shared/base.html" %}
+{% block body %}
+  {% include "consultant/_nav.html" %}
+
+  <div class="card">
+    <div class="panel-head">
+      <div>
+        <h1>Meetings</h1>
+      </div>
+      <a href="/consultant/meetings/new" class="titlebar-link-button">New Meeting</a>
+    </div>
+    <div class="history-toolbar">
+      <div class="actions">
+        <a href="/consultant/meetings?filter=all" class="{% if filter_name == 'all' %}nav-active{% endif %}">All</a>
+        <a href="/consultant/meetings?filter=open" class="{% if filter_name == 'open' %}nav-active{% endif %}">Open</a>
+        <a href="/consultant/meetings?filter=upcoming" class="{% if filter_name == 'upcoming' %}nav-active{% endif %}">Upcoming</a>
+        <a href="/consultant/meetings?filter=past" class="{% if filter_name == 'past' %}nav-active{% endif %}">Past</a>
+        <a href="/consultant/meetings?filter=cancelled" class="{% if filter_name == 'cancelled' %}nav-active{% endif %}">Cancelled</a>
+      </div>
+      <form method="get" class="history-search">
+        <input type="hidden" name="filter" value="{{ filter_name }}">
+        <input type="search" name="q" value="{{ search or '' }}" placeholder="Search client, title or date">
+      </form>
+    </div>
+    <div class="list">
+      {% for meeting in meetings %}
+        <a class="item session-history-link" href="/consultant/meetings/{{ meeting.id }}">
+          <div class="details-summary">
+            <div class="session-history-summary">
+              <strong>{{ meeting.scheduled_start_at|display_dt }}</strong>
+              <span class="muted summary-copy">{{ meeting.client_name }} · {{ meeting.meeting_type_display }} · {{ meeting.title }}</span>
+            </div>
+            <div class="actions">
+              <span class="status-chip {% if meeting.is_live_display %}live{% endif %}">{{ meeting.status_display }}</span>
+            </div>
+          </div>
+        </a>
+      {% else %}
+        <div class="muted">No meetings yet. Create one for now or schedule one for later.</div>
+      {% endfor %}
+    </div>
+  </div>
+{% endblock %}

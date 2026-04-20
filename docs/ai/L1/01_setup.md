@@ -18,6 +18,7 @@ This repo documents the product/admin layer. Client session boot, Agora channel 
   - `tests/test_internal_api.py`
   - `tests/test_web_dashboard.py`
   - `tests/test_live_stack.py` (opt-in live service smoke test)
+  - meeting lifecycle checks currently live in `tests/test_internal_api.py` and `tests/test_web_dashboard.py`
 
 ## Quick Start
 
@@ -74,6 +75,13 @@ Important optional config:
 - `CONSULTANT_EMAIL_FROM`
 - `CONSULTANT_EMAIL_REPLY_TO`
 - `CONSULTANT_OUTBOUND_REQUEST_TIMEOUT_SECONDS`
+- `THERAPY_CLIENT_APP_URL`
+
+Reminder runner:
+
+- checked-in helper: `scripts/run_reminders.py`
+- dashboard endpoint: `POST /internal/run-reminders`
+- intended invocation: cron or another scheduler, not a request-path side effect
 
 ## Admin Auth File
 
@@ -118,6 +126,28 @@ Messaging flow:
 - outbound messages include a secure link back to `/client/messages/<token>`
 - client replies are captured through that hosted UI instead of inbound SMS
 
+Meeting flow:
+
+- consultants schedule meetings from `/consultant/clients/<client_id>/meetings/new`
+- meeting creation also creates the `client_access_links` row used by the hosted response page
+- clients accept or decline from `/meetings/respond/<token>`
+- `simple-backend` calls signed `POST /internal/authorize-meeting-join` before minting RTC/RTM tokens
+- `server-custom-llm` posts deterministic meeting artifacts back through `POST /internal/session-complete`
+- meeting reminders are sent by calling the signed internal reminder sweep endpoint through `scripts/run_reminders.py`
+
+Run the reminder sweep locally:
+
+```bash
+source venv/bin/activate
+python scripts/run_reminders.py
+```
+
+Example cron entry:
+
+```cron
+* * * * * cd /Users/benweekes/work/therapy/consultant-dashboard && ./venv/bin/python scripts/run_reminders.py --quiet >> /tmp/mindfix-reminders.log 2>&1
+```
+
 `link-client-auth` still exists as a low-level helper for tests, fixtures, or repair work.
 
 ## Verification
@@ -142,11 +172,14 @@ Coverage includes:
 - consultant/admin login success and failure
 - signed `GET /internal/resolve-client`
 - signed `GET /internal/client-context`
+- signed `POST /internal/authorize-meeting-join`
 - signed `POST /internal/session-complete`
 - dashboard route protections and render paths
 - consultant/admin CRUD flows
 - consultant/admin password change flows
 - automatic client identity resolution contract used by `simple-backend`
+- consultant meeting scheduling and response pages
+- meeting completion linkage back onto `scheduled_meetings`
 
 Live smoke coverage includes:
 
@@ -155,6 +188,41 @@ Live smoke coverage includes:
 - `consultant-dashboard` health
 - `server-custom-llm` ping
 - Cloudflare tunnel ping
+
+## Local Restart Discipline
+
+When local behavior does not match the code on disk, assume a stale bound process first.
+
+Check active listeners:
+
+```bash
+lsof -nP -iTCP:8090 -sTCP:LISTEN
+lsof -nP -iTCP:8082 -sTCP:LISTEN
+```
+
+Kill the exact stale PID and restart the intended service, then verify:
+
+```bash
+curl http://127.0.0.1:8090/health
+curl http://127.0.0.1:8082/health
+```
+
+Typical symptoms:
+
+- dashboard templates look unchanged after edits
+- `/join-meeting` or other backend behavior looks impossible for the current code
+- a new tunnel URL is configured on disk but Agora still appears to use an older one
+
+Required discipline before telling the user a local fix is live:
+
+1. edit the code
+2. identify the bound PID with `lsof`
+3. kill that exact PID
+4. restart the intended service
+5. verify the matching `/health` endpoint
+6. reload the actual rendered page or rerun the exact request path
+
+Do not trust template files or a normal browser refresh by themselves.
 
 ## See Also
 

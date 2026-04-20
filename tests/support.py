@@ -5,6 +5,7 @@ import os
 import tempfile
 import time
 import unittest
+from typing import Optional
 
 from werkzeug.security import generate_password_hash
 
@@ -139,6 +140,7 @@ class ConsultantDashboardTestCase(unittest.TestCase):
         session_id: str = "sess_test_001",
         urgent_escalation: bool = False,
         include_alert: bool = True,
+        transcript: Optional[dict] = None,
     ):
         payload = {
             "client_id": self.client_id,
@@ -154,6 +156,8 @@ class ConsultantDashboardTestCase(unittest.TestCase):
             "biomarkers": {"averages": {"stress_index": 52.5, "hrv": 31.0}},
             "alerts": [],
         }
+        if transcript is not None:
+            payload["transcript"] = transcript
         if include_alert:
             payload["alerts"].append(
                 {

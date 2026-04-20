@@ -13,6 +13,7 @@ There are three main classes of caller:
   - `simple-backend`
   - `server-custom-llm`
 - local operators running CLI commands
+- hosted client meeting/message token holders
 
 Each class uses a different mechanism.
 
@@ -33,6 +34,7 @@ Current state:
 
 - consultant flow has 2FA
 - admin flow is password-only today
+- clients can also reach hosted secure pages through hashed `client_access_links`
 
 ## Internal Service Auth
 
@@ -47,6 +49,16 @@ Protections:
 - 5-minute timestamp freshness window
 - exact path + method + payload binding in the signature
 
+Meeting-specific trust rule:
+
+- the hosted client meeting token is the trust anchor for guest join
+- but the token never grants media access by itself
+- `simple-backend` must call signed `POST /internal/authorize-meeting-join` and mint RTC/RTM only after the dashboard confirms:
+  - current meeting state
+  - join window
+  - cancellation / decline status
+  - participant role
+
 ## Encryption at Rest
 
 Sensitive JSON artifacts are encrypted before writing to disk.
@@ -59,6 +71,13 @@ Implementation:
 - AES-GCM for authenticated encryption
 
 This means filesystem reads alone should not reveal session history.
+
+Hosted token handling:
+
+- secure message links and meeting response links both reuse `client_access_links`
+- only token hashes are stored in SQLite
+- hosted realtime and hosted HTTP routes both enforce token expiry
+- consultant join uses a short-lived signed bootstrap URL rather than trusting raw browser parameters
 
 ## What Stays in SQLite vs Encrypted Artifacts
 
@@ -118,6 +137,7 @@ Be careful not to add raw personal or clinical detail into audit payloads unless
 - there is no key rotation mechanism yet for `THERAPY_MASTER_KEY`
 - there is no outbox/retry queue yet for failed external event delivery because this repo currently only receives events
 - session deletion is still a hard delete; soft-delete plus preserved audit semantics is still pending
+- hosted links are bearer-style URLs, so email interception remains the main practical attack surface until a stronger second factor is added to that flow
 
 ## Roadmap Security / Integrity Items
 

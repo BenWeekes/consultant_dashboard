@@ -1,0 +1,5 @@
+<div class="nav">
+  <a href="/admin/dashboard" class="{% if request.path == '/admin/dashboard' %}nav-active{% endif %}">Overview</a>
+  <a href="/admin/consultants" class="{% if request.path.startswith('/admin/consultants') %}nav-active{% endif %}">Consultants</a>
+  <a href="/admin/account" class="{% if request.path == '/admin/account' %}nav-active{% endif %}">Account</a>
+</div>

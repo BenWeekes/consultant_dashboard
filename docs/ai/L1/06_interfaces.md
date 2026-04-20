@@ -12,9 +12,13 @@ Consultant routes:
 - `GET /consultant/dashboard`
 - `GET/POST /consultant/clients`
 - `GET/POST /consultant/clients/<client_id>`
+- `GET/POST /consultant/clients/<client_id>/meetings/new`
 - `GET/POST /consultant/clients/<client_id>/messages/new`
 - `POST /consultant/clients/<client_id>/messages/send`
 - `GET /consultant/clients/<client_id>/messages/thread`
+- `GET /consultant/meetings`
+- `GET/POST /consultant/meetings/<meeting_id>`
+- `GET /consultant/meetings/<meeting_id>/join`
 - `GET /consultant/sessions`
 - `GET/POST /consultant/sessions/<session_id>`
 
@@ -30,6 +34,7 @@ Shared routes:
 
 - `GET /`
 - `GET /home`
+- `GET/POST /meetings/respond/<token>`
 - `GET/POST /client/messages/<token>`
 - `GET /client/messages/<token>/thread`
 - `POST /logout`
@@ -45,6 +50,7 @@ Notes:
 - only US and UK phone numbers are supported right now
 - the client overview page shows compact latest-session biomarker highlights and keeps the full grouped biomarker breakdown on the session detail page
 - secure message links are valid for both the hosted reply page and the client realtime thread only until `expires_at`
+- hosted meeting response links also reuse `client_access_links`; meeting association is resolved from `scheduled_meetings.response_access_link_id`
 
 Realtime routes:
 
@@ -127,6 +133,56 @@ Influence on the next AI session:
 - `alerts` = open human follow-up signals
 - `recent_summaries` are truncated in `simple-backend` before prompt injection to avoid consuming too much context window
 
+### `POST /internal/authorize-meeting-join`
+
+Signature required.
+
+Accepted JSON body:
+
+- host join:
+  - `participant_role = "host"`
+  - `meeting_id`
+  - `consultant_id`
+- guest join:
+  - `participant_role = "guest"`
+  - `response_access_link_id`
+  - `meeting_id`
+
+Notes:
+
+- The hosted client response page still starts from a long-lived invite token.
+- The React meeting client does **not** receive that raw invite token in its URL.
+- It receives a short-lived signed guest `join_bootstrap`, and `simple-backend` forwards the signed bootstrap contents as:
+  - `participant_role = "guest"`
+  - `meeting_id`
+  - `response_access_link_id`
+- The legacy raw `access_token` path still exists as a fallback, but the intended meeting join flow is bootstrap-based.
+
+Returns on success:
+
+- `ok`
+- `meeting_id`
+- `participant_role`
+- `client_id`
+- `consultant_id`
+- `channel_name`
+- `participant_uid`
+- `user_uid`
+- `host_uid`
+- `guest_uid`
+- `rtm_uid`
+- `scheduled_start_at`
+- `scheduled_end_at`
+- `join_window_start_at`
+- `join_window_end_at`
+- `ensure_meeting_services`
+
+Rules:
+
+- host join is allowed from `scheduled`, `client_viewed`, `accepted`, or `in_progress`
+- guest join requires `accepted` or `in_progress`
+- `simple-backend` must use the server response as authoritative and ignore browser-supplied participant ids or UIDs
+
 ### `POST /internal/verify-client-password`
 
 Signature required.
@@ -155,6 +211,35 @@ Implementation note:
 - phone normalization currently exists in both `consultant-dashboard` and `simple-backend`
 - behavior must stay aligned across both repos until that helper is extracted into shared code
 
+### `POST /internal/run-reminders`
+
+Signature required.
+
+Accepted body:
+
+- empty body or empty JSON body
+
+Returns:
+
+- `ok`
+- `sent_24h`
+- `sent_1m`
+- `failed_24h`
+- `failed_1m`
+- `skipped_immediate`
+
+Normal caller:
+
+- `scripts/run_reminders.py`
+- cron or another external scheduler
+
+Rules:
+
+- sends reminders only for future scheduled meetings
+- skips immediate `meet now` meetings
+- uses signed meeting-response tokens so reminder emails do not require storing raw access tokens
+- relies on `reminder_24h_sent_at` and `reminder_1m_sent_at` for idempotency
+
 ### `POST /internal/session-complete`
 
 Signature required.
@@ -164,6 +249,8 @@ Current accepted payload fields:
 - `client_id`
 - `session_id`
 - `consultant_id`
+- `session_kind`
+- `meeting_id`
 - `profile`
 - `channel`
 - `started_at`
@@ -205,6 +292,13 @@ Current `summary` object shape:
 - `risk_overview`
 - `follow_up`
 - `source`
+
+Meeting linkage behavior:
+
+- when `meeting_id` is present and matches a row in `scheduled_meetings`, the service also:
+  - marks the meeting `completed`
+  - stores `summary_storage_key` and `biomarker_storage_key` on the meeting row
+  - sets `scheduled_meetings.linked_session_id`
 
 Covered by:
 
@@ -269,6 +363,8 @@ Core tables:
 - `clients`
 - `consultant_clients`
 - `client_auth_identities`
+- `scheduled_meetings`
+- `meeting_events`
 - `sessions`
 - `session_alerts`
 - `client_note_revisions`

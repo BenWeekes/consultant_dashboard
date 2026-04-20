@@ -51,6 +51,7 @@ def create_app() -> Flask:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     storage_root = Path(config["STORAGE_ROOT"])
     storage_root.mkdir(parents=True, exist_ok=True)
+    init_db(config)
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(internal_bp)

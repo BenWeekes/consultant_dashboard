@@ -1,11 +1,6 @@
 {% extends "shared/base.html" %}
 {% block body %}
-  <div class="nav">
-    <a href="/consultant/dashboard">Overview</a>
-    <a href="/consultant/clients">Clients</a>
-    <a href="/consultant/sessions">Sessions</a>
-    <a href="/consultant/account">Account</a>
-  </div>
+  {% include "consultant/_nav.html" %}
   <div class="split">
     <div class="card">
       <div class="label">{{ brand }}</div>
@@ -24,7 +19,10 @@
         <div class="field-help">Use at least 8 characters.</div>
         <label class="field-label">Confirm New Password</label>
         <input name="confirm_password" type="password" required>
-        <button type="submit">Update password</button>
+        <button type="submit">Update Password</button>
+      </form>
+      <form method="post" action="/consultant/logout" style="margin-top: 16px;">
+        <button type="submit" class="button-secondary">Log Out</button>
       </form>
     </div>
   </div>

@@ -60,6 +60,11 @@ CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     client_id TEXT NOT NULL,
     consultant_id TEXT,
+    session_kind TEXT NOT NULL DEFAULT 'avatar_ai_session',
+    meeting_id TEXT,
+    transcription_enabled INTEGER NOT NULL DEFAULT 0,
+    audio_biomarkers_enabled INTEGER NOT NULL DEFAULT 1,
+    video_biomarkers_enabled INTEGER NOT NULL DEFAULT 1,
     profile_name TEXT NOT NULL,
     channel_name TEXT NOT NULL,
     started_at TEXT,
@@ -67,6 +72,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     duration_seconds INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'completed',
     summary_storage_key TEXT,
+    transcript_storage_key TEXT,
     biomarker_storage_key TEXT,
     memory_storage_key TEXT,
     urgent_escalation INTEGER NOT NULL DEFAULT 0,
@@ -75,6 +81,68 @@ CREATE TABLE IF NOT EXISTS sessions (
     FOREIGN KEY (client_id) REFERENCES clients(id),
     FOREIGN KEY (consultant_id) REFERENCES consultants(id)
 );
+
+CREATE TABLE IF NOT EXISTS scheduled_meetings (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    client_id TEXT NOT NULL,
+    consultant_id TEXT NOT NULL,
+    meeting_type TEXT NOT NULL DEFAULT 'human',
+    repeat_weekly INTEGER NOT NULL DEFAULT 0,
+    transcription_enabled INTEGER NOT NULL DEFAULT 0,
+    audio_biomarkers_enabled INTEGER NOT NULL DEFAULT 1,
+    video_biomarkers_enabled INTEGER NOT NULL DEFAULT 1,
+    transcription_provider TEXT NOT NULL DEFAULT '',
+    transcription_language TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'scheduled',
+    title TEXT NOT NULL,
+    invite_message TEXT NOT NULL DEFAULT '',
+    timezone_name TEXT NOT NULL,
+    scheduled_start_at TEXT NOT NULL,
+    scheduled_end_at TEXT NOT NULL,
+    join_window_start_at TEXT NOT NULL,
+    join_window_end_at TEXT NOT NULL,
+    channel_name TEXT NOT NULL,
+    response_access_link_id TEXT NOT NULL UNIQUE,
+    invite_delivery_status TEXT NOT NULL DEFAULT 'pending',
+    invite_delivery_error TEXT NOT NULL DEFAULT '',
+    reminder_24h_sent_at TEXT,
+    reminder_1m_sent_at TEXT,
+    accepted_at TEXT,
+    declined_at TEXT,
+    cancelled_at TEXT,
+    in_progress_at TEXT,
+    completed_at TEXT,
+    client_joined_at TEXT,
+    client_left_at TEXT,
+    consultant_joined_at TEXT,
+    consultant_left_at TEXT,
+    attendance_outcome TEXT NOT NULL DEFAULT '',
+    ended_by_role TEXT NOT NULL DEFAULT '',
+    ended_by_id TEXT NOT NULL DEFAULT '',
+    summary_storage_key TEXT,
+    biomarker_storage_key TEXT,
+    linked_session_id TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY (consultant_id) REFERENCES consultants(id) ON DELETE CASCADE,
+    FOREIGN KEY (response_access_link_id) REFERENCES client_access_links(id) ON DELETE RESTRICT,
+    FOREIGN KEY (linked_session_id) REFERENCES sessions(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS meeting_events (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    meeting_id TEXT NOT NULL,
+    actor_type TEXT NOT NULL,
+    actor_id TEXT NOT NULL DEFAULT '',
+    event_type TEXT NOT NULL,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (meeting_id) REFERENCES scheduled_meetings(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_meetings_channel_name
+ON scheduled_meetings(channel_name);
 
 CREATE TABLE IF NOT EXISTS session_alerts (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),

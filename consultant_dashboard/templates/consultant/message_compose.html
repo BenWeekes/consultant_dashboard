@@ -1,11 +1,6 @@
 {% extends "shared/base.html" %}
 {% block body %}
-  <div class="nav">
-    <a href="/consultant/dashboard">Overview</a>
-    <a href="/consultant/clients">Clients</a>
-    <a href="/consultant/sessions">Sessions</a>
-    <a href="/consultant/account">Account</a>
-  </div>
+  {% include "consultant/_nav.html" %}
   <div class="split">
     <div class="card">
       <div class="label">Messaging</div>
@@ -30,8 +25,8 @@
         <div class="field-help">A secure reply link is automatically added for the client.</div>
 
         <div class="actions">
-          <button type="submit">Send message</button>
-          <a href="/consultant/clients/{{ client.id }}" class="button-secondary button-link">Back to client</a>
+          <button type="submit">Send Message</button>
+          <a href="/consultant/clients/{{ client.id }}" class="button-secondary button-link">Back to Client</a>
         </div>
       </form>
     </div>

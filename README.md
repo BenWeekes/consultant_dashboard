@@ -13,6 +13,7 @@ This service owns:
 - start-of-session context APIs
 - end-of-call ingestion APIs
 - consultant-to-client messaging with secure reply links
+- consultant live meeting scheduling, response pages, and review pages
 
 It does **not** start Agora sessions directly. `simple-backend` stays responsible for that path.
 
@@ -57,7 +58,9 @@ Normal dashboard behavior:
 - only US and UK phone numbers are supported right now
 - admins can set or reset consultant passwords from the consultant detail page
 - consultants manage client access by updating the client email, phone, and optional password fields
-- consultants can send email, SMS, and meeting-invite messages from the client detail flow
+- consultants can schedule live meetings from the client detail flow
+- clients accept or decline meetings from hosted response pages on this service
+- consultant and client join the live meeting through the React client after dashboard-backed authorization
 - client replies are expected through secure web links, not inbound SMS
 
 Messaging delivery config:
@@ -78,6 +81,8 @@ Messaging delivery config:
 - `GET /internal/health`
 - `GET /internal/resolve-client`
 - `GET /internal/client-context`
+- `POST /internal/authorize-meeting-join`
+- `POST /internal/run-reminders`
 - `POST /internal/session-complete`
 
 Internal authenticated requests require:
@@ -101,6 +106,32 @@ For `POST`, `payload` is the raw request body.
 - `python run.py create-consultant ...`
 - `python run.py create-client ...`
 - `python run.py link-client-auth ...`
+
+## Reminder Cron
+
+Meeting reminders are triggered by the dashboard itself through a signed internal endpoint:
+
+- `POST /internal/run-reminders`
+
+A checked-in helper script calls that endpoint with the required HMAC headers:
+
+```bash
+cd consultant-dashboard
+./venv/bin/python scripts/run_reminders.py
+```
+
+Example cron entry:
+
+```cron
+* * * * * cd /Users/benweekes/work/therapy/consultant-dashboard && ./venv/bin/python scripts/run_reminders.py --quiet >> /tmp/mindfix-reminders.log 2>&1
+```
+
+Current reminder behavior:
+
+- sends a 24-hour reminder for future scheduled meetings
+- sends a 1-minute reminder shortly before scheduled start
+- skips immediate `meet now` meetings
+- is idempotent via `reminder_24h_sent_at` / `reminder_1m_sent_at`
 
 ## Tests
 
@@ -129,6 +160,9 @@ Coverage currently includes:
 - consultant/admin password change flows
 - client password create/reset flows
 - consultant outbound messaging and secure client replies
+- consultant meeting scheduling and meeting response flows
+- internal meeting-join authorization
+- meeting completion linking from `session-complete` back onto `scheduled_meetings`
 
 Optional live stack smoke test:
 
@@ -152,6 +186,39 @@ Override them with:
 - `LIVE_DASHBOARD_URL`
 - `LIVE_CUSTOM_LLM_URL`
 - `LIVE_TUNNEL_PING_URL`
+
+## Local Dev Note
+
+If local behavior does not match the code you just changed, check for stale bound processes before debugging the feature itself.
+
+Common ports:
+
+- dashboard: `127.0.0.1:8090`
+- simple-backend: `127.0.0.1:8082`
+
+Useful checks:
+
+```bash
+lsof -nP -iTCP:8090 -sTCP:LISTEN
+lsof -nP -iTCP:8082 -sTCP:LISTEN
+curl http://127.0.0.1:8090/health
+curl http://127.0.0.1:8082/health
+```
+
+Recent local failures were caused by older processes still serving:
+
+- old dashboard templates on `:8090`
+- old `/join-meeting` behavior on `:8082`
+
+Required local workflow after any dashboard template or backend behavior change:
+
+1. find the exact listening PID with `lsof`
+2. kill that PID
+3. restart the service
+4. verify `/health`
+5. only then trust the browser/request result
+
+Do not assume a save, hot reload, or browser refresh is enough.
 
 ## Admin Auth File
 

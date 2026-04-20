@@ -1,115 +1,235 @@
 {% extends "shared/base.html" %}
 {% block body %}
-  <div class="nav">
-    <a href="/consultant/dashboard">Overview</a>
-    <a href="/consultant/clients">Clients</a>
-    <a href="/consultant/sessions">Sessions</a>
-    <a href="/consultant/account">Account</a>
-  </div>
-  <div class="split">
-    <div class="card grid">
-      <div>
-        <div class="label">Session</div>
-        <h1>{{ session_row.display_name }}</h1>
-        <p class="muted">{{ (session_row.ended_at or session_row.started_at or session_row.created_at)|display_dt }}</p>
-      </div>
-      <div class="row">
-        <span class="pill">{{ session_row.duration_seconds }} seconds</span>
-        {% if session_row.urgent_escalation %}<span class="pill">Urgent escalation</span>{% endif %}
-      </div>
-      <form method="post" action="/consultant/sessions/{{ session_row.id }}/delete" onsubmit="return confirm('Delete this session?');">
-        <button type="submit" class="button-danger">Delete session</button>
-      </form>
-      <div class="item">
-        <div class="label">Notes And Direction</div>
-        <form method="post">
-          <label class="field-label">Notes</label>
-          <textarea name="notes">{{ client_notes or '' }}</textarea>
-          <label class="field-label">Direction</label>
-          <textarea name="direction">{{ client_direction or '' }}</textarea>
-          <button type="submit">Save notes and direction</button>
-        </form>
-      </div>
-      <div class="item">
-        <div class="label">Summary</div>
-        {% if summary %}
-          <div><strong>Brief Summary</strong></div>
-          <div class="muted summary-copy">{{ summary.brief_overview or summary.overview or "No brief summary stored." }}</div>
-          <div style="height: 12px;"></div>
-          <div><strong>Full Summary</strong></div>
-          <div class="muted summary-copy summary-scroll">{{ summary.full_summary or summary.overview or "No full summary stored." }}</div>
-          {% if summary.biomarker_summary %}
-            <div style="height: 12px;"></div>
-            <div><strong>Biomarker Summary</strong></div>
-            <div class="muted summary-copy">{{ summary.biomarker_summary }}</div>
-          {% endif %}
-          {% if summary.risk_overview %}
-            <div style="height: 12px;"></div>
-            <div><strong>Risk Overview</strong></div>
-            <div class="muted summary-copy">{{ summary.risk_overview }}</div>
-          {% endif %}
-          {% if summary.follow_up %}
-            <div style="height: 12px;"></div>
-            <div><strong>Follow Up</strong></div>
-            <div class="muted summary-copy">{{ summary.follow_up }}</div>
-          {% endif %}
-        {% else %}
-          <div class="muted">No summary stored.</div>
+  {% include "consultant/_nav.html" %}
+
+  <div class="card client-header">
+    <div>
+      <h1>{{ session_kind_display }}</h1>
+      <div class="client-contact-line">
+        <span><a href="/consultant/clients/{{ session_row.client_id }}">{{ session_row.display_name }}</a></span>
+        <span class="client-sep">·</span>
+        <span>{{ (session_row.ended_at or session_row.started_at or session_row.created_at)|display_dt }}</span>
+        <span class="client-sep">·</span>
+        <span>{{ session_row.duration_seconds }} seconds</span>
+        {% if session_row.urgent_escalation %}
+          <span class="client-sep">·</span>
+          <span>Urgent escalation</span>
         {% endif %}
       </div>
-      <div class="item">
-        <div class="label">Biomarkers</div>
-        {% if biomarkers %}
-          {% if biomarker_headlines %}
-            <div class="biomarker-headline-grid">
+    </div>
+    <div class="actions">
+      <form method="post" action="/consultant/sessions/{{ session_row.id }}/delete" onsubmit="return confirm('Delete this session?');">
+        <button type="submit" class="titlebar-link-button">Delete Session</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="client-top-grid">
+    <div class="card panel-equal">
+      <div class="panel-head">
+        <div class="panel-title">
+          <div class="panel-kicker">Transcripts</div>
+        </div>
+      </div>
+      <div class="section-stack">
+        {% if transcript_text %}
+          <div class="summary-card">
+            <h3>Transcript</h3>
+            <div class="summary-copy summary-scroll" style="white-space: pre-wrap;">{{ transcript_text }}</div>
+          </div>
+        {% elif transcript_enabled and transcript %}
+          <div class="summary-card">
+            <h3>Transcript</h3>
+            <div class="summary-copy">Speech-to-text was enabled for this session, but no transcript text was stored.</div>
+          </div>
+        {% elif not transcript_enabled %}
+          <div class="summary-card">
+            <h3>Transcript</h3>
+            <div class="summary-copy">Speech-to-text was not enabled for this session.</div>
+          </div>
+        {% endif %}
+        {% if summary %}
+          <div class="summary-card">
+            <h3>Brief summary</h3>
+            <div class="summary-copy">{{ summary.brief_overview or summary.overview or "No brief summary stored." }}</div>
+          </div>
+          <div class="summary-card">
+            <h3>Full summary</h3>
+            <div class="summary-copy summary-scroll">{{ summary.full_summary or summary.overview or "No full summary stored." }}</div>
+          </div>
+          {% if summary.biomarker_summary %}
+            <div class="summary-card">
+              <h3>Biomarker summary</h3>
+              <div class="summary-copy">{{ summary.biomarker_summary }}</div>
+            </div>
+          {% endif %}
+          {% if summary.risk_overview %}
+            <div class="summary-card">
+              <h3>Risk overview</h3>
+              <div class="summary-copy">{{ summary.risk_overview }}</div>
+            </div>
+          {% endif %}
+          {% if summary.follow_up %}
+            <div class="summary-card">
+              <h3>Follow up</h3>
+              <div class="summary-copy">{{ summary.follow_up }}</div>
+            </div>
+          {% endif %}
+        {% else %}
+          <div class="summary-card">
+            <h3>Summary</h3>
+            <div class="summary-copy">No transcript summary is stored for this session.</div>
+          </div>
+        {% endif %}
+        {% if biomarker_headlines %}
+          <div class="summary-card">
+            <h3>Biomarkers</h3>
+            <div class="compact-metric-grid">
               {% for item in biomarker_headlines %}
-                <div class="biomarker-headline-item">
+                <div class="compact-metric-item">
                   <span class="compact-metric-label">{{ item.label }}</span>
                   <strong>{{ item.value }}</strong>
                 </div>
               {% endfor %}
             </div>
-          {% endif %}
-          {% for section in biomarker_sections %}
-            <details class="biomarker-section" {% if loop.first %}open{% endif %} style="margin-top: 12px;">
-              <summary class="details-summary">
-                <strong>{{ section.title }}</strong>
-                <span class="muted">Expand</span>
-              </summary>
-              <div class="biomarker-section-body">
-                <div class="biomarker-grid">
-                  {% for row in section.rows %}
-                    <div class="biomarker-row">
-                      <strong>{{ row.label }}</strong>
-                      <div>{{ row.triplet }}</div>
-                      {% if row.baseline %}
-                        <div class="biomarker-meta">Baseline: {{ row.baseline }}</div>
-                      {% endif %}
-                    </div>
-                  {% endfor %}
-                </div>
-              </div>
-            </details>
-          {% endfor %}
+          </div>
+        {% elif biomarker_sections %}
+          <div class="summary-card">
+            <h3>Biomarkers</h3>
+            <div class="summary-copy">Biomarker data was stored for this session. See the detailed sections below.</div>
+          </div>
+        {% elif not audio_biomarkers_enabled and not video_biomarkers_enabled %}
+          <div class="summary-card">
+            <h3>Biomarkers</h3>
+            <div class="summary-copy">Audio and video biomarkers were not enabled for this session.</div>
+          </div>
         {% else %}
-          <div class="muted">No biomarker aggregates stored.</div>
+          <div class="summary-card">
+            <h3>Biomarkers</h3>
+            <div class="summary-copy">
+              {% if not audio_biomarkers_enabled and video_biomarkers_enabled %}
+                Audio biomarkers were not enabled for this session.
+              {% elif audio_biomarkers_enabled and not video_biomarkers_enabled %}
+                Video biomarkers were not enabled for this session.
+              {% else %}
+                Biomarkers were enabled for this session, but no biomarker data was stored.
+              {% endif %}
+            </div>
+          </div>
+        {% endif %}
+        {% if alerts %}
+          <div class="summary-card">
+            <h3>Follow-up flags</h3>
+            <div class="section-stack compact">
+              {% for alert in alerts %}
+                <div>
+                  <strong>{{ alert.title }}</strong>
+                  <div class="muted">{{ alert.severity }} · {{ alert.source }}</div>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
         {% endif %}
       </div>
     </div>
-    <div class="card">
-      <div class="label">Alerts</div>
-      <h2>Session Alerts</h2>
-      <div class="list">
-        {% for alert in alerts %}
-          <div class="item">
-            <strong>{{ alert.title }}</strong>
-            <div class="muted">{{ alert.severity }} · {{ alert.source }}</div>
-            <div class="muted">{{ alert.created_at }}</div>
+
+    <div class="card panel-equal">
+      <div class="panel-head tight">
+        <div class="panel-title">
+          <div class="panel-kicker">Notes And Direction</div>
+        </div>
+      </div>
+      <div class="section-stack">
+        <form method="post">
+          <label class="field-label">Notes</label>
+          <textarea name="notes" class="compact-context">{{ client_notes or '' }}</textarea>
+          <label class="field-label">Direction</label>
+          <textarea name="direction" class="compact-context">{{ client_direction or '' }}</textarea>
+          <button type="submit">Save notes and direction</button>
+        </form>
+        <div class="summary-card">
+          <h3>Biomarker baseline</h3>
+          {% if baseline and baseline.averages %}
+            <div class="compact-metric-grid">
+              {% for key, value in baseline.averages.items() %}
+                {% if loop.index <= 6 %}
+                  <div class="compact-metric-item">
+                    <span class="compact-metric-label">{{ key.replace('_', ' ') }}</span>
+                    <strong>{{ value }}</strong>
+                  </div>
+                {% endif %}
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="muted">No biomarker baseline stored yet.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="card chat-panel panel-equal" id="client-thread">
+      <div class="panel-head tight">
+        <div class="panel-title">
+          <div class="panel-kicker">Messages</div>
+        </div>
+      </div>
+      <div
+        class="chat-thread chat-thread-scroll"
+        data-message-thread
+        data-thread-endpoint="/consultant/clients/{{ session_row.client_id }}/messages/thread"
+        data-thread-ws="/ws/consultant/clients/{{ session_row.client_id }}/messages"
+        data-empty-text="No client messages yet."
+      >
+        {% for message in messages %}
+          <div class="chat-row {% if message.direction == 'outbound' %}chat-row-outbound{% else %}chat-row-inbound{% endif %}">
+            <div class="chat-bubble {% if message.direction == 'outbound' %}chat-bubble-outbound{% else %}chat-bubble-inbound{% endif %}">
+              <div class="row" style="justify-content: space-between;">
+                <div class="chat-header">{{ "Consultant" if message.direction == "outbound" else "Client" }} · {{ message.created_at|display_dt }}</div>
+              </div>
+              <div class="chat-body">{{ message.body }}</div>
+              {% if message.delivery_error and message.delivery_status != "sent" %}
+                <div class="muted" style="margin-top: 8px;">Delivery: {{ message.delivery_error }}</div>
+              {% endif %}
+            </div>
           </div>
         {% else %}
-          <div class="muted">No alerts stored for this session.</div>
+          <div class="muted">No client messages yet.</div>
+        {% endfor %}
+      </div>
+      <form class="chat-compose" method="post" action="/consultant/clients/{{ session_row.client_id }}/messages/send" data-message-compose="/consultant/clients/{{ session_row.client_id }}/messages/send">
+        <label class="field-label">New message</label>
+        <textarea name="message_body" class="chat-compose-box" placeholder="Write a message to the client"></textarea>
+        <div class="row" style="justify-content: space-between;">
+          <div class="chat-status-note" data-compose-status>Messages are sent through MindFix and clients reply through a secure web link.</div>
+          <button type="submit">Send Message</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {% if biomarker_sections %}
+    <div class="card history-card">
+      <div class="history-toolbar">
+        <div class="panel-title"><div class="panel-kicker">Biomarkers</div></div>
+      </div>
+      <div class="section-stack">
+        {% for section in biomarker_sections %}
+          <div class="summary-card">
+            <h3>{{ section.title }}</h3>
+            <div class="biomarker-grid" style="margin-top: 10px;">
+              {% for row in section.rows %}
+                <div class="biomarker-row">
+                  <strong>{{ row.label }}</strong>
+                  <div>{{ row.triplet }}</div>
+                  {% if row.baseline %}
+                    <div class="biomarker-meta">Baseline: {{ row.baseline }}</div>
+                  {% endif %}
+                </div>
+              {% endfor %}
+            </div>
+          </div>
         {% endfor %}
       </div>
     </div>
-  </div>
+  {% endif %}
 {% endblock %}

@@ -1,10 +1,6 @@
 {% extends "shared/base.html" %}
 {% block body %}
-  <div class="nav">
-    <a href="/admin/dashboard">Overview</a>
-    <a href="/admin/consultants">Consultants</a>
-    <a href="/admin/account">Account</a>
-  </div>
+  {% include "admin/_nav.html" %}
   <div class="card grid">
     <div>
       <div class="label">{{ brand }}</div>
@@ -23,7 +19,7 @@
         <div class="label">Recent Consultants</div>
         <h2>Team</h2>
       </div>
-      <a href="/admin/consultants">Manage consultants</a>
+      <a href="/admin/consultants">Manage Consultants</a>
     </div>
     <div class="list">
       {% for consultant in consultants %}

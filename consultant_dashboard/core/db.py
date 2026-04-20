@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -22,6 +23,19 @@ def init_db(config: dict) -> None:
 
 
 def _ensure_migrations(db: sqlite3.Connection) -> None:
+    session_columns = {row["name"] for row in db.execute("PRAGMA table_info(sessions)").fetchall()}
+    if "session_kind" not in session_columns:
+        db.execute("ALTER TABLE sessions ADD COLUMN session_kind TEXT NOT NULL DEFAULT 'avatar_ai_session'")
+    if "meeting_id" not in session_columns:
+        db.execute("ALTER TABLE sessions ADD COLUMN meeting_id TEXT")
+    if "transcript_storage_key" not in session_columns:
+        db.execute("ALTER TABLE sessions ADD COLUMN transcript_storage_key TEXT")
+    if "transcription_enabled" not in session_columns:
+        db.execute("ALTER TABLE sessions ADD COLUMN transcription_enabled INTEGER NOT NULL DEFAULT 0")
+    if "audio_biomarkers_enabled" not in session_columns:
+        db.execute("ALTER TABLE sessions ADD COLUMN audio_biomarkers_enabled INTEGER NOT NULL DEFAULT 1")
+    if "video_biomarkers_enabled" not in session_columns:
+        db.execute("ALTER TABLE sessions ADD COLUMN video_biomarkers_enabled INTEGER NOT NULL DEFAULT 1")
     client_columns = {row["name"] for row in db.execute("PRAGMA table_info(clients)").fetchall()}
     if "password_hash" not in client_columns:
         db.execute("ALTER TABLE clients ADD COLUMN password_hash TEXT")
@@ -46,6 +60,196 @@ def _ensure_migrations(db: sqlite3.Connection) -> None:
         ON client_access_links(token_hash)
         """
     )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS scheduled_meetings (
+            id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+            client_id TEXT NOT NULL,
+            consultant_id TEXT NOT NULL,
+            meeting_type TEXT NOT NULL DEFAULT 'human',
+            repeat_weekly INTEGER NOT NULL DEFAULT 0,
+            transcription_enabled INTEGER NOT NULL DEFAULT 0,
+            audio_biomarkers_enabled INTEGER NOT NULL DEFAULT 1,
+            video_biomarkers_enabled INTEGER NOT NULL DEFAULT 1,
+            transcription_provider TEXT NOT NULL DEFAULT '',
+            transcription_language TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'scheduled',
+            title TEXT NOT NULL,
+            invite_message TEXT NOT NULL DEFAULT '',
+            timezone_name TEXT NOT NULL,
+            scheduled_start_at TEXT NOT NULL,
+            scheduled_end_at TEXT NOT NULL,
+            join_window_start_at TEXT NOT NULL,
+            join_window_end_at TEXT NOT NULL,
+            channel_name TEXT NOT NULL,
+            response_access_link_id TEXT NOT NULL UNIQUE,
+            invite_delivery_status TEXT NOT NULL DEFAULT 'pending',
+            invite_delivery_error TEXT NOT NULL DEFAULT '',
+            reminder_24h_sent_at TEXT,
+            reminder_1m_sent_at TEXT,
+            accepted_at TEXT,
+            declined_at TEXT,
+            cancelled_at TEXT,
+            in_progress_at TEXT,
+            completed_at TEXT,
+            client_joined_at TEXT,
+            client_left_at TEXT,
+            consultant_joined_at TEXT,
+            consultant_left_at TEXT,
+            attendance_outcome TEXT NOT NULL DEFAULT '',
+            ended_by_role TEXT NOT NULL DEFAULT '',
+            ended_by_id TEXT NOT NULL DEFAULT '',
+            summary_storage_key TEXT,
+            biomarker_storage_key TEXT,
+            linked_session_id TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+            FOREIGN KEY (consultant_id) REFERENCES consultants(id) ON DELETE CASCADE,
+            FOREIGN KEY (response_access_link_id) REFERENCES client_access_links(id) ON DELETE RESTRICT,
+            FOREIGN KEY (linked_session_id) REFERENCES sessions(id) ON DELETE SET NULL
+        )
+        """
+    )
+    meeting_columns = {row["name"] for row in db.execute("PRAGMA table_info(scheduled_meetings)").fetchall()}
+    if "meeting_type" not in meeting_columns:
+        db.execute("ALTER TABLE scheduled_meetings ADD COLUMN meeting_type TEXT NOT NULL DEFAULT 'human'")
+    if "repeat_weekly" not in meeting_columns:
+        db.execute("ALTER TABLE scheduled_meetings ADD COLUMN repeat_weekly INTEGER NOT NULL DEFAULT 0")
+    if "transcription_enabled" not in meeting_columns:
+        db.execute("ALTER TABLE scheduled_meetings ADD COLUMN transcription_enabled INTEGER NOT NULL DEFAULT 0")
+    if "audio_biomarkers_enabled" not in meeting_columns:
+        db.execute("ALTER TABLE scheduled_meetings ADD COLUMN audio_biomarkers_enabled INTEGER NOT NULL DEFAULT 1")
+    if "video_biomarkers_enabled" not in meeting_columns:
+        db.execute("ALTER TABLE scheduled_meetings ADD COLUMN video_biomarkers_enabled INTEGER NOT NULL DEFAULT 1")
+    if "transcription_provider" not in meeting_columns:
+        db.execute("ALTER TABLE scheduled_meetings ADD COLUMN transcription_provider TEXT NOT NULL DEFAULT ''")
+    if "transcription_language" not in meeting_columns:
+        db.execute("ALTER TABLE scheduled_meetings ADD COLUMN transcription_language TEXT NOT NULL DEFAULT ''")
+    if "reminder_24h_sent_at" not in meeting_columns:
+        db.execute("ALTER TABLE scheduled_meetings ADD COLUMN reminder_24h_sent_at TEXT")
+    if "reminder_1m_sent_at" not in meeting_columns:
+        db.execute("ALTER TABLE scheduled_meetings ADD COLUMN reminder_1m_sent_at TEXT")
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_scheduled_meetings_channel_name
+        ON scheduled_meetings(channel_name)
+        """
+    )
+    _ensure_scheduled_meetings_channel_not_unique(db)
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS meeting_events (
+            id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+            meeting_id TEXT NOT NULL,
+            actor_type TEXT NOT NULL,
+            actor_id TEXT NOT NULL DEFAULT '',
+            event_type TEXT NOT NULL,
+            details_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (meeting_id) REFERENCES scheduled_meetings(id) ON DELETE CASCADE
+        )
+        """
+    )
+
+
+def _ensure_scheduled_meetings_channel_not_unique(db: sqlite3.Connection) -> None:
+    row = db.execute(
+        """
+        SELECT sql
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'scheduled_meetings'
+        """
+    ).fetchone()
+    sql = (row["sql"] or "") if row else ""
+    if "channel_name TEXT NOT NULL UNIQUE" not in sql:
+        return
+
+    db.execute("PRAGMA foreign_keys = OFF")
+    db.execute(
+        """
+        CREATE TABLE scheduled_meetings_new (
+            id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+            client_id TEXT NOT NULL,
+            consultant_id TEXT NOT NULL,
+            meeting_type TEXT NOT NULL DEFAULT 'human',
+            repeat_weekly INTEGER NOT NULL DEFAULT 0,
+            transcription_enabled INTEGER NOT NULL DEFAULT 0,
+            audio_biomarkers_enabled INTEGER NOT NULL DEFAULT 1,
+            video_biomarkers_enabled INTEGER NOT NULL DEFAULT 1,
+            transcription_provider TEXT NOT NULL DEFAULT '',
+            transcription_language TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'scheduled',
+            title TEXT NOT NULL,
+            invite_message TEXT NOT NULL DEFAULT '',
+            timezone_name TEXT NOT NULL,
+            scheduled_start_at TEXT NOT NULL,
+            scheduled_end_at TEXT NOT NULL,
+            join_window_start_at TEXT NOT NULL,
+            join_window_end_at TEXT NOT NULL,
+            channel_name TEXT NOT NULL,
+            response_access_link_id TEXT NOT NULL UNIQUE,
+            invite_delivery_status TEXT NOT NULL DEFAULT 'pending',
+            invite_delivery_error TEXT NOT NULL DEFAULT '',
+            reminder_24h_sent_at TEXT,
+            reminder_1m_sent_at TEXT,
+            accepted_at TEXT,
+            declined_at TEXT,
+            cancelled_at TEXT,
+            in_progress_at TEXT,
+            completed_at TEXT,
+            client_joined_at TEXT,
+            client_left_at TEXT,
+            consultant_joined_at TEXT,
+            consultant_left_at TEXT,
+            attendance_outcome TEXT NOT NULL DEFAULT '',
+            ended_by_role TEXT NOT NULL DEFAULT '',
+            ended_by_id TEXT NOT NULL DEFAULT '',
+            summary_storage_key TEXT,
+            biomarker_storage_key TEXT,
+            linked_session_id TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+            FOREIGN KEY (consultant_id) REFERENCES consultants(id) ON DELETE CASCADE,
+            FOREIGN KEY (response_access_link_id) REFERENCES client_access_links(id) ON DELETE RESTRICT,
+            FOREIGN KEY (linked_session_id) REFERENCES sessions(id) ON DELETE SET NULL
+        )
+        """
+    )
+    db.execute(
+        """
+        INSERT INTO scheduled_meetings_new (
+            id, client_id, consultant_id, meeting_type, repeat_weekly, transcription_enabled, audio_biomarkers_enabled, video_biomarkers_enabled, transcription_provider, transcription_language, status, title, invite_message, timezone_name,
+            scheduled_start_at, scheduled_end_at, join_window_start_at, join_window_end_at,
+            channel_name, response_access_link_id, invite_delivery_status, invite_delivery_error,
+            reminder_24h_sent_at, reminder_1m_sent_at,
+            accepted_at, declined_at, cancelled_at, in_progress_at, completed_at,
+            client_joined_at, client_left_at, consultant_joined_at, consultant_left_at,
+            attendance_outcome, ended_by_role, ended_by_id, summary_storage_key,
+            biomarker_storage_key, linked_session_id, created_at, updated_at
+        )
+        SELECT
+            id, client_id, consultant_id, 'human', 0, 0, 1, 1, '', '', status, title, invite_message, timezone_name,
+            scheduled_start_at, scheduled_end_at, join_window_start_at, join_window_end_at,
+            channel_name, response_access_link_id, invite_delivery_status, invite_delivery_error,
+            NULL, NULL,
+            accepted_at, declined_at, cancelled_at, in_progress_at, completed_at,
+            client_joined_at, client_left_at, consultant_joined_at, consultant_left_at,
+            attendance_outcome, ended_by_role, ended_by_id, summary_storage_key,
+            biomarker_storage_key, linked_session_id, created_at, updated_at
+        FROM scheduled_meetings
+        """
+    )
+    db.execute("DROP TABLE scheduled_meetings")
+    db.execute("ALTER TABLE scheduled_meetings_new RENAME TO scheduled_meetings")
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_scheduled_meetings_channel_name
+        ON scheduled_meetings(channel_name)
+        """
+    )
+    db.execute("PRAGMA foreign_keys = ON")
 
 
 def create_consultant(
@@ -252,7 +456,7 @@ def delete_session(
 def get_latest_session_artifacts(db: sqlite3.Connection, client_id: str):
     return db.execute(
         """
-        SELECT summary_storage_key, biomarker_storage_key
+        SELECT summary_storage_key, transcript_storage_key, biomarker_storage_key
         FROM sessions
         WHERE client_id = ?
         ORDER BY COALESCE(ended_at, started_at, created_at) DESC
@@ -406,6 +610,579 @@ def mark_client_access_link_used(db: sqlite3.Connection, link_id: str) -> None:
         """,
         (link_id,),
     )
+
+
+def create_scheduled_meeting(
+    db: sqlite3.Connection,
+    *,
+    client_id: str,
+    consultant_id: str,
+    meeting_type: str = "human",
+    repeat_weekly: bool = False,
+    transcription_enabled: bool = False,
+    audio_biomarkers_enabled: bool = True,
+    video_biomarkers_enabled: bool = True,
+    transcription_provider: str = "",
+    transcription_language: str = "",
+    title: str,
+    invite_message: str,
+    timezone_name: str,
+    scheduled_start_at: str,
+    scheduled_end_at: str,
+    join_window_start_at: str,
+    join_window_end_at: str,
+    channel_name: str,
+    response_access_link_id: str,
+) -> str:
+    db.execute(
+        """
+        INSERT INTO scheduled_meetings (
+            client_id, consultant_id, meeting_type, repeat_weekly,
+            transcription_enabled, audio_biomarkers_enabled, video_biomarkers_enabled,
+            transcription_provider, transcription_language,
+            title, invite_message, timezone_name,
+            scheduled_start_at, scheduled_end_at, join_window_start_at, join_window_end_at,
+            channel_name, response_access_link_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            client_id,
+            consultant_id,
+            (meeting_type or "human").strip().lower(),
+            1 if repeat_weekly else 0,
+            1 if transcription_enabled else 0,
+            1 if audio_biomarkers_enabled else 0,
+            1 if video_biomarkers_enabled else 0,
+            (transcription_provider or "").strip(),
+            (transcription_language or "").strip(),
+            title.strip(),
+            invite_message.strip(),
+            timezone_name.strip(),
+            scheduled_start_at,
+            scheduled_end_at,
+            join_window_start_at,
+            join_window_end_at,
+            channel_name,
+            response_access_link_id,
+        ),
+    )
+    return db.execute(
+        "SELECT id FROM scheduled_meetings WHERE rowid = last_insert_rowid()"
+    ).fetchone()["id"]
+
+
+def find_open_meeting_for_pair(
+    db: sqlite3.Connection,
+    *,
+    consultant_id: str,
+    client_id: str,
+    meeting_type: str = "human",
+):
+    return db.execute(
+        """
+        SELECT *
+        FROM scheduled_meetings
+        WHERE consultant_id = ?
+          AND client_id = ?
+          AND meeting_type = ?
+          AND status IN ('scheduled', 'client_viewed', 'accepted', 'in_progress')
+        ORDER BY COALESCE(in_progress_at, scheduled_start_at, created_at) DESC
+        LIMIT 1
+        """,
+        (consultant_id, client_id, (meeting_type or "human").strip().lower()),
+    ).fetchone()
+
+
+def update_meeting_invite_delivery(
+    db: sqlite3.Connection,
+    *,
+    meeting_id: str,
+    delivery_status: str,
+    delivery_error: str = "",
+) -> None:
+    db.execute(
+        """
+        UPDATE scheduled_meetings
+        SET invite_delivery_status = ?,
+            invite_delivery_error = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (delivery_status.strip(), delivery_error.strip(), meeting_id),
+    )
+
+
+def record_meeting_event(
+    db: sqlite3.Connection,
+    *,
+    meeting_id: str,
+    actor_type: str,
+    actor_id: str,
+    event_type: str,
+    details: Optional[Dict] = None,
+) -> None:
+    db.execute(
+        """
+        INSERT INTO meeting_events (meeting_id, actor_type, actor_id, event_type, details_json)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            meeting_id,
+            actor_type,
+            actor_id,
+            event_type,
+            json.dumps(details or {}),
+        ),
+    )
+
+
+def list_meetings_for_client(
+    db: sqlite3.Connection,
+    *,
+    client_id: str,
+    consultant_id: Optional[str] = None,
+    limit: int = 50,
+):
+    params: List[object] = [client_id]
+    consultant_sql = ""
+    if consultant_id:
+        consultant_sql = "AND sm.consultant_id = ?"
+        params.append(consultant_id)
+    params.append(limit)
+    return db.execute(
+        f"""
+        SELECT sm.*, c.display_name AS client_name, co.name AS consultant_name
+        FROM scheduled_meetings sm
+        JOIN clients c ON c.id = sm.client_id
+        JOIN consultants co ON co.id = sm.consultant_id
+        WHERE sm.client_id = ?
+        {consultant_sql}
+        ORDER BY
+          CASE
+            WHEN sm.status = 'in_progress' THEN 0
+            WHEN sm.status IN ('scheduled', 'client_viewed', 'accepted') THEN 1
+            WHEN sm.status = 'completed' THEN 2
+            ELSE 3
+          END,
+          sm.scheduled_start_at DESC
+        LIMIT ?
+        """,
+        params,
+    ).fetchall()
+
+
+def list_meetings_for_consultant(
+    db: sqlite3.Connection,
+    *,
+    consultant_id: str,
+    limit: int = 100,
+):
+    return db.execute(
+        """
+        SELECT sm.*, c.display_name AS client_name, c.email AS client_email
+        FROM scheduled_meetings sm
+        JOIN clients c ON c.id = sm.client_id
+        WHERE sm.consultant_id = ?
+        ORDER BY
+          CASE
+            WHEN sm.status = 'in_progress' THEN 0
+            WHEN sm.status IN ('scheduled', 'client_viewed', 'accepted') THEN 1
+            WHEN sm.status = 'completed' THEN 2
+            ELSE 3
+          END,
+          sm.scheduled_start_at DESC
+        LIMIT ?
+        """,
+        (consultant_id, limit),
+    ).fetchall()
+
+
+def next_meeting_for_client(
+    db: sqlite3.Connection,
+    *,
+    consultant_id: str,
+    client_id: str,
+):
+    return db.execute(
+        """
+        SELECT *
+        FROM scheduled_meetings
+        WHERE consultant_id = ?
+          AND client_id = ?
+          AND status IN ('scheduled', 'client_viewed', 'accepted', 'in_progress')
+        ORDER BY
+          CASE
+            WHEN status = 'in_progress' THEN 0
+            ELSE 1
+          END,
+          scheduled_start_at ASC
+        LIMIT 1
+        """,
+        (consultant_id, client_id),
+    ).fetchone()
+
+
+def get_scheduled_meeting(db: sqlite3.Connection, meeting_id: str):
+    return db.execute(
+        """
+        SELECT sm.*, c.display_name AS client_name, c.email AS client_email,
+               c.phone_number AS client_phone_number, c.notification_email AS client_notification_email,
+               co.name AS consultant_name, co.email AS consultant_email, co.notification_email AS consultant_notification_email
+        FROM scheduled_meetings sm
+        JOIN clients c ON c.id = sm.client_id
+        JOIN consultants co ON co.id = sm.consultant_id
+        WHERE sm.id = ?
+        LIMIT 1
+        """,
+        (meeting_id,),
+    ).fetchone()
+
+
+def get_scheduled_meeting_detail(
+    db: sqlite3.Connection,
+    meeting_id: str,
+    *,
+    consultant_id: Optional[str] = None,
+):
+    params: List[object] = [meeting_id]
+    consultant_sql = ""
+    if consultant_id:
+        consultant_sql = "AND sm.consultant_id = ?"
+        params.append(consultant_id)
+    return db.execute(
+        f"""
+        SELECT sm.*, c.display_name AS client_name, c.email AS client_email,
+               c.phone_number AS client_phone_number, c.notification_email AS client_notification_email,
+               c.notes_current, c.direction_current,
+               co.name AS consultant_name, co.email AS consultant_email, co.notification_email AS consultant_notification_email,
+               s.status AS linked_session_status, s.summary_storage_key AS linked_summary_storage_key,
+               s.biomarker_storage_key AS linked_biomarker_storage_key
+        FROM scheduled_meetings sm
+        JOIN clients c ON c.id = sm.client_id
+        JOIN consultants co ON co.id = sm.consultant_id
+        LEFT JOIN sessions s ON s.id = sm.linked_session_id
+        WHERE sm.id = ?
+        {consultant_sql}
+        LIMIT 1
+        """,
+        params,
+    ).fetchone()
+
+
+def get_meeting_by_response_access_link_id(db: sqlite3.Connection, access_link_id: str):
+    return db.execute(
+        """
+        SELECT sm.*, c.display_name AS client_name, c.email AS client_email,
+               c.phone_number AS client_phone_number,
+               co.name AS consultant_name, co.email AS consultant_email
+        FROM scheduled_meetings sm
+        JOIN clients c ON c.id = sm.client_id
+        JOIN consultants co ON co.id = sm.consultant_id
+        WHERE sm.response_access_link_id = ?
+        LIMIT 1
+        """,
+        (access_link_id,),
+    ).fetchone()
+
+
+def get_client_access_link_by_id(db: sqlite3.Connection, link_id: str):
+    return db.execute(
+        "SELECT * FROM client_access_links WHERE id = ? LIMIT 1",
+        (link_id,),
+    ).fetchone()
+
+
+def update_meeting_response_status(
+    db: sqlite3.Connection,
+    *,
+    meeting_id: str,
+    status: str,
+) -> bool:
+    if status == "accepted":
+        cursor = db.execute(
+            """
+            UPDATE scheduled_meetings
+            SET status = 'accepted',
+                accepted_at = CURRENT_TIMESTAMP,
+                declined_at = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+              AND status IN ('scheduled', 'client_viewed')
+            """,
+            (meeting_id,),
+        )
+        return cursor.rowcount > 0
+    if status == "declined":
+        cursor = db.execute(
+            """
+            UPDATE scheduled_meetings
+            SET status = 'declined',
+                accepted_at = NULL,
+                declined_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+              AND status IN ('scheduled', 'client_viewed', 'accepted')
+            """,
+            (meeting_id,),
+        )
+        return cursor.rowcount > 0
+    raise ValueError(f"Unsupported meeting response status: {status}")
+
+
+def cancel_scheduled_meeting(
+    db: sqlite3.Connection,
+    *,
+    meeting_id: str,
+) -> bool:
+    cursor = db.execute(
+        """
+        UPDATE scheduled_meetings
+        SET status = 'cancelled',
+            cancelled_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+          AND status IN ('scheduled', 'client_viewed', 'accepted')
+        """,
+        (meeting_id,),
+    )
+    return cursor.rowcount > 0
+
+
+def delete_scheduled_meeting(
+    db: sqlite3.Connection,
+    *,
+    meeting_id: str,
+) -> bool:
+    row = db.execute(
+        """
+        SELECT response_access_link_id, status
+        FROM scheduled_meetings
+        WHERE id = ?
+        LIMIT 1
+        """,
+        (meeting_id,),
+    ).fetchone()
+    if not row or row["status"] == "in_progress":
+        return False
+    cursor = db.execute("DELETE FROM scheduled_meetings WHERE id = ?", (meeting_id,))
+    if not cursor.rowcount:
+        return False
+    db.execute("DELETE FROM client_access_links WHERE id = ?", (row["response_access_link_id"],))
+    return True
+
+
+def _meeting_role_column(participant_role: str, *, joined: bool) -> str:
+    normalized = (participant_role or "").strip().lower()
+    mapping = {
+        "guest": "client_joined_at" if joined else "client_left_at",
+        "host": "consultant_joined_at" if joined else "consultant_left_at",
+    }
+    if normalized not in mapping:
+        raise ValueError(f"Unsupported participant role: {participant_role}")
+    return mapping[normalized]
+
+
+def mark_meeting_joined(
+    db: sqlite3.Connection,
+    *,
+    meeting_id: str,
+    participant_role: str,
+) -> Optional[bool]:
+    role_column = _meeting_role_column(participant_role, joined=True)
+    meeting = db.execute(
+        """
+        SELECT in_progress_at, status
+        FROM scheduled_meetings
+        WHERE id = ?
+        LIMIT 1
+        """,
+        (meeting_id,),
+    ).fetchone()
+    if not meeting or meeting["status"] not in {"scheduled", "client_viewed", "accepted", "in_progress"}:
+        return None
+    first_join = bool(meeting and not meeting["in_progress_at"])
+    cursor = db.execute(
+        f"""
+        UPDATE scheduled_meetings
+        SET status = 'in_progress',
+            in_progress_at = COALESCE(in_progress_at, CURRENT_TIMESTAMP),
+            {role_column} = COALESCE({role_column}, CURRENT_TIMESTAMP),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+          AND status IN ('scheduled', 'client_viewed', 'accepted', 'in_progress')
+        """,
+        (meeting_id,),
+    )
+    if not cursor.rowcount:
+        return None
+    return first_join
+
+
+def mark_meeting_participant_left(
+    db: sqlite3.Connection,
+    *,
+    meeting_id: str,
+    participant_role: str,
+) -> None:
+    role_column = _meeting_role_column(participant_role, joined=False)
+    db.execute(
+        f"""
+        UPDATE scheduled_meetings
+        SET {role_column} = COALESCE({role_column}, CURRENT_TIMESTAMP),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (meeting_id,),
+    )
+
+
+def complete_scheduled_meeting(
+    db: sqlite3.Connection,
+    *,
+    meeting_id: str,
+    linked_session_id: str = "",
+    summary_storage_key: str = "",
+    biomarker_storage_key: str = "",
+    attendance_outcome: str = "",
+    ended_by_role: str = "",
+    ended_by_id: str = "",
+) -> bool:
+    cursor = db.execute(
+        """
+        UPDATE scheduled_meetings
+        SET status = 'completed',
+            completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP),
+            linked_session_id = COALESCE(?, linked_session_id),
+            summary_storage_key = COALESCE(?, summary_storage_key),
+            biomarker_storage_key = COALESCE(?, biomarker_storage_key),
+            attendance_outcome = CASE WHEN ? != '' THEN ? ELSE attendance_outcome END,
+            ended_by_role = CASE WHEN ? != '' THEN ? ELSE ended_by_role END,
+            ended_by_id = CASE WHEN ? != '' THEN ? ELSE ended_by_id END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+          AND status IN ('scheduled', 'client_viewed', 'accepted', 'in_progress', 'completed')
+        """,
+        (
+            linked_session_id or None,
+            summary_storage_key or None,
+            biomarker_storage_key or None,
+            attendance_outcome,
+            attendance_outcome,
+            ended_by_role,
+            ended_by_role,
+            ended_by_id,
+            ended_by_id,
+            meeting_id,
+        ),
+    )
+    return cursor.rowcount > 0
+
+
+def mark_meeting_no_show(
+    db: sqlite3.Connection,
+    *,
+    meeting_id: str,
+    attendance_outcome: str,
+) -> bool:
+    cursor = db.execute(
+        """
+        UPDATE scheduled_meetings
+        SET status = 'completed',
+            attendance_outcome = ?,
+            completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+          AND status IN ('scheduled', 'client_viewed', 'accepted', 'in_progress')
+        """,
+        (attendance_outcome, meeting_id),
+    )
+    return cursor.rowcount > 0
+
+
+def list_active_meetings_for_reminders(db: sqlite3.Connection):
+    return db.execute(
+        """
+        SELECT sm.*, c.display_name AS client_name, c.email AS client_email,
+               c.phone_number AS client_phone_number,
+               co.name AS consultant_name, co.email AS consultant_email
+        FROM scheduled_meetings sm
+        JOIN clients c ON c.id = sm.client_id
+        JOIN consultants co ON co.id = sm.consultant_id
+        WHERE sm.status IN ('scheduled', 'client_viewed', 'accepted')
+        ORDER BY sm.scheduled_start_at ASC
+        """
+    ).fetchall()
+
+
+def mark_meeting_reminder_sent(
+    db: sqlite3.Connection,
+    *,
+    meeting_id: str,
+    reminder_kind: str,
+) -> bool:
+    if reminder_kind == "24h":
+        cursor = db.execute(
+            """
+            UPDATE scheduled_meetings
+            SET reminder_24h_sent_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+              AND reminder_24h_sent_at IS NULL
+            """,
+            (meeting_id,),
+        )
+        return cursor.rowcount > 0
+    if reminder_kind == "1m":
+        cursor = db.execute(
+            """
+            UPDATE scheduled_meetings
+            SET reminder_1m_sent_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+              AND reminder_1m_sent_at IS NULL
+            """,
+            (meeting_id,),
+        )
+        return cursor.rowcount > 0
+    raise ValueError(f"Unsupported reminder kind: {reminder_kind}")
+
+
+def has_overlapping_meeting(
+    db: sqlite3.Connection,
+    *,
+    consultant_id: str,
+    client_id: str,
+    scheduled_start_at: str,
+    scheduled_end_at: str,
+) -> bool:
+    row = db.execute(
+        """
+        SELECT id
+        FROM scheduled_meetings
+        WHERE status IN ('scheduled', 'client_viewed', 'accepted', 'in_progress')
+          AND (
+            consultant_id = ?
+            OR client_id = ?
+          )
+          AND scheduled_start_at < ?
+          AND scheduled_end_at > ?
+        LIMIT 1
+        """,
+        (consultant_id, client_id, scheduled_end_at, scheduled_start_at),
+    ).fetchone()
+    return bool(row)
+
+
+def list_meeting_events(db: sqlite3.Connection, meeting_id: str):
+    return db.execute(
+        """
+        SELECT *
+        FROM meeting_events
+        WHERE meeting_id = ?
+        ORDER BY created_at ASC
+        """,
+        (meeting_id,),
+    ).fetchall()
 
 
 def create_client_message(
@@ -636,6 +1413,11 @@ def upsert_session(
     session_id: str,
     client_id: str,
     consultant_id: Optional[str],
+    session_kind: str,
+    meeting_id: Optional[str],
+    transcription_enabled: int,
+    audio_biomarkers_enabled: int,
+    video_biomarkers_enabled: int,
     profile_name: str,
     channel_name: str,
     started_at: str,
@@ -643,6 +1425,7 @@ def upsert_session(
     duration_seconds: int,
     status: str,
     summary_storage_key: Optional[str],
+    transcript_storage_key: Optional[str],
     biomarker_storage_key: Optional[str],
     memory_storage_key: Optional[str],
     urgent_escalation: int,
@@ -651,14 +1434,21 @@ def upsert_session(
     db.execute(
         """
         INSERT INTO sessions (
-            id, client_id, consultant_id, profile_name, channel_name,
+            id, client_id, consultant_id, session_kind, meeting_id,
+            transcription_enabled, audio_biomarkers_enabled, video_biomarkers_enabled,
+            profile_name, channel_name,
             started_at, ended_at, duration_seconds, status,
-            summary_storage_key, biomarker_storage_key, memory_storage_key,
+            summary_storage_key, transcript_storage_key, biomarker_storage_key, memory_storage_key,
             urgent_escalation, escalation_reason
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             client_id=excluded.client_id,
             consultant_id=excluded.consultant_id,
+            session_kind=excluded.session_kind,
+            meeting_id=excluded.meeting_id,
+            transcription_enabled=excluded.transcription_enabled,
+            audio_biomarkers_enabled=excluded.audio_biomarkers_enabled,
+            video_biomarkers_enabled=excluded.video_biomarkers_enabled,
             profile_name=excluded.profile_name,
             channel_name=excluded.channel_name,
             started_at=excluded.started_at,
@@ -666,6 +1456,7 @@ def upsert_session(
             duration_seconds=excluded.duration_seconds,
             status=excluded.status,
             summary_storage_key=excluded.summary_storage_key,
+            transcript_storage_key=excluded.transcript_storage_key,
             biomarker_storage_key=excluded.biomarker_storage_key,
             memory_storage_key=excluded.memory_storage_key,
             urgent_escalation=excluded.urgent_escalation,
@@ -675,6 +1466,11 @@ def upsert_session(
             session_id,
             client_id,
             consultant_id,
+            session_kind,
+            meeting_id,
+            transcription_enabled,
+            audio_biomarkers_enabled,
+            video_biomarkers_enabled,
             profile_name,
             channel_name,
             started_at,
@@ -682,6 +1478,7 @@ def upsert_session(
             duration_seconds,
             status,
             summary_storage_key,
+            transcript_storage_key,
             biomarker_storage_key,
             memory_storage_key,
             urgent_escalation,
@@ -744,16 +1541,66 @@ def list_clients_for_consultant(db: sqlite3.Connection, consultant_id: str):
     return db.execute(
         """
         SELECT c.*,
-               COUNT(DISTINCT s.id) AS session_count,
-               MAX(s.ended_at) AS last_session_at
+               (
+                   SELECT COUNT(*)
+                   FROM sessions s
+                   WHERE s.client_id = c.id
+               ) AS session_count,
+               (
+                   SELECT MAX(COALESCE(s.ended_at, s.started_at, s.created_at))
+                   FROM sessions s
+                   WHERE s.client_id = c.id
+               ) AS last_session_at,
+               (
+                   SELECT s.id
+                   FROM sessions s
+                   WHERE s.client_id = c.id
+                   ORDER BY COALESCE(s.ended_at, s.started_at, s.created_at) DESC
+                   LIMIT 1
+               ) AS last_session_id,
+               (
+                   SELECT COUNT(*)
+                   FROM client_messages m
+                   WHERE m.client_id = c.id
+                     AND m.consultant_id = ?
+                     AND m.direction = 'inbound'
+                     AND m.read_by_consultant_at IS NULL
+               ) AS unread_message_count,
+               (
+                   SELECT sm.scheduled_start_at
+                   FROM scheduled_meetings sm
+                   WHERE sm.client_id = c.id
+                     AND sm.consultant_id = ?
+                     AND sm.status IN ('scheduled', 'client_viewed', 'accepted', 'in_progress')
+                   ORDER BY
+                     CASE WHEN sm.status = 'in_progress' THEN 0 ELSE 1 END,
+                     sm.scheduled_start_at ASC
+                   LIMIT 1
+               ) AS next_meeting_at,
+               (
+                   SELECT sm.status
+                   FROM scheduled_meetings sm
+                   WHERE sm.client_id = c.id
+                     AND sm.consultant_id = ?
+                     AND sm.status IN ('scheduled', 'client_viewed', 'accepted', 'in_progress')
+                   ORDER BY
+                     CASE WHEN sm.status = 'in_progress' THEN 0 ELSE 1 END,
+                     sm.scheduled_start_at ASC
+                   LIMIT 1
+               ) AS next_meeting_status
         FROM clients c
         JOIN consultant_clients cc ON cc.client_id = c.id
-        LEFT JOIN sessions s ON s.client_id = c.id
         WHERE cc.consultant_id = ? AND c.is_active = 1
-        GROUP BY c.id
-        ORDER BY COALESCE(MAX(s.ended_at), c.created_at) DESC
+        ORDER BY COALESCE(
+            (
+                SELECT MAX(COALESCE(s.ended_at, s.started_at, s.created_at))
+                FROM sessions s
+                WHERE s.client_id = c.id
+            ),
+            c.created_at
+        ) DESC
         """,
-        (consultant_id,),
+        (consultant_id, consultant_id, consultant_id, consultant_id),
     ).fetchall()
 
 

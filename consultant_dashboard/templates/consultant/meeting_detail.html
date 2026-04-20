@@ -1,0 +1,137 @@
+{% extends "shared/base.html" %}
+{% block body %}
+  {% include "consultant/_nav.html" %}
+
+  <div class="split" style="grid-template-columns: 1.4fr 0.8fr; align-items: start; margin-bottom: 24px;">
+    <div class="card panel-equal">
+      <div class="panel-head">
+        <div class="panel-title">
+          <div class="panel-kicker">Meeting</div>
+          <h1>{{ meeting.title }}</h1>
+        </div>
+        {% if can_join %}
+          <a href="{{ join_url }}" class="button-secondary" target="_blank" rel="noopener">Join Meeting</a>
+        {% endif %}
+      </div>
+      <div class="section-stack">
+        <div class="meta-block">
+          <div class="meta-primary">{{ meeting.scheduled_start_at|display_dt }}</div>
+          <div class="meta-secondary">{{ meeting_type_display }} · {{ status_display }}{% if meeting.repeat_weekly %} · Weekly{% endif %}</div>
+        </div>
+        <div class="summary-card">
+          <h3>Client</h3>
+          <div class="summary-copy">{{ meeting.client_name }}</div>
+        </div>
+        {% if meeting.invite_message %}
+          <div class="summary-card">
+            <h3>Invite message</h3>
+            <div class="summary-copy">{{ meeting.invite_message }}</div>
+          </div>
+        {% endif %}
+        {% if not is_now_meeting %}
+          <div class="summary-card">
+            <h3>Invite delivery</h3>
+            <div class="summary-copy">{{ meeting.invite_delivery_status }}</div>
+            {% if meeting.invite_delivery_error %}
+              <div class="muted">{{ meeting.invite_delivery_error }}</div>
+            {% endif %}
+          </div>
+        {% endif %}
+        <div class="actions" style="margin-top: 4px;">
+          <form method="post">
+            <input type="hidden" name="action" value="resend_invite">
+            <button type="submit">Resend Invite</button>
+          </form>
+          {% if can_cancel %}
+            <form method="post" onsubmit="return confirm('Cancel this meeting?');">
+              <input type="hidden" name="action" value="cancel">
+              <button type="submit" class="button-danger">Cancel Meeting</button>
+            </form>
+          {% endif %}
+          {% if can_delete %}
+            <form method="post" onsubmit="return confirm('Delete this meeting?');">
+              <input type="hidden" name="action" value="delete">
+              <button type="submit" class="button-secondary">Delete Meeting</button>
+            </form>
+          {% endif %}
+        </div>
+        {% if can_end %}
+          <div class="muted">Use the in-meeting end action to finish a live meeting for both sides.</div>
+        {% endif %}
+        {% if meeting.linked_session_id %}
+          <div class="summary-card">
+            <h3>Linked session</h3>
+            <div class="summary-copy"><a href="/consultant/sessions/{{ meeting.linked_session_id }}">Open Session</a></div>
+          </div>
+        {% endif %}
+        {% if linked_summary %}
+          <div class="summary-card">
+            <h3>Summary</h3>
+            <div class="summary-copy">{{ linked_summary.brief_overview or linked_summary.overview or '' }}</div>
+          </div>
+        {% endif %}
+        {% if biomarker_headlines %}
+          <div class="compact-metric-grid">
+            {% for item in biomarker_headlines %}
+              <div class="compact-metric-item">
+                <span class="compact-metric-label">{{ item.label }}</span>
+                <strong>{{ item.value }}</strong>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card panel-equal">
+      <div class="panel-head tight">
+        <div class="panel-title">
+          <div class="panel-kicker">Details</div>
+        </div>
+      </div>
+      <div class="section-stack">
+        <div class="summary-card">
+          <h3>Schedule</h3>
+          <div class="meta-list">
+            <div class="meta-line"><strong>Type</strong><span class="muted">{{ meeting_type_display }}</span></div>
+            <div class="meta-line"><strong>Status</strong><span class="muted">{{ status_display }}</span></div>
+            <div class="meta-line"><strong>Starts</strong><span class="muted">{{ meeting.scheduled_start_at|display_dt }}</span></div>
+            <div class="meta-line"><strong>Ends</strong><span class="muted">{{ meeting.scheduled_end_at|display_dt }}</span></div>
+            <div class="meta-line"><strong>Repeats</strong><span class="muted">{{ "Weekly" if meeting.repeat_weekly else "No" }}</span></div>
+          </div>
+        </div>
+        <div class="summary-card">
+          <h3>Signals</h3>
+          <div class="meta-list">
+            <div class="meta-line"><strong>Speech-to-text</strong><span class="muted">{{ "On" if meeting.transcription_enabled_display else "Off" }}</span></div>
+            <div class="meta-line"><strong>Audio biomarkers</strong><span class="muted">{{ "On" if meeting.audio_biomarkers_enabled_display else "Off" }}</span></div>
+            <div class="meta-line"><strong>Video biomarkers</strong><span class="muted">{{ "On" if meeting.video_biomarkers_enabled_display else "Off" }}</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if biomarker_sections %}
+    <div class="card history-card">
+      <div class="history-toolbar">
+        <div class="panel-title"><div class="panel-kicker">Biomarkers</div></div>
+      </div>
+      <div class="section-stack">
+        {% for section in biomarker_sections %}
+          <div class="summary-card">
+            <h3>{{ section.title }}</h3>
+            <div class="biomarker-grid" style="margin-top: 10px;">
+              {% for row in section.rows %}
+                <div class="biomarker-row">
+                  <strong>{{ row.label }}</strong>
+                  <div>{{ row.triplet }}</div>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+{% endblock %}
