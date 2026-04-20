@@ -4,6 +4,7 @@ This repo now follows the progressive disclosure structure, but deep dives are i
 
 Planned deep dives:
 
+- `therapy_stack_setup.md` — full local bring-up across `consultant-dashboard`, `simple-backend`, `react-video-client-avatar`, `server-custom-llm`, tunnel setup, reminder cron, and stale-process recovery.
 - `internal_auth_flow.md` — full signing protocol, failure modes, replay protection, and cross-service examples. To be created.
 - `encrypted_storage_model.md` — artifact layout, key derivation, and future S3 migration notes. To be created.
 - `session_ingestion_pipeline.md` — end-of-call payload processing, baseline recomputation, and alert generation. To be created.

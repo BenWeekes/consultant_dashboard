@@ -4,6 +4,10 @@ Purpose: boot the service locally, seed initial records, and understand the requ
 
 This repo documents the product/admin layer. Client session boot, Agora channel setup, Shen, and Thymia live primarily in the sample-stack recipe at `agent-samples/recipes/therapist.md`.
 
+For the full cross-repo local runbook, including tunnel setup and restart order, use:
+
+- [Therapy Stack Setup](deep_dives/therapy_stack_setup.md)
+
 ## Stack
 
 - Python service: Flask app in `consultant_dashboard/`
