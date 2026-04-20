@@ -1,0 +1,480 @@
+/* ============================================================
+   MindFix — Custom Styles
+   Built on Bootstrap 5 with a calming teal palette
+   ============================================================ */
+
+:root {
+  --mf-primary: #1a8a6e;
+  --mf-primary-dark: #14705a;
+  --mf-primary-light: #2bb58e;
+  --mf-dark: #1b2838;
+  --mf-dark-lighter: #243447;
+  --mf-text: #3a4a5c;
+  --mf-text-light: #7a8a9c;
+  --mf-bg: #ffffff;
+  --mf-bg-alt: #f5f9f8;
+  --mf-border: #e0ebe8;
+  --mf-accent-soft: rgba(26, 138, 110, 0.08);
+}
+
+/* ======================== BASE ======================== */
+
+body {
+  font-family: "Open Sans", system-ui, -apple-system, sans-serif;
+  color: var(--mf-text);
+  line-height: 1.7;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: "Raleway", system-ui, -apple-system, sans-serif;
+  font-weight: 600;
+  color: var(--mf-dark);
+}
+
+a {
+  color: var(--mf-primary);
+  transition: color 0.2s;
+}
+
+a:hover {
+  color: var(--mf-primary-dark);
+}
+
+/* ======================== BUTTONS ======================== */
+
+.btn-accent {
+  background: var(--mf-primary);
+  color: #fff;
+  border: none;
+  padding: 12px 32px;
+  font-weight: 600;
+  font-family: "Raleway", system-ui, sans-serif;
+  border-radius: 6px;
+  transition: background 0.2s, transform 0.15s;
+}
+
+.btn-accent:hover {
+  background: var(--mf-primary-dark);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.btn-accent:active {
+  transform: translateY(0);
+}
+
+.btn-accent.btn-lg {
+  padding: 16px 44px;
+  font-size: 1.15rem;
+}
+
+/* ======================== NAVBAR ======================== */
+
+#mainNav {
+  background: transparent;
+  transition: background 0.3s, box-shadow 0.3s;
+  padding: 16px 0;
+}
+
+#mainNav.navbar-scrolled {
+  background: var(--mf-dark);
+  box-shadow: 0 2px 20px rgba(0, 0, 0, 0.3);
+  padding: 10px 0;
+}
+
+#mainNav .navbar-brand {
+  font-family: "Raleway", system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 1.5rem;
+  letter-spacing: -0.02em;
+}
+
+#mainNav .navbar-brand i {
+  color: var(--mf-primary-light);
+}
+
+#mainNav .nav-link {
+  font-weight: 500;
+  padding: 8px 16px;
+  font-size: 0.95rem;
+  transition: color 0.2s;
+}
+
+#mainNav .nav-link:hover,
+#mainNav .nav-link.active {
+  color: var(--mf-primary-light);
+}
+
+.navbar-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.navbar-buttons .btn {
+  font-size: 0.85rem;
+  font-weight: 500;
+  border-radius: 4px;
+}
+
+/* ======================== HERO ======================== */
+
+.hero-section {
+  position: relative;
+  min-height: 100vh;
+  background: linear-gradient(135deg, var(--mf-dark) 0%, var(--mf-dark-lighter) 50%, #1a3a4a 100%);
+  color: #fff;
+  overflow: hidden;
+}
+
+.hero-overlay {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 80%, rgba(26, 138, 110, 0.15) 0%, transparent 60%);
+  pointer-events: none;
+}
+
+.hero-title {
+  font-size: 3rem;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 20px;
+  line-height: 1.2;
+}
+
+.hero-subtitle {
+  font-size: 1.2rem;
+  color: rgba(255, 255, 255, 0.75);
+  max-width: 600px;
+  margin: 0 auto;
+  font-weight: 300;
+}
+
+.hero-trust {
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 400;
+}
+
+.hero-disclaimer {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.35);
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+.hero-avatars {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.hero-avatar-link {
+  display: block;
+  border-radius: 12px;
+  overflow: hidden;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.hero-avatar-link:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.hero-avatar {
+  width: 160px;
+  height: 120px;
+  object-fit: cover;
+  display: block;
+}
+
+@media (max-width: 767.98px) {
+  .hero-avatars {
+    gap: 12px;
+  }
+
+  .hero-avatar {
+    width: 120px;
+    height: 90px;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .hero-avatar {
+    width: 80px;
+    height: 60px;
+  }
+}
+
+/* ======================== SECTIONS ======================== */
+
+.section-padding {
+  padding: 100px 0;
+}
+
+.section-alt {
+  background: var(--mf-bg-alt);
+}
+
+.section-title {
+  font-size: 2rem;
+  margin-bottom: 12px;
+  position: relative;
+}
+
+.section-lead {
+  color: var(--mf-text-light);
+  font-size: 1.1rem;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+/* ======================== FEATURE CARDS ======================== */
+
+.feature-card {
+  padding: 40px 24px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--mf-border);
+  transition: transform 0.2s, box-shadow 0.2s;
+  height: 100%;
+}
+
+.feature-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
+}
+
+.feature-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--mf-accent-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 20px;
+  font-size: 1.6rem;
+  color: var(--mf-primary);
+}
+
+.feature-card h4 {
+  font-size: 1.15rem;
+  margin-bottom: 12px;
+}
+
+.feature-card p {
+  color: var(--mf-text-light);
+  font-size: 0.95rem;
+  margin-bottom: 0;
+}
+
+/* ======================== STEP CARDS ======================== */
+
+.step-card {
+  padding: 40px 24px;
+  height: 100%;
+}
+
+.step-number {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--mf-primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 20px;
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-family: "Raleway", system-ui, sans-serif;
+}
+
+.step-card h4 {
+  font-size: 1.15rem;
+  margin-bottom: 12px;
+}
+
+.step-card p {
+  color: var(--mf-text-light);
+  font-size: 0.95rem;
+  margin-bottom: 0;
+}
+
+/* ======================== FOR CONSULTANTS ======================== */
+
+.consultant-features {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.consultant-features li {
+  padding: 10px 0;
+  font-size: 1rem;
+  border-bottom: 1px solid var(--mf-border);
+  color: var(--mf-text);
+}
+
+.consultant-features li:last-child {
+  border-bottom: none;
+}
+
+.consultant-features li i {
+  color: var(--mf-primary);
+  width: 20px;
+  text-align: center;
+}
+
+.consultant-illustration {
+  font-size: 12rem;
+  color: var(--mf-border);
+  line-height: 1;
+}
+
+/* ======================== CONTACT ======================== */
+
+.contact-card {
+  padding: 48px 32px;
+  border-radius: 12px;
+  background: var(--mf-bg-alt);
+  border: 1px solid var(--mf-border);
+}
+
+.contact-icon {
+  font-size: 2.5rem;
+  color: var(--mf-primary);
+}
+
+.contact-email {
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--mf-primary);
+}
+
+.contact-email:hover {
+  color: var(--mf-primary-dark);
+}
+
+.contact-response {
+  font-size: 0.85rem;
+  color: var(--mf-text-light);
+}
+
+/* ======================== FOOTER ======================== */
+
+.site-footer {
+  background: var(--mf-dark);
+  color: rgba(255, 255, 255, 0.7);
+  padding: 60px 0 30px;
+}
+
+.site-footer h5 {
+  color: #fff;
+  font-size: 1.1rem;
+  margin-bottom: 16px;
+}
+
+.footer-tagline {
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 8px;
+}
+
+.footer-disclaimer {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.35);
+  line-height: 1.5;
+}
+
+.footer-links {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.footer-links li {
+  margin-bottom: 8px;
+}
+
+.footer-links a {
+  color: rgba(255, 255, 255, 0.6);
+  text-decoration: none;
+  font-size: 0.9rem;
+  transition: color 0.2s;
+}
+
+.footer-links a:hover {
+  color: var(--mf-primary-light);
+}
+
+.footer-hr {
+  border-color: rgba(255, 255, 255, 0.1);
+  margin: 30px 0 20px;
+}
+
+.footer-copy {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.4);
+  margin: 0;
+}
+
+/* ======================== RESPONSIVE ======================== */
+
+@media (max-width: 991.98px) {
+  .navbar-buttons {
+    margin-top: 12px;
+    justify-content: center;
+  }
+
+  .hero-title {
+    font-size: 2.2rem;
+  }
+
+  .hero-subtitle {
+    font-size: 1.05rem;
+  }
+
+  .section-padding {
+    padding: 70px 0;
+  }
+}
+
+@media (max-width: 767.98px) {
+  .hero-title {
+    font-size: 1.8rem;
+  }
+
+  .hero-subtitle {
+    font-size: 1rem;
+  }
+
+  .btn-accent.btn-lg {
+    padding: 14px 32px;
+    font-size: 1rem;
+  }
+
+  .section-title {
+    font-size: 1.6rem;
+  }
+
+  .consultant-illustration {
+    font-size: 6rem;
+    margin-top: 20px;
+  }
+
+  .feature-card {
+    padding: 30px 20px;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .hero-section {
+    min-height: 90vh;
+  }
+
+  .hero-title {
+    font-size: 1.5rem;
+  }
+}

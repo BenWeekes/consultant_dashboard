@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MindFix — AI-Powered Mental Wellness</title>
+  <meta name="description" content="AI mental wellness guided by a human therapist. MindFix helps licensed professionals support more people at a lower cost — cutting waiting lists without replacing the expert.">
+
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Font Awesome 6 -->
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@300;400;500;600;700&family=Open+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <!-- Custom CSS -->
+  <link href="css/style.css" rel="stylesheet">
+
+  <!--
+    Deploy-time config: replace http://localhost:8084 and http://127.0.0.1:8090
+    with real values during deployment. For example:
+      sed -i 's|http://localhost:8084|https://app.mindfix.me|g; s|http://127.0.0.1:8090|https://dashboard.mindfix.me|g' index.html
+  -->
+</head>
+<body data-bs-spy="scroll" data-bs-target="#mainNav" data-bs-offset="80">
+
+  <!-- ======================== NAVBAR ======================== -->
+  <nav id="mainNav" class="navbar navbar-expand-lg navbar-dark fixed-top">
+    <div class="container">
+      <a class="navbar-brand" href="#">
+        <i class="fa-solid fa-brain"></i> MindFix
+      </a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navbarNav">
+        <ul class="navbar-nav ms-auto me-3">
+          <li class="nav-item"><a class="nav-link" href="#about">About</a></li>
+          <li class="nav-item"><a class="nav-link" href="#how-it-works">How It Works</a></li>
+          <li class="nav-item"><a class="nav-link" href="#for-consultants">For Consultants</a></li>
+          <li class="nav-item"><a class="nav-link" href="#contact">Contact</a></li>
+        </ul>
+        <div class="navbar-buttons">
+          <a id="consultantLoginBtn" href="http://127.0.0.1:8090/consultant/login" class="btn btn-outline-light btn-sm me-2">Consultant Login</a>
+          <a id="adminLoginBtn" href="http://127.0.0.1:8090/admin/login" class="btn btn-outline-light btn-sm">Admin Login</a>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ======================== HERO ======================== -->
+  <header id="hero" class="hero-section d-flex align-items-center">
+    <div class="hero-overlay"></div>
+    <div class="container text-center position-relative">
+      <h1 class="hero-title">AI Mental Wellness, Guided by a Human Therapist</h1>
+      <p class="hero-subtitle">Start an AI wellness session</p>
+      <div class="hero-avatars mt-4">
+        <a href="http://localhost:8084/?profile=therapy&autoconnect=true" class="hero-avatar-link">
+          <img src="img/avatar-1.png" alt="AI wellness companion" class="hero-avatar">
+        </a>
+        <a href="http://localhost:8084/?profile=therapy&autoconnect=true" class="hero-avatar-link">
+          <img src="img/avatar-2.png" alt="AI wellness companion" class="hero-avatar">
+        </a>
+        <a href="http://localhost:8084/?profile=therapy&autoconnect=true" class="hero-avatar-link">
+          <img src="img/avatar-3.png" alt="AI wellness companion" class="hero-avatar">
+        </a>
+        <a href="http://localhost:8084/?profile=therapy&autoconnect=true" class="hero-avatar-link">
+          <img src="img/avatar-4.png" alt="AI wellness companion" class="hero-avatar">
+        </a>
+      </div>
+      <p class="hero-trust mt-4">
+        <i class="fa-solid fa-lock me-1"></i> Built on HIPAA-eligible infrastructure. End-to-end encryption. Two-factor authentication. No download required.
+      </p>
+      <p class="hero-disclaimer mt-2">
+        The AI companion is not a therapist or medical provider — your human therapist oversees every session.
+      </p>
+    </div>
+  </header>
+
+  <!-- ======================== ABOUT ======================== -->
+  <section id="about" class="section-padding">
+    <div class="container">
+      <div class="text-center mb-5">
+        <h2 class="section-title">What is MindFix?</h2>
+        <p class="section-lead">A platform that helps mental health professionals support more people at a lower price point, without cutting corners.</p>
+      </div>
+      <div class="row g-4">
+        <div class="col-md-4">
+          <div class="feature-card text-center">
+            <div class="feature-icon">
+              <i class="fa-solid fa-clock"></i>
+            </div>
+            <h4>Always Available</h4>
+            <p>24/7 AI sessions with no scheduling needed. Get support whenever you need it, day or night.</p>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="feature-card text-center">
+            <div class="feature-icon">
+              <i class="fa-solid fa-heart-pulse"></i>
+            </div>
+            <h4>Real-Time Wellbeing Monitoring</h4>
+            <p>Voice and camera biomarkers are analysed during sessions to help understand your emotional state.</p>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="feature-card text-center">
+            <div class="feature-icon">
+              <i class="fa-solid fa-user-doctor"></i>
+            </div>
+            <h4>Therapist Oversight</h4>
+            <p>Every client is registered with a licensed therapist who reviews session summaries, tracks your progress, guides the AI, and manages escalation.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================== HOW IT WORKS ======================== -->
+  <section id="how-it-works" class="section-padding section-alt">
+    <div class="container">
+      <div class="text-center mb-5">
+        <h2 class="section-title">How It Works</h2>
+        <p class="section-lead">Three simple steps to start your wellness journey</p>
+      </div>
+      <div class="row g-4">
+        <div class="col-md-4">
+          <div class="step-card text-center">
+            <div class="step-number">1</div>
+            <h4>Sign in securely</h4>
+            <p>Log in with Google and verify your phone number. Your identity stays private and protected.</p>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="step-card text-center">
+            <div class="step-number">2</div>
+            <h4>Talk to your AI companion</h4>
+            <p>Start a private video session. Real-time biomarkers help gauge how you're feeling as you talk.</p>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="step-card text-center">
+            <div class="step-number">3</div>
+            <h4>Review and follow-up</h4>
+            <p>After each session, a summary is sent to your therapist. They review your progress, provide direction to the AI, and follow up when needed.</p>
+          </div>
+        </div>
+      </div>
+      <div class="text-center mt-5">
+        <a id="howItWorksCta" href="http://localhost:8084/?profile=therapy&autoconnect=true" class="btn btn-accent">
+          <i class="fa-solid fa-comments me-2"></i>Start an AI Session
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================== FOR CONSULTANTS ======================== -->
+  <section id="for-consultants" class="section-padding">
+    <div class="container">
+      <div class="row align-items-center">
+        <div class="col-lg-6 mb-4 mb-lg-0">
+          <h2 class="section-title">For Mental Health Professionals</h2>
+          <p class="mb-4">MindFix does not replace you. It helps you support more clients, reduce waiting lists, and stay in control. You guide the AI, review every session, and handle escalation on your terms.</p>
+          <ul class="consultant-features">
+            <li><i class="fa-solid fa-users me-2"></i> Client management and scheduling</li>
+            <li><i class="fa-solid fa-chart-line me-2"></i> Biomarker baselines and trend tracking</li>
+            <li><i class="fa-solid fa-file-lines me-2"></i> AI-generated session summaries</li>
+            <li><i class="fa-solid fa-bell me-2"></i> Automated risk alerts and escalation control</li>
+            <li><i class="fa-solid fa-compass me-2"></i> Provide direction to the AI between sessions</li>
+            <li><i class="fa-solid fa-message me-2"></i> Secure client messaging</li>
+          </ul>
+          <a id="consultantCta" href="http://127.0.0.1:8090/consultant/login" class="btn btn-accent mt-3">
+            <i class="fa-solid fa-right-to-bracket me-2"></i>Log in to your dashboard
+          </a>
+        </div>
+        <div class="col-lg-6 text-center">
+          <div class="consultant-illustration">
+            <i class="fa-solid fa-laptop-medical"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================== WHY MINDFIX ======================== -->
+  <section id="why-mindfix" class="section-padding section-alt">
+    <div class="container">
+      <div class="text-center mb-5">
+        <h2 class="section-title">Why MindFix?</h2>
+      </div>
+      <div class="row g-4">
+        <div class="col-md-4">
+          <div class="feature-card text-center">
+            <div class="feature-icon">
+              <i class="fa-solid fa-shield-halved"></i>
+            </div>
+            <h4>Private by design</h4>
+            <p>Built on HIPAA-eligible infrastructure with end-to-end encryption, two-factor authentication, and role-based access controls. Sessions are only visible to you and your therapist.</p>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="feature-card text-center">
+            <div class="feature-icon">
+              <i class="fa-solid fa-globe"></i>
+            </div>
+            <h4>No app to install</h4>
+            <p>MindFix runs entirely in your browser. Start a session from any device — desktop, tablet, or phone.</p>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="feature-card text-center">
+            <div class="feature-icon">
+              <i class="fa-solid fa-hand-holding-heart"></i>
+            </div>
+            <h4>Human therapist, always in the loop</h4>
+            <p>MindFix is not a replacement for professional care. Your licensed therapist oversees every session, guides the AI, and steps in when it matters.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================== CONTACT ======================== -->
+  <section id="contact" class="section-padding">
+    <div class="container">
+      <div class="text-center mb-5">
+        <h2 class="section-title">Get in Touch</h2>
+        <p class="section-lead">Have questions? We'd love to hear from you.</p>
+      </div>
+      <div class="row justify-content-center">
+        <div class="col-lg-7 text-center">
+          <div class="contact-card">
+            <div class="contact-icon mb-3">
+              <i class="fa-solid fa-envelope"></i>
+            </div>
+            <p class="mb-2">Drop us a line at</p>
+            <a href="mailto:info@mindfix.me" class="contact-email">info@mindfix.me</a>
+            <p class="contact-response mt-3">We aim to respond within 48 hours.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================== FOOTER ======================== -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-4 mb-4 mb-md-0">
+          <h5><i class="fa-solid fa-brain me-2"></i>MindFix</h5>
+          <p class="footer-tagline">AI wellness guided by licensed therapists.</p>
+          <p class="footer-disclaimer">The AI companion is not a therapist or medical provider — your human therapist oversees every session.</p>
+        </div>
+        <div class="col-md-4 mb-4 mb-md-0">
+          <h5>Contact</h5>
+          <ul class="footer-links">
+            <li><i class="fa-solid fa-envelope me-2"></i><a href="mailto:info@mindfix.me">info@mindfix.me</a></li>
+            <li><i class="fa-solid fa-phone me-2"></i>+44 (0) 20 3538 5358</li>
+          </ul>
+        </div>
+        <div class="col-md-4">
+          <h5>Links</h5>
+          <ul class="footer-links">
+            <li><a href="privacy.html">Privacy Policy</a></li>
+            <li><a href="terms.html">Terms of Service</a></li>
+          </ul>
+        </div>
+      </div>
+      <hr class="footer-hr">
+      <div class="text-center">
+        <p class="footer-copy">&copy; 2026 MindFix. All rights reserved.</p>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Bootstrap 5 JS Bundle -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      // Smooth scroll for nav links
+      document.querySelectorAll('a.nav-link[href^="#"]').forEach(function (link) {
+        link.addEventListener("click", function (e) {
+          e.preventDefault();
+          var target = document.querySelector(this.getAttribute("href"));
+          if (target) {
+            var offset = 70;
+            var top = target.getBoundingClientRect().top + window.pageYOffset - offset;
+            window.scrollTo({ top: top, behavior: "smooth" });
+          }
+          // Collapse mobile nav
+          var navCollapse = document.getElementById("navbarNav");
+          if (navCollapse.classList.contains("show")) {
+            new bootstrap.Collapse(navCollapse).hide();
+          }
+        });
+      });
+
+      // Navbar background on scroll
+      var navbar = document.getElementById("mainNav");
+      window.addEventListener("scroll", function () {
+        if (window.scrollY > 50) {
+          navbar.classList.add("navbar-scrolled");
+        } else {
+          navbar.classList.remove("navbar-scrolled");
+        }
+      });
+    });
+  </script>
+</body>
+</html>
