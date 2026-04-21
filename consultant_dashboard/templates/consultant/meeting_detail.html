@@ -30,8 +30,16 @@
         {% endif %}
         {% if not is_now_meeting %}
           <div class="summary-card">
-            <h3>Invite delivery</h3>
-            <div class="summary-copy">{{ meeting.invite_delivery_status }}</div>
+            <h3>Client response</h3>
+            <div class="summary-copy">
+              {% if meeting.status in ["accepted", "declined"] %}
+                {{ status_display }}
+              {% elif meeting.status in ["scheduled", "client_viewed"] %}
+                Sent
+              {% else %}
+                {{ status_display }}
+              {% endif %}
+            </div>
             {% if meeting.invite_delivery_error %}
               <div class="muted">{{ meeting.invite_delivery_error }}</div>
             {% endif %}

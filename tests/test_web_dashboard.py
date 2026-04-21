@@ -814,7 +814,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertTrue(meeting["accepted_at"])
 
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
-    def test_client_cannot_decline_after_accepting_meeting(self, mocked_deliver_email):
+    def test_client_can_toggle_between_accept_and_decline(self, mocked_deliver_email):
         self.consultant_login()
         self.client.post(
             f"/consultant/clients/{self.client_id}/meetings/new",
@@ -848,15 +848,17 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             follow_redirects=True,
         )
         self.assertEqual(decline_response.status_code, 200)
-        self.assertIn(b"can no longer be declined", decline_response.data)
+        self.assertIn(b"Meeting declined", decline_response.data)
 
         db = get_db(self.app.config)
         meeting = db.execute(
-            "SELECT status FROM scheduled_meetings WHERE id = ?",
+            "SELECT status, accepted_at, declined_at FROM scheduled_meetings WHERE id = ?",
             (meeting_id,),
         ).fetchone()
         db.close()
-        self.assertEqual(meeting["status"], "accepted")
+        self.assertEqual(meeting["status"], "declined")
+        self.assertIsNone(meeting["accepted_at"])
+        self.assertTrue(meeting["declined_at"])
 
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_resend_invite_reopens_declined_meeting(self, mocked_deliver_email):
@@ -955,6 +957,65 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         response = self.client.get(f"/meetings/respond/{token}")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Accept and join now", response.data)
+
+    @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
+    def test_meeting_response_shows_toggle_actions_after_accept(self, mocked_deliver_email):
+        self.consultant_login()
+        self.client.post(
+            "/consultant/meetings/new",
+            data={
+                "client_id": self.client_id,
+                "title": "Toggle Response",
+                "scheduled_start_at": self._future_local_time(days=1),
+                "duration_minutes": "30",
+                "timezone_name": "Europe/London",
+                "invite_message": "",
+            },
+            follow_redirects=True,
+        )
+        token = mocked_deliver_email.call_args.kwargs["reply_link"].rsplit("/", 1)[-1]
+        self.client.post(
+            f"/meetings/respond/{token}",
+            data={"action": "accept"},
+            follow_redirects=True,
+        )
+        response = self.client.get(f"/meetings/respond/{token}")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'value="accept"', response.data)
+        self.assertIn(b'value="decline"', response.data)
+        self.assertIn(b"Status: accepted", response.data)
+        self.assertIn(b"reminder email with your meeting link", response.data)
+
+    @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
+    def test_consultant_meeting_detail_shows_client_response_status(self, mocked_deliver_email):
+        self.consultant_login()
+        self.client.post(
+            "/consultant/meetings/new",
+            data={
+                "client_id": self.client_id,
+                "title": "Response Status Detail",
+                "scheduled_start_at": self._future_local_time(days=1),
+                "duration_minutes": "30",
+                "timezone_name": "Europe/London",
+                "invite_message": "",
+            },
+            follow_redirects=True,
+        )
+        token = mocked_deliver_email.call_args.kwargs["reply_link"].rsplit("/", 1)[-1]
+        self.client.post(
+            f"/meetings/respond/{token}",
+            data={"action": "accept"},
+            follow_redirects=True,
+        )
+        db = get_db(self.app.config)
+        meeting_id = db.execute(
+            "SELECT id FROM scheduled_meetings ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()["id"]
+        db.close()
+        response = self.client.get(f"/consultant/meetings/{meeting_id}")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Client response", response.data)
+        self.assertIn(b"Accepted", response.data)
 
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_meeting_response_ics_downloads(self, mocked_deliver_email):

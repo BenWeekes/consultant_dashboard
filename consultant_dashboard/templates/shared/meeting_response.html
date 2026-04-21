@@ -29,10 +29,10 @@
       {% endif %}
 
       <div class="actions" style="margin-top: 22px;">
-        {% if meeting.status in ['scheduled', 'client_viewed'] and not is_ai_meeting %}
+        {% if meeting.status in ['scheduled', 'client_viewed', 'accepted', 'declined'] and not is_ai_meeting %}
           <form method="post">
-            <input type="hidden" name="action" value="{{ 'accept_join' if immediate_join else 'accept' }}">
-            <button type="submit">{{ "Accept and join now" if immediate_join else "Accept" }}</button>
+            <input type="hidden" name="action" value="{{ 'accept_join' if immediate_join and meeting.status in ['scheduled', 'client_viewed'] else 'accept' }}">
+            <button type="submit">{{ "Accept and join now" if immediate_join and meeting.status in ['scheduled', 'client_viewed'] else "Accept" }}</button>
           </form>
           <form method="post">
             <input type="hidden" name="action" value="decline">
@@ -47,7 +47,10 @@
         {% endif %}
       </div>
 
-      <div class="muted" style="margin-top: 18px;">Status: {{ meeting.status.replace('_', ' ') }}</div>
+      {% if not is_ai_meeting %}
+        <div class="muted" style="margin-top: 16px;">A reminder email with your meeting link will be sent before the meeting starts.</div>
+      {% endif %}
+      <div class="muted" style="margin-top: 10px;">Status: {{ meeting.status.replace('_', ' ') }}</div>
     {% endif %}
   </div>
 {% endblock %}
