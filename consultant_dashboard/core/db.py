@@ -921,7 +921,7 @@ def update_meeting_response_status(
                 declined_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
-              AND status IN ('scheduled', 'client_viewed', 'accepted')
+              AND status IN ('scheduled', 'client_viewed')
             """,
             (meeting_id,),
         )

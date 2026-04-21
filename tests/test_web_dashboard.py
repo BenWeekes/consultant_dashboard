@@ -287,6 +287,9 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertEqual(row["video_biomarkers_enabled"], 1)
         self.assertEqual(row["transcription_provider"], "agora_stt")
         self.assertEqual(row["transcription_language"], "en-US")
+        invite_plain_text = mocked_deliver_email.call_args.kwargs.get("plain_text_override", "")
+        self.assertIn("Repeats: Weekly", invite_plain_text)
+        self.assertNotIn("Open meeting details:", invite_plain_text)
 
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_consultant_can_disable_biomarkers_on_meeting_form(self, mocked_deliver_email):
@@ -807,6 +810,95 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         db.close()
         self.assertEqual(meeting["status"], "accepted")
         self.assertTrue(meeting["accepted_at"])
+
+    @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
+    def test_client_cannot_decline_after_accepting_meeting(self, mocked_deliver_email):
+        self.consultant_login()
+        self.client.post(
+            f"/consultant/clients/{self.client_id}/meetings/new",
+            data={
+                "title": "Accept Then Decline Test",
+                "scheduled_start_at": self._future_local_time(days=1),
+                "duration_minutes": "30",
+                "timezone_name": "Europe/London",
+                "invite_message": "",
+            },
+            follow_redirects=True,
+        )
+        db = get_db(self.app.config)
+        meeting_id = db.execute(
+            "SELECT id FROM scheduled_meetings ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()["id"]
+        db.close()
+        token = mocked_deliver_email.call_args.kwargs["reply_link"].rsplit("/", 1)[-1]
+
+        accept_response = self.client.post(
+            f"/meetings/respond/{token}",
+            data={"action": "accept"},
+            follow_redirects=True,
+        )
+        self.assertEqual(accept_response.status_code, 200)
+        self.assertIn(b"Meeting accepted", accept_response.data)
+
+        decline_response = self.client.post(
+            f"/meetings/respond/{token}",
+            data={"action": "decline"},
+            follow_redirects=True,
+        )
+        self.assertEqual(decline_response.status_code, 200)
+        self.assertIn(b"can no longer be declined", decline_response.data)
+
+        db = get_db(self.app.config)
+        meeting = db.execute(
+            "SELECT status FROM scheduled_meetings WHERE id = ?",
+            (meeting_id,),
+        ).fetchone()
+        db.close()
+        self.assertEqual(meeting["status"], "accepted")
+
+    @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
+    def test_resend_invite_reopens_declined_meeting(self, mocked_deliver_email):
+        self.consultant_login()
+        self.client.post(
+            f"/consultant/clients/{self.client_id}/meetings/new",
+            data={
+                "title": "Decline Then Reopen Test",
+                "scheduled_start_at": self._future_local_time(days=1),
+                "duration_minutes": "30",
+                "timezone_name": "Europe/London",
+                "invite_message": "",
+            },
+            follow_redirects=True,
+        )
+        first_token = mocked_deliver_email.call_args.kwargs["reply_link"].rsplit("/", 1)[-1]
+        self.client.post(
+            f"/meetings/respond/{first_token}",
+            data={"action": "decline"},
+            follow_redirects=True,
+        )
+
+        db = get_db(self.app.config)
+        meeting_id = db.execute(
+            "SELECT id FROM scheduled_meetings ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()["id"]
+        db.close()
+
+        response = self.client.post(
+            f"/consultant/meetings/{meeting_id}",
+            data={"action": "resend_invite"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Meeting reopened for response", response.data)
+
+        db = get_db(self.app.config)
+        meeting = db.execute(
+            "SELECT status, declined_at FROM scheduled_meetings WHERE id = ?",
+            (meeting_id,),
+        ).fetchone()
+        db.close()
+        self.assertEqual(meeting["status"], "scheduled")
+        self.assertIsNone(meeting["declined_at"])
 
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_meeting_detail_and_response_pages_show_join_actions(self, mocked_deliver_email):

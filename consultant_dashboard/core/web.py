@@ -535,12 +535,12 @@ def _meeting_delivery_content(meeting, hosted_link: str, *, reminder_kind: str =
         )
     if meeting["invite_message"]:
         body += f"\n{meeting['invite_message']}\n"
+    if not immediate and bool(_meeting_field(meeting, "repeat_weekly", 0)):
+        body += "\nRepeats: Weekly\n"
     if reminder_kind == "24h":
         body += "\nReminder: your meeting is within the next 24 hours.\n"
     elif reminder_kind == "1m":
         body += "\nReminder: it is time to join now.\n"
-    if not immediate:
-        body += f"\nOpen meeting details: {hosted_link}"
     return body
 
 
@@ -1697,6 +1697,7 @@ def consultant_meeting_detail(meeting_id: str):
             else:
                 flash("This meeting can no longer be cancelled.", "error")
         elif action == "resend_invite":
+            reopened_declined = meeting["status"] == "declined"
             access_token = new_access_token()
             access_link_id = create_client_access_link(
                 db,
@@ -1709,11 +1710,26 @@ def consultant_meeting_detail(meeting_id: str):
                 "UPDATE scheduled_meetings SET response_access_link_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (access_link_id, meeting_id),
             )
+            if reopened_declined:
+                db.execute(
+                    """
+                    UPDATE scheduled_meetings
+                    SET status = 'scheduled',
+                        declined_at = NULL,
+                        accepted_at = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (meeting_id,),
+                )
             meeting = get_scheduled_meeting_detail(db, meeting_id, consultant_id=consultant_id)
             _send_meeting_invite(db, meeting, access_token)
             record_meeting_event(db, meeting_id=meeting_id, actor_type="consultant", actor_id=consultant_id, event_type="invite_resent")
             db.commit()
-            flash("Invite resent", "muted")
+            if reopened_declined:
+                flash("Invite resent. Meeting reopened for response.", "muted")
+            else:
+                flash("Invite resent", "muted")
         elif action == "mark_no_show":
             outcome = request.form.get("attendance_outcome", "client_no_show").strip()
             if mark_meeting_no_show(db, meeting_id=meeting_id, attendance_outcome=outcome):

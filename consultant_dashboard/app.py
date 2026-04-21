@@ -2,8 +2,9 @@ import argparse
 import hashlib
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from flask import Flask, redirect, url_for
@@ -23,14 +24,20 @@ def _hash_value(value: str) -> str:
     return hashlib.sha256(value.strip().lower().encode("utf-8")).hexdigest()
 
 
-def _format_display_datetime(value: str) -> str:
+def _format_display_datetime(value: str, display_timezone: str = "Europe/London") -> str:
     if not value:
         return ""
     try:
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return value
-    return dt.strftime("%d %b %Y, %H:%M")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    try:
+        local_tz = ZoneInfo(display_timezone)
+    except Exception:
+        local_tz = timezone.utc
+    return dt.astimezone(local_tz).strftime("%d %b %Y, %H:%M")
 
 
 def create_app() -> Flask:
@@ -56,7 +63,9 @@ def create_app() -> Flask:
     app.register_blueprint(auth_bp)
     app.register_blueprint(internal_bp)
     app.register_blueprint(web_bp)
-    app.jinja_env.filters["display_dt"] = _format_display_datetime
+    app.jinja_env.filters["display_dt"] = lambda value: _format_display_datetime(
+        value, app.config.get("DISPLAY_TIMEZONE", "Europe/London")
+    )
 
     @app.route("/")
     def root():
