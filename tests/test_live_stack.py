@@ -18,21 +18,32 @@ def _get(url: str, timeout: int = 5):
         return resp.status, body
 
 
+LIVE_BASE_URL = os.environ.get("LIVE_BASE_URL", "https://mindfix.me").rstrip("/")
+
+
 @unittest.skipUnless(
     os.environ.get("RUN_LIVE_STACK_TESTS", "").lower() in {"1", "true", "yes"},
     "set RUN_LIVE_STACK_TESTS=1 to run live stack smoke tests",
 )
 class LiveStackSmokeTest(unittest.TestCase):
-    backend_base = os.environ.get("LIVE_BACKEND_URL", "http://127.0.0.1:8082")
+    backend_base = os.environ.get(
+        "LIVE_BACKEND_URL",
+        LIVE_BASE_URL or "http://127.0.0.1:8082",
+    )
     client_url = os.environ.get(
         "LIVE_CLIENT_URL",
-        "http://localhost:8084?profile=therapy&autoconnect=true",
+        (LIVE_BASE_URL + "/app?profile=therapy&autoconnect=true&returnurl=/")
+        if LIVE_BASE_URL
+        else "http://localhost:8084?profile=therapy&autoconnect=true",
     )
-    dashboard_base = os.environ.get("LIVE_DASHBOARD_URL", "http://127.0.0.1:8090")
+    dashboard_base = os.environ.get(
+        "LIVE_DASHBOARD_URL",
+        LIVE_BASE_URL or "http://127.0.0.1:8090",
+    )
     custom_llm_base = os.environ.get("LIVE_CUSTOM_LLM_URL", "http://127.0.0.1:8101")
     tunnel_ping_url = os.environ.get(
         "LIVE_TUNNEL_PING_URL",
-        "https://artwork-davidson-unable-informative.trycloudflare.com/ping",
+        f"{custom_llm_base.rstrip('/')}/ping",
     )
 
     def test_backend_health(self):

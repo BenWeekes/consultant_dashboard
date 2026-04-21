@@ -91,6 +91,9 @@ def resolve_client():
         "client_id": row["client_id"],
         "consultant_id": row["consultant_id"],
         "is_active": bool(row["is_active"]),
+        "email": row["email"] or "",
+        "display_name": row["display_name"] or "",
+        "phone_number": row["phone_number"] or "",
     }
 
 

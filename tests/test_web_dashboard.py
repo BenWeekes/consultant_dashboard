@@ -17,6 +17,11 @@ from consultant_dashboard.core.messaging import hash_access_token
 
 
 class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
+    def _future_local_time(self, *, days: int = 1, minutes: int = 0, timezone_name: str = "Europe/London") -> str:
+        return (
+            datetime.now(timezone.utc) + timedelta(days=days, minutes=minutes)
+        ).astimezone(ZoneInfo(timezone_name)).strftime("%Y-%m-%dT%H:%M")
+
     def test_consultant_routes_require_login(self):
         response = self.client.get("/consultant/dashboard", follow_redirects=False)
         self.assertEqual(response.status_code, 302)
@@ -48,7 +53,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         response = self.client.get("/consultant/dashboard")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Consultant Dashboard", response.data)
-        self.assertIn(b"Alex Demo", response.data)
+        self.assertIn(b"Signed in as Test Consultant", response.data)
         self.assertIn(b"Linked Clients", response.data)
 
     def test_consultant_can_create_client_and_view_detail(self):
@@ -212,7 +217,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
                 "video_biomarkers_enabled": "0",
                 "transcription_provider": "agora_stt",
                 "transcription_language": "en-US",
-                "scheduled_start_at": "2026-04-20T10:00",
+                "scheduled_start_at": self._future_local_time(days=1),
                 "duration_minutes": "30",
                 "timezone_name": "Europe/London",
                 "invite_message": "Let's talk live.",
@@ -254,7 +259,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
                 "meeting_type": "ai",
                 "repeat_weekly": "1",
                 "title": "MindFix AI check-in",
-                "scheduled_start_at": "2026-04-20T10:00",
+                "scheduled_start_at": self._future_local_time(days=1),
                 "duration_minutes": "30",
                 "timezone_name": "Europe/London",
                 "invite_message": "AI reminder.",
@@ -277,11 +282,11 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertEqual(row["meeting_type"], "ai")
         self.assertEqual(row["repeat_weekly"], 1)
         self.assertEqual(row["channel_name"], get_pair_channel(self.consultant_id, self.client_id, "ai"))
-        self.assertEqual(row["transcription_enabled"], 0)
+        self.assertEqual(row["transcription_enabled"], 1)
         self.assertEqual(row["audio_biomarkers_enabled"], 1)
         self.assertEqual(row["video_biomarkers_enabled"], 1)
-        self.assertEqual(row["transcription_provider"], "")
-        self.assertEqual(row["transcription_language"], "")
+        self.assertEqual(row["transcription_provider"], "agora_stt")
+        self.assertEqual(row["transcription_language"], "en-US")
 
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_consultant_can_disable_biomarkers_on_meeting_form(self, mocked_deliver_email):
@@ -294,7 +299,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
                 "meeting_type": "human",
                 "audio_biomarkers_enabled": "0",
                 "video_biomarkers_enabled": "0",
-                "scheduled_start_at": "2026-04-20T10:00",
+                "scheduled_start_at": self._future_local_time(days=1),
                 "duration_minutes": "30",
                 "timezone_name": "Europe/London",
                 "invite_message": "",
@@ -348,7 +353,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
                 "meeting_type": "human",
                 "transcription_enabled": "1",
                 "audio_biomarkers_enabled": "1",
-                "scheduled_start_at": "2026-04-20T10:00",
+                "scheduled_start_at": self._future_local_time(days=1),
                 "duration_minutes": "30",
                 "timezone_name": "Europe/London",
                 "invite_message": "",
@@ -364,7 +369,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_immediate_meetings_skip_overlap_validation(self, mocked_deliver_email):
         self.consultant_login()
-        now_value = (datetime.now(timezone.utc) + timedelta(seconds=10)).strftime("%Y-%m-%dT%H:%M")
+        now_value = self._future_local_time(days=0, minutes=0)
 
         first = self.client.post(
             "/consultant/meetings/new",
@@ -395,7 +400,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             follow_redirects=True,
         )
         self.assertEqual(second.status_code, 200)
-        self.assertIn(b"Opening it now", second.data)
+        self.assertIn(b"active meeting", second.data)
         self.assertIn(b"Open Meeting", second.data)
 
         db = get_db(self.app.config)
@@ -450,7 +455,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_future_meeting_blocked_when_open_meeting_exists_for_pair(self, mocked_deliver_email):
         self.consultant_login()
-        now_value = (datetime.now(timezone.utc) + timedelta(seconds=10)).strftime("%Y-%m-%dT%H:%M")
+        now_value = self._future_local_time(days=0, minutes=0)
         self.client.post(
             "/consultant/meetings/new",
             data={
@@ -764,7 +769,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             f"/consultant/clients/{self.client_id}/meetings/new",
             data={
                 "title": "Accept Test",
-                "scheduled_start_at": "2026-04-20T10:00",
+                "scheduled_start_at": self._future_local_time(days=1),
                 "duration_minutes": "30",
                 "timezone_name": "Europe/London",
                 "invite_message": "",
@@ -864,7 +869,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             data={
                 "client_id": self.client_id,
                 "title": "Calendar Test",
-                "scheduled_start_at": "2026-04-20T10:00",
+                "scheduled_start_at": self._future_local_time(days=1),
                 "duration_minutes": "30",
                 "timezone_name": "Europe/London",
                 "invite_message": "Bring questions.",
@@ -899,7 +904,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Cancel meeting", response.data)
+        self.assertIn(b"Cancel Meeting", response.data)
 
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_consultant_can_delete_meeting_from_detail_page(self, mocked_deliver_email):
@@ -963,7 +968,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         response = self.client.get("/consultant/clients")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Alex Demo", response.data)
-        self.assertIn(b"New meeting", response.data)
+        self.assertIn(b"New Meeting", response.data)
         self.assertIn(b"Add Client", response.data)
 
         response = self.client.get(f"/consultant/clients/{self.client_id}")

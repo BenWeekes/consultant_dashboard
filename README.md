@@ -171,16 +171,40 @@ source venv/bin/activate
 RUN_LIVE_STACK_TESTS=1 python -m unittest tests.test_live_stack -v
 ```
 
+Defaults:
+
+- `LIVE_BASE_URL=https://mindfix.me`
+- `LIVE_CUSTOM_LLM_URL=http://127.0.0.1:8101`
+- `LIVE_TUNNEL_PING_URL=${LIVE_CUSTOM_LLM_URL}/ping`
+
+Local Mac with one reverse-proxy domain/port:
+
+```bash
+RUN_LIVE_STACK_TESTS=1 LIVE_BASE_URL=http://localhost:8080 python -m unittest tests.test_live_stack -v
+```
+
+Local Mac with direct ports (no nginx):
+
+```bash
+RUN_LIVE_STACK_TESTS=1 \
+LIVE_BACKEND_URL=http://127.0.0.1:8082 \
+LIVE_DASHBOARD_URL=http://127.0.0.1:8090 \
+LIVE_CLIENT_URL='http://localhost:8084?profile=therapy&autoconnect=true' \
+LIVE_CUSTOM_LLM_URL=http://127.0.0.1:8101 \
+python -m unittest tests.test_live_stack -v
+```
+
 Default live endpoints checked:
 
 - `http://127.0.0.1:8082/health`
 - `http://127.0.0.1:8082/auth-check?...`
 - `http://127.0.0.1:8090/health`
 - `http://127.0.0.1:8101/ping`
-- configured Cloudflare tunnel `/ping`
+- `LIVE_TUNNEL_PING_URL` (defaults to `${LIVE_CUSTOM_LLM_URL}/ping`)
 
 Override them with:
 
+- `LIVE_BASE_URL` (sets backend/dashboard/client defaults together)
 - `LIVE_BACKEND_URL`
 - `LIVE_CLIENT_URL`
 - `LIVE_DASHBOARD_URL`

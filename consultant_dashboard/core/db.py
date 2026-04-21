@@ -1498,7 +1498,7 @@ def resolve_client_identity(db: sqlite3.Connection, **hashes: str):
     if not clauses:
         return None
     sql = f"""
-        SELECT cai.client_id, cc.consultant_id, c.is_active
+        SELECT cai.client_id, cc.consultant_id, c.is_active, c.email, c.display_name, c.phone_number
         FROM client_auth_identities cai
         JOIN clients c ON c.id = cai.client_id
         LEFT JOIN consultant_clients cc ON cc.client_id = cai.client_id
