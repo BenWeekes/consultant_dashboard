@@ -288,6 +288,8 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertEqual(row["transcription_provider"], "agora_stt")
         self.assertEqual(row["transcription_language"], "en-US")
         invite_plain_text = mocked_deliver_email.call_args.kwargs.get("plain_text_override", "")
+        self.assertIn("Europe/London", invite_plain_text)
+        self.assertIn("UTC+01:00", invite_plain_text)
         self.assertIn("Repeats: Weekly", invite_plain_text)
         self.assertNotIn("Open meeting details:", invite_plain_text)
 
@@ -927,15 +929,16 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Meeting accepted", response.data)
-        self.assertIn(b"Join Meeting", response.data)
-        self.assertIn(f"/meetings/respond/{token}/join".encode("utf-8"), response.data)
+        self.assertNotIn(b"Join Meeting", response.data)
+        self.assertIn(b"Add to calendar", response.data)
+        self.assertNotIn(f"/meetings/respond/{token}/join".encode("utf-8"), response.data)
         self.assertNotIn(b"join_bootstrap=", response.data)
         self.assertNotIn(b"access_token=", response.data)
 
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_meeting_response_can_offer_accept_and_join_now(self, mocked_deliver_email):
         self.consultant_login()
-        start_at = datetime.now(timezone.utc) + timedelta(minutes=2)
+        start_at = (datetime.now(timezone.utc) - timedelta(minutes=1)).astimezone(ZoneInfo("Europe/London"))
         self.client.post(
             "/consultant/meetings/new",
             data={

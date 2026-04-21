@@ -312,6 +312,15 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
                 channel_name=get_pair_channel(self.consultant_id, self.client_id, "human"),
                 response_access_link_id=access_link_id,
             )
+            db.execute(
+                """
+                UPDATE scheduled_meetings
+                SET created_at = datetime('now', '-1 day'),
+                    updated_at = datetime('now', '-1 day'),
+                    reminder_24h_sent_at = datetime('now', '-2 hours')
+                WHERE title = 'Reminder 1m Meeting'
+                """
+            )
             db.commit()
             db.close()
 

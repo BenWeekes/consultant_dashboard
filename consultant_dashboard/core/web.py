@@ -230,23 +230,18 @@ def _meeting_status_display(meeting) -> str:
     if _meeting_is_stale_open(meeting):
         return "Expired"
     status = _meeting_field(meeting, "status", "")
+    if status in {"scheduled", "client_viewed"}:
+        return "Sent"
+    if status == "accepted":
+        return "Accepted"
     if status == "cancelled":
         return "Cancelled"
     if status == "declined":
         return "Declined"
-    if status == "completed":
-        return "Past"
-    start_at = _parse_iso_datetime(_meeting_field(meeting, "scheduled_start_at", ""))
-    end_at = _parse_iso_datetime(_meeting_field(meeting, "scheduled_end_at", ""))
-    now = datetime.now(timezone.utc)
-    if start_at and end_at and start_at <= now <= end_at:
+    if status == "in_progress":
         return "Meeting now"
-    if start_at and start_at > now:
-        return "Future"
-    if start_at and start_at <= now:
-        return "Past"
     if status == "completed":
-        return "Past"
+        return "Completed"
     return status.replace("_", " ").title()
 
 
@@ -276,11 +271,7 @@ def _normalize_next_meeting_fields(row: dict) -> None:
             "join_window_end_at": next_time,
         }
         status_display = _meeting_status_display(pseudo_meeting)
-        if status_display in {"Past", "Expired", "Cancelled", "Declined"}:
-            row["next_meeting_at"] = ""
-            row["next_meeting_status_display"] = ""
-        else:
-            row["next_meeting_status_display"] = status_display
+        row["next_meeting_status_display"] = status_display
     else:
         row["next_meeting_status_display"] = ""
 
@@ -503,9 +494,32 @@ def _parse_iso_datetime(value: str):
         return None
 
 
+def _format_meeting_when_for_invite(meeting) -> str:
+    start_label = _parse_iso_datetime(_meeting_field(meeting, "scheduled_start_at", ""))
+    if not start_label:
+        return _meeting_field(meeting, "scheduled_start_at", "")
+    timezone_name = (_meeting_field(meeting, "timezone_name", "") or "UTC").strip()
+    try:
+        tz = ZoneInfo(timezone_name)
+    except Exception:
+        tz = timezone.utc
+        timezone_name = "UTC"
+    local_dt = start_label.astimezone(tz)
+    tz_abbrev = local_dt.tzname() or ""
+    offset_delta = local_dt.utcoffset() or timedelta(0)
+    total_minutes = int(offset_delta.total_seconds() // 60)
+    sign = "+" if total_minutes >= 0 else "-"
+    abs_minutes = abs(total_minutes)
+    offset_hours = abs_minutes // 60
+    offset_minutes = abs_minutes % 60
+    offset_text = f"UTC{sign}{offset_hours:02d}:{offset_minutes:02d}"
+    if tz_abbrev and tz_abbrev.upper() != timezone_name.upper():
+        return f"{local_dt.strftime('%d %b %Y, %H:%M')} {timezone_name} ({tz_abbrev}, {offset_text})"
+    return f"{local_dt.strftime('%d %b %Y, %H:%M')} {timezone_name} ({offset_text})"
+
+
 def _meeting_delivery_content(meeting, hosted_link: str, *, reminder_kind: str = ""):
-    start_label = _parse_iso_datetime(meeting["scheduled_start_at"])
-    start_text = start_label.strftime("%d %b %Y, %H:%M UTC") if start_label else meeting["scheduled_start_at"]
+    start_text = _format_meeting_when_for_invite(meeting)
     immediate = _is_immediate_meeting(meeting)
     meeting_type = (meeting["meeting_type"] or "human").strip().lower()
     if meeting_type == "ai":
@@ -573,7 +587,10 @@ def _send_meeting_invite(db, meeting, access_token: str = "", *, reminder_kind: 
     if reminder_kind == "24h":
         subject = f"Reminder: {subject}"
     elif reminder_kind == "1m":
-        subject = f"Join now: {subject}"
+        if meeting_type == "ai":
+            subject = f"Meet Now with {current_app.config['BRAND_NAME'].upper()} AI"
+        else:
+            subject = f"Meet Now with {consultant_name.upper()}"
     delivery_status = "not_sent"
     delivery_error = "no_client_delivery_channel"
     if meeting["client_email"]:
@@ -2114,8 +2131,6 @@ def meeting_response_page(token: str):
     join_start = _parse_iso_datetime(meeting["join_window_start_at"])
     join_end = _parse_iso_datetime(meeting["join_window_end_at"])
     guest_join_start = _parse_iso_datetime(meeting["scheduled_start_at"])
-    if guest_join_start:
-        guest_join_start = guest_join_start - timedelta(minutes=10)
     immediate_join = bool(
         not is_ai_meeting
         and meeting["status"] in {"scheduled", "client_viewed"}

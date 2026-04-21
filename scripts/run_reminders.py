@@ -11,6 +11,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -94,18 +95,25 @@ def main() -> int:
         with urllib.request.urlopen(request, timeout=args.timeout) as response:
             body = response.read().decode("utf-8")
             if not args.quiet:
+                ran_at_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 try:
                     parsed = json.loads(body)
-                    print(json.dumps(parsed, indent=2, sort_keys=True))
+                    if isinstance(parsed, dict):
+                        parsed["ran_at_utc"] = ran_at_utc
+                        print(json.dumps(parsed, sort_keys=True))
+                    else:
+                        print(json.dumps({"ran_at_utc": ran_at_utc, "result": parsed}, sort_keys=True))
                 except json.JSONDecodeError:
-                    print(body)
+                    print(json.dumps({"ran_at_utc": ran_at_utc, "raw_body": body}, sort_keys=True))
             return 0
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
-        print(body or f"HTTP {exc.code}", file=sys.stderr)
+        ran_at_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        print(json.dumps({"ran_at_utc": ran_at_utc, "error": body or f"HTTP {exc.code}"}), file=sys.stderr)
         return 1
     except urllib.error.URLError as exc:
-        print(f"request failed: {exc}", file=sys.stderr)
+        ran_at_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        print(json.dumps({"ran_at_utc": ran_at_utc, "error": f"request failed: {exc}"}), file=sys.stderr)
         return 1
 
 
