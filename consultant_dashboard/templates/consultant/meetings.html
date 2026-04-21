@@ -11,11 +11,11 @@
     </div>
     <div class="history-toolbar">
       <div class="actions">
-        <a href="/consultant/meetings?filter=all" class="{% if filter_name == 'all' %}nav-active{% endif %}">All</a>
-        <a href="/consultant/meetings?filter=open" class="{% if filter_name == 'open' %}nav-active{% endif %}">Open</a>
-        <a href="/consultant/meetings?filter=upcoming" class="{% if filter_name == 'upcoming' %}nav-active{% endif %}">Upcoming</a>
-        <a href="/consultant/meetings?filter=past" class="{% if filter_name == 'past' %}nav-active{% endif %}">Past</a>
-        <a href="/consultant/meetings?filter=cancelled" class="{% if filter_name == 'cancelled' %}nav-active{% endif %}">Cancelled</a>
+        <a href="/consultant/meetings?filter=all" class="titlebar-link-button {% if filter_name == 'all' %}filter-link-active{% endif %}">All</a>
+        <a href="/consultant/meetings?filter=open" class="titlebar-link-button {% if filter_name == 'open' %}filter-link-active{% endif %}">Open</a>
+        <a href="/consultant/meetings?filter=upcoming" class="titlebar-link-button {% if filter_name == 'upcoming' %}filter-link-active{% endif %}">Upcoming</a>
+        <a href="/consultant/meetings?filter=past" class="titlebar-link-button {% if filter_name == 'past' %}filter-link-active{% endif %}">Past</a>
+        <a href="/consultant/meetings?filter=cancelled" class="titlebar-link-button {% if filter_name == 'cancelled' %}filter-link-active{% endif %}">Cancelled</a>
       </div>
       <form method="get" class="history-search">
         <input type="hidden" name="filter" value="{{ filter_name }}">

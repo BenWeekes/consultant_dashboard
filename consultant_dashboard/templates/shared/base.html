@@ -178,6 +178,10 @@
         text-decoration: none;
         cursor: pointer;
       }
+      .filter-link-active {
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
       .section-stack { display: grid; gap: 14px; align-content: start; }
       .section-stack.compact { gap: 10px; }
       .meta-block { display: grid; gap: 4px; }
@@ -309,7 +313,7 @@
       .table td a { font-weight: 600; text-decoration: none; }
       .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
       form { display: grid; gap: 12px; }
-      a { color: var(--accent); }
+      a { color: var(--accent); text-decoration: none; font-weight: 600; }
       .toast-stack {
         position: fixed;
         top: 20px;
