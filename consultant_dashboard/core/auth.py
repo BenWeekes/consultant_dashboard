@@ -1,7 +1,11 @@
 import configparser
+import json
 import os
 import random
 import time
+import urllib.parse
+import urllib.request
+from base64 import urlsafe_b64decode
 from datetime import timedelta
 from functools import wraps
 from typing import Dict, Optional, Tuple
@@ -9,9 +13,21 @@ from typing import Dict, Optional, Tuple
 from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from .db import get_consultant_by_email, get_consultant_by_id, get_db, log_audit, update_consultant_password
+from .db import get_consultant_by_email, get_consultant_by_id, get_db, get_vendor_by_slug, log_audit, update_consultant_password
+from .vendors import current_branding, current_vendor_slug, tenant_url_for
 
 auth_bp = Blueprint("auth", __name__)
+
+
+def _brand_name() -> str:
+    return current_branding().get("name") or current_app.config["BRAND_NAME"]
+
+
+def _current_vendor_id() -> str:
+    db = get_db(current_app.config)
+    vendor = get_vendor_by_slug(db, current_vendor_slug())
+    db.close()
+    return vendor["id"] if vendor else ""
 
 
 def require_admin_auth_file(path: str) -> None:
@@ -114,6 +130,23 @@ def _clear_consultant_pending_session() -> None:
         session.pop(key, None)
 
 
+def _google_oauth_enabled() -> bool:
+    return bool(current_app.config.get("GOOGLE_CLIENT_ID"))
+
+
+def _consultant_google_callback_url() -> str:
+    base = current_app.config.get("PUBLIC_BASE_URL", "").rstrip("/")
+    if not base:
+        base = request.url_root.rstrip("/")
+    return f"{base}/consultant/google/callback"
+
+
+def _decode_google_id_token(id_token: str) -> Dict[str, str]:
+    payload_b64 = id_token.split(".")[1]
+    payload_b64 += "=" * (-len(payload_b64) % 4)
+    return json.loads(urlsafe_b64decode(payload_b64.encode("utf-8")).decode("utf-8"))
+
+
 def _clear_consultant_session() -> None:
     _clear_consultant_pending_session()
     session.pop("consultant_id", None)
@@ -127,7 +160,7 @@ def _require_consultant(fn):
     @wraps(fn)
     def wrapped(*args, **kwargs):
         if not session.get("consultant_id"):
-            return redirect(url_for("auth.consultant_login"))
+            return redirect(tenant_url_for("auth.consultant_login"))
         return fn(*args, **kwargs)
     return wrapped
 
@@ -136,7 +169,7 @@ def _require_admin(fn):
     @wraps(fn)
     def wrapped(*args, **kwargs):
         if not session.get("admin_email"):
-            return redirect(url_for("auth.admin_login"))
+            return redirect(tenant_url_for("auth.admin_login"))
         return fn(*args, **kwargs)
     return wrapped
 
@@ -159,17 +192,27 @@ def _record_audit(actor_type: str, actor_id: str, action: str, details: Optional
 @auth_bp.route("/consultant/login", methods=["GET", "POST"])
 def consultant_login():
     if request.method == "GET":
-        return render_template("consultant/login.html", brand=current_app.config["BRAND_NAME"], theme="consultant")
+        return render_template(
+            "consultant/login.html",
+            brand=_brand_name(),
+            theme="consultant",
+            show_google_login=_google_oauth_enabled() or current_app.config["AUTH_DEV_MODE"],
+        )
 
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
     db = get_db(current_app.config)
-    consultant = get_consultant_by_email(db, email)
+    consultant = get_consultant_by_email(db, email, vendor_id=_current_vendor_id())
     if not consultant or not check_password_hash(consultant["password_hash"], password):
         _record_audit("consultant", email or "unknown", "login_failed")
         flash("Invalid email or password", "error")
         db.close()
-        return render_template("consultant/login.html", brand=current_app.config["BRAND_NAME"], theme="consultant"), 401
+        return render_template(
+            "consultant/login.html",
+            brand=_brand_name(),
+            theme="consultant",
+            show_google_login=_google_oauth_enabled() or current_app.config["AUTH_DEV_MODE"],
+        ), 401
 
     code = "000000" if current_app.config["AUTH_DEV_MODE"] else f"{random.randint(0, 999999):06d}"
     _clear_consultant_pending_session()
@@ -184,37 +227,130 @@ def consultant_login():
         print(f"[consultant-dashboard] Failed to send OTP to {consultant['phone_number']}: {exc}")
         flash("Failed to send verification code. Please check the phone number and Twilio setup.", "error")
         db.close()
-        return render_template("consultant/login.html", brand=current_app.config["BRAND_NAME"], theme="consultant"), 500
+        return render_template(
+            "consultant/login.html",
+            brand=_brand_name(),
+            theme="consultant",
+            show_google_login=_google_oauth_enabled() or current_app.config["AUTH_DEV_MODE"],
+        ), 500
     _record_audit("consultant", consultant["id"], "login_password_verified")
     db.close()
-    return redirect(url_for("auth.consultant_verify"))
+    return redirect(tenant_url_for("auth.consultant_verify"))
+
+
+@auth_bp.route("/consultant/google", methods=["GET"])
+def consultant_google():
+    if current_app.config["AUTH_DEV_MODE"]:
+        session["consultant_google_email"] = "consultant@example.com"
+        return redirect(tenant_url_for("auth.consultant_google_callback", code="dev-mode"))
+
+    client_id = current_app.config.get("GOOGLE_CLIENT_ID", "").strip()
+    if not client_id:
+        flash("Google sign-in is not configured for consultants.", "error")
+        return redirect(tenant_url_for("auth.consultant_login"))
+
+    params = urllib.parse.urlencode(
+        {
+            "client_id": client_id,
+            "redirect_uri": _consultant_google_callback_url(),
+            "response_type": "code",
+            "scope": "openid email profile",
+            "access_type": "offline",
+            "prompt": "select_account",
+        }
+    )
+    return redirect(f"https://accounts.google.com/o/oauth2/v2/auth?{params}")
+
+
+@auth_bp.route("/consultant/google/callback", methods=["GET"])
+def consultant_google_callback():
+    if current_app.config["AUTH_DEV_MODE"] and request.args.get("code") == "dev-mode":
+        email = session.get("consultant_google_email", "consultant@example.com").strip().lower()
+    else:
+        code = request.args.get("code", "").strip()
+        if not code:
+            flash("Missing Google authorization code.", "error")
+            return redirect(tenant_url_for("auth.consultant_login"))
+
+        token_data = urllib.parse.urlencode(
+            {
+                "code": code,
+                "client_id": current_app.config.get("GOOGLE_CLIENT_ID", ""),
+                "client_secret": current_app.config.get("GOOGLE_CLIENT_SECRET", ""),
+                "redirect_uri": _consultant_google_callback_url(),
+                "grant_type": "authorization_code",
+            }
+        ).encode("utf-8")
+        try:
+            token_req = urllib.request.Request(
+                "https://oauth2.googleapis.com/token",
+                data=token_data,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            with urllib.request.urlopen(token_req, timeout=10) as resp:
+                token_resp = json.loads(resp.read().decode("utf-8"))
+            email = (_decode_google_id_token(token_resp.get("id_token", "")).get("email") or "").strip().lower()
+        except Exception as exc:
+            print(f"[consultant-dashboard] Google consultant token exchange failed: {exc}")
+            flash("Google authentication failed.", "error")
+            return redirect(tenant_url_for("auth.consultant_login"))
+
+    if not email:
+        flash("Google account did not return an email address.", "error")
+        return redirect(tenant_url_for("auth.consultant_login"))
+
+    db = get_db(current_app.config)
+    consultant = get_consultant_by_email(db, email, vendor_id=_current_vendor_id())
+    if not consultant:
+        db.close()
+        _record_audit("consultant", email, "google_login_failed")
+        flash("No consultant account exists for that Google email on this vendor.", "error")
+        return redirect(tenant_url_for("auth.consultant_login"))
+
+    code = "000000" if current_app.config["AUTH_DEV_MODE"] else f"{random.randint(0, 999999):06d}"
+    _clear_consultant_pending_session()
+    session["pending_role"] = "consultant"
+    session["pending_consultant_id"] = consultant["id"]
+    session["pending_phone"] = consultant["phone_number"]
+    session["pending_code"] = code
+    session["pending_code_exp"] = int(time.time()) + 300
+    try:
+        _send_or_store_code(consultant["phone_number"], code)
+    except Exception as exc:
+        print(f"[consultant-dashboard] Failed to send Google OTP to {consultant['phone_number']}: {exc}")
+        flash("Failed to send verification code.", "error")
+        db.close()
+        return redirect(tenant_url_for("auth.consultant_login"))
+    _record_audit("consultant", consultant["id"], "login_google_verified", {"email": email})
+    db.close()
+    return redirect(tenant_url_for("auth.consultant_verify"))
 
 
 @auth_bp.route("/consultant/verify", methods=["GET", "POST"])
 def consultant_verify():
     if session.get("pending_role") != "consultant":
-        return redirect(url_for("auth.consultant_login"))
+        return redirect(tenant_url_for("auth.consultant_login"))
     if request.method == "GET":
-        return render_template("consultant/verify.html", brand=current_app.config["BRAND_NAME"], theme="consultant")
+        return render_template("consultant/verify.html", brand=_brand_name(), theme="consultant")
 
     code = request.form.get("code", "").strip()
     if not _verify_code(session.get("pending_phone", ""), code):
         flash("Invalid or expired code", "error")
         _record_audit("consultant", session.get("pending_consultant_id", "unknown"), "login_otp_failed")
-        return render_template("consultant/verify.html", brand=current_app.config["BRAND_NAME"], theme="consultant"), 401
+        return render_template("consultant/verify.html", brand=_brand_name(), theme="consultant"), 401
 
     consultant_id = session["pending_consultant_id"]
     _clear_consultant_pending_session()
     session["consultant_id"] = consultant_id
     session.permanent = True
     _record_audit("consultant", consultant_id, "login_success")
-    return redirect(url_for("web.consultant_dashboard"))
+    return redirect(tenant_url_for("web.consultant_dashboard"))
 
 
 @auth_bp.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
     if request.method == "GET":
-        return render_template("admin/login.html", brand=current_app.config["BRAND_NAME"])
+        return render_template("admin/login.html", brand=_brand_name())
 
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
@@ -223,11 +359,11 @@ def admin_login():
     if not hashed or not check_password_hash(hashed, password):
         _record_audit("admin", email or "unknown", "login_failed")
         flash("Invalid email or password", "error")
-        return render_template("admin/login.html", brand=current_app.config["BRAND_NAME"]), 401
+        return render_template("admin/login.html", brand=_brand_name()), 401
     session["admin_email"] = email
     session.permanent = True
     _record_audit("admin", email, "login_success")
-    return redirect(url_for("web.admin_dashboard"))
+    return redirect(tenant_url_for("web.admin_dashboard"))
 
 
 @auth_bp.route("/consultant/account", methods=["GET", "POST"])
@@ -239,7 +375,7 @@ def consultant_account():
     if not consultant:
         db.close()
         _clear_consultant_session()
-        return redirect(url_for("auth.consultant_login"))
+        return redirect(tenant_url_for("auth.consultant_login"))
 
     if request.method == "POST":
         current_password = request.form.get("current_password", "")
@@ -264,7 +400,7 @@ def consultant_account():
     db.close()
     return render_template(
         "consultant/account.html",
-        brand=current_app.config["BRAND_NAME"],
+        brand=_brand_name(),
         theme="consultant",
         consultant=consultant,
     )
@@ -293,7 +429,7 @@ def admin_account():
             flash("Password updated", "muted")
     return render_template(
         "admin/account.html",
-        brand=current_app.config["BRAND_NAME"],
+        brand=_brand_name(),
         admin_email=admin_email,
     )
 
@@ -303,7 +439,7 @@ def consultant_logout():
     consultant_id = session.get("consultant_id") or "unknown"
     _clear_consultant_session()
     _record_audit("consultant", str(consultant_id), "logout")
-    return redirect(url_for("web.home"))
+    return redirect(tenant_url_for("web.home"))
 
 
 @auth_bp.route("/admin/logout", methods=["POST"])
@@ -311,7 +447,7 @@ def admin_logout():
     admin_email = session.get("admin_email") or "unknown"
     _clear_admin_session()
     _record_audit("admin", str(admin_email), "logout")
-    return redirect(url_for("web.home"))
+    return redirect(tenant_url_for("web.home"))
 
 
 @auth_bp.route("/logout", methods=["POST"])
@@ -320,7 +456,7 @@ def logout():
     _clear_consultant_session()
     _clear_admin_session()
     _record_audit("unknown", str(actor_id), "logout")
-    return redirect(url_for("web.home"))
+    return redirect(tenant_url_for("web.home"))
 
 
 def require_consultant(fn):

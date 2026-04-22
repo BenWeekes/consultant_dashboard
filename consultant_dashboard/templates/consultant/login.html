@@ -1,11 +1,5 @@
 {% extends "shared/base.html" %}
 {% block body %}
-  <div class="public-topbar-shell">
-    <a class="public-topbar-link" href="/" aria-label="Go to home page">
-      <span class="public-topbar-mark"><i class="fa-solid fa-brain" aria-hidden="true"></i></span>
-      <span>MindFix</span>
-    </a>
-  </div>
   <div class="auth-shell">
   <div class="card">
     <div class="label">{{ brand }}</div>
@@ -15,6 +9,10 @@
       <input type="password" name="password" placeholder="Password" required>
       <button type="submit">Send verification code</button>
     </form>
+    {% if show_google_login %}
+      <div class="muted" style="margin: 8px 0; text-align: center;">or</div>
+      <a href="{{ tenant_url_for('auth.consultant_google') }}" class="button-secondary button-link" style="text-align: center;">Sign in with Google</a>
+    {% endif %}
   </div>
   </div>
 {% endblock %}

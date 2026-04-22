@@ -7,15 +7,15 @@
       <div>
         <h1>Meetings</h1>
       </div>
-      <a href="/consultant/meetings/new" class="titlebar-link-button">New Meeting</a>
+      <a href="{{ tenant_url_for('web.consultant_meeting_new') }}" class="titlebar-link-button">New Meeting</a>
     </div>
     <div class="history-toolbar">
       <div class="actions">
-        <a href="/consultant/meetings?filter=all" class="titlebar-link-button {% if filter_name == 'all' %}filter-link-active{% endif %}">All</a>
-        <a href="/consultant/meetings?filter=open" class="titlebar-link-button {% if filter_name == 'open' %}filter-link-active{% endif %}">Open</a>
-        <a href="/consultant/meetings?filter=upcoming" class="titlebar-link-button {% if filter_name == 'upcoming' %}filter-link-active{% endif %}">Upcoming</a>
-        <a href="/consultant/meetings?filter=past" class="titlebar-link-button {% if filter_name == 'past' %}filter-link-active{% endif %}">Past</a>
-        <a href="/consultant/meetings?filter=cancelled" class="titlebar-link-button {% if filter_name == 'cancelled' %}filter-link-active{% endif %}">Cancelled</a>
+        <a href="{{ tenant_url_for('web.consultant_meetings') }}?filter=all" class="titlebar-link-button {% if filter_name == 'all' %}filter-link-active{% endif %}">All</a>
+        <a href="{{ tenant_url_for('web.consultant_meetings') }}?filter=open" class="titlebar-link-button {% if filter_name == 'open' %}filter-link-active{% endif %}">Open</a>
+        <a href="{{ tenant_url_for('web.consultant_meetings') }}?filter=upcoming" class="titlebar-link-button {% if filter_name == 'upcoming' %}filter-link-active{% endif %}">Upcoming</a>
+        <a href="{{ tenant_url_for('web.consultant_meetings') }}?filter=past" class="titlebar-link-button {% if filter_name == 'past' %}filter-link-active{% endif %}">Past</a>
+        <a href="{{ tenant_url_for('web.consultant_meetings') }}?filter=cancelled" class="titlebar-link-button {% if filter_name == 'cancelled' %}filter-link-active{% endif %}">Cancelled</a>
       </div>
       <form method="get" class="history-search">
         <input type="hidden" name="filter" value="{{ filter_name }}">
@@ -24,7 +24,7 @@
     </div>
     <div class="list">
       {% for meeting in meetings %}
-        <a class="item session-history-link" href="/consultant/meetings/{{ meeting.id }}">
+        <a class="item session-history-link" href="{{ tenant_path('/consultant/meetings/' ~ meeting.id) }}">
           <div class="details-summary">
             <div class="session-history-summary">
               <strong>{{ meeting.scheduled_start_at|display_dt }}</strong>

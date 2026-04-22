@@ -4,3 +4,5 @@ __pycache__/
 venv/
 data/
 config/admin_auth.conf
+client/node_modules/
+client/.next/

@@ -62,7 +62,7 @@
         <button type="submit">Save Changes</button>
       </form>
       <p class="muted">Delete hides this consultant from the dashboard and blocks future login, but keeps existing records.</p>
-      <form method="post" action="/admin/consultants/{{ consultant.id }}/delete" onsubmit="return confirm('Delete this consultant?');">
+      <form method="post" action="{{ tenant_path('/admin/consultants/' ~ consultant.id ~ '/delete') }}" onsubmit="return confirm('Delete this consultant?');">
         <button type="submit" class="button-danger">Delete Consultant</button>
       </form>
     </div>

@@ -2,10 +2,11 @@ import base64
 import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from flask import Blueprint, Response, abort, current_app, flash, redirect, render_template, request, session, url_for
+from flask import Blueprint, Response, abort, current_app, flash, redirect, render_template, request, session, send_from_directory
 from flask import jsonify
 
 from .auth import require_admin, require_consultant
@@ -16,6 +17,7 @@ from .db import (
     create_client_message,
     create_client,
     create_consultant,
+    create_vendor,
     create_scheduled_meeting,
     delete_scheduled_meeting,
     deactivate_client,
@@ -30,6 +32,7 @@ from .db import (
     get_scheduled_meeting_detail,
     get_scheduled_meeting,
     get_session_detail,
+    get_vendor_by_id,
     find_open_meeting_for_pair,
     get_client_access_link_by_id,
     list_meeting_events,
@@ -40,6 +43,7 @@ from .db import (
     list_client_messages,
     list_meetings_for_consultant,
     list_consultants,
+    list_vendors,
     list_sessions,
     list_sessions_for_client,
     log_audit,
@@ -56,10 +60,12 @@ from .db import (
     update_client_password,
     update_consultant,
     update_consultant_password,
+    update_vendor,
     upsert_client_auth_identity,
 )
 from .client_identity import build_identity_hashes
 from .messaging import (
+    build_public_url,
     build_delivery_content,
     build_meeting_ics,
     build_meeting_response_link,
@@ -83,9 +89,14 @@ from .meetings import (
 from .phone_numbers import country_options, infer_country_code, local_display_number, normalize_phone
 from .realtime import publish_client_thread_update
 from .storage import EncryptedStorage
+from .vendors import current_branding, current_storage_root, current_vendor_slug, get_current_vendor, tenant_path, tenant_public_url, tenant_url_for
 from werkzeug.security import generate_password_hash
 
 web_bp = Blueprint("web", __name__)
+
+
+def _brand_name() -> str:
+    return current_branding().get("name") or current_app.config["BRAND_NAME"]
 
 
 def _phone_form_value(phone_number: str):
@@ -105,11 +116,58 @@ def _parse_iso_utc(value: Optional[str]) -> Optional[datetime]:
 
 
 def _storage() -> EncryptedStorage:
-    return EncryptedStorage(current_app.config["STORAGE_ROOT"], current_app.config["MASTER_KEY"])
+    return EncryptedStorage(current_storage_root(), current_app.config["MASTER_KEY"])
 
 
 def _client_app_base_url() -> str:
-    return current_app.config["CLIENT_APP_URL"].rstrip("/")
+    configured = current_app.config["CLIENT_APP_URL"].rstrip("/")
+    vendor_slug = current_vendor_slug()
+    if configured.startswith("http://") or configured.startswith("https://"):
+        if vendor_slug and "/v/" not in configured and configured.endswith("/app"):
+            return f"{configured[:-4]}/v/{vendor_slug}/app"
+        return configured
+    return tenant_public_url("/app", vendor_slug)
+
+
+def _rewrite_vendor_public_html(html: str) -> str:
+    vendor_prefix = tenant_path("/")
+    replacements = {
+        'href="/consultant/login"': f'href="{tenant_path("/consultant/login")}"',
+        'href="/admin/login"': f'href="{tenant_path("/admin/login")}"',
+        'href="/app?profile=therapy&autoconnect=true&returnurl=/"': f'href="{tenant_path("/app?profile=therapy&autoconnect=true&returnurl=/")}"',
+        '(isLocal ? "http://localhost:8084" : "/app")': f'(isLocal ? "http://localhost:8084" : "{tenant_path("/app")}")',
+        '(isLocal ? "http://127.0.0.1:8090" : "")': f'(isLocal ? "http://127.0.0.1:8090" : "{tenant_path("")}")',
+        'href="privacy.html"': f'href="{tenant_path("/privacy.html")}"',
+        'href="terms.html"': f'href="{tenant_path("/terms.html")}"',
+    }
+    rewritten = html
+    for source, target in replacements.items():
+        rewritten = rewritten.replace(source, target)
+    return rewritten.replace('href="css/', f'href="{vendor_prefix}css/').replace('src="img/', f'src="{vendor_prefix}img/')
+
+
+def _serve_vendor_public_asset(asset_path: str):
+    vendor = get_current_vendor()
+    www_root = Path((vendor.get("www_root") or "").strip())
+    if not www_root.exists() or not www_root.is_dir():
+        abort(404)
+
+    requested = (asset_path or "index.html").lstrip("/")
+    target = www_root / requested
+    if target.is_dir():
+        target = target / "index.html"
+    try:
+        target = target.resolve()
+    except FileNotFoundError:
+        abort(404)
+    if www_root.resolve() not in target.parents and target != www_root.resolve():
+        abort(404)
+    if not target.exists() or not target.is_file():
+        abort(404)
+    if target.suffix.lower() == ".html":
+        body = _rewrite_vendor_public_html(target.read_text(encoding="utf-8"))
+        return Response(body, mimetype="text/html")
+    return send_from_directory(str(www_root), str(target.relative_to(www_root)))
 
 
 def _client_profile_name() -> str:
@@ -127,7 +185,7 @@ def _build_client_join_bootstrap(meeting_id: str, access_link_id: str) -> str:
 
 
 def _build_client_join_url(token: str) -> str:
-    return url_for("web.meeting_response_join", token=token)
+    return tenant_url_for("web.meeting_response_join", token=token)
 
 
 def _build_signed_meeting_response_token(link) -> str:
@@ -216,6 +274,21 @@ def _meeting_is_joinable_for_host(meeting, now: Optional[datetime] = None) -> bo
     return True
 
 
+def _meeting_is_joinable_for_guest(meeting, now: Optional[datetime] = None) -> bool:
+    if not meeting or meeting["status"] not in {"scheduled", "client_viewed", "accepted", "declined", "in_progress"}:
+        return False
+    now = now or datetime.now(timezone.utc)
+    guest_join_start = _parse_iso_datetime(meeting["scheduled_start_at"])
+    join_end = _parse_iso_datetime(meeting["join_window_end_at"])
+    if guest_join_start:
+        guest_join_start = guest_join_start - timedelta(minutes=10)
+        if now < guest_join_start:
+            return False
+    if join_end and now > join_end:
+        return False
+    return True
+
+
 def _meeting_is_window_expired(meeting, now: Optional[datetime] = None) -> bool:
     now = now or datetime.now(timezone.utc)
     join_end = _parse_iso_datetime(meeting["join_window_end_at"])
@@ -231,7 +304,7 @@ def _meeting_status_display(meeting) -> str:
         return "Expired"
     status = _meeting_field(meeting, "status", "")
     if status in {"scheduled", "client_viewed"}:
-        return "Sent"
+        return "Invited"
     if status == "accepted":
         return "Accepted"
     if status == "cancelled":
@@ -239,6 +312,12 @@ def _meeting_status_display(meeting) -> str:
     if status == "declined":
         return "Declined"
     if status == "in_progress":
+        start_at = _parse_iso_datetime(_meeting_field(meeting, "scheduled_start_at", ""))
+        consultant_joined_at = _parse_iso_datetime(_meeting_field(meeting, "consultant_joined_at", ""))
+        client_joined_at = _parse_iso_datetime(_meeting_field(meeting, "client_joined_at", ""))
+        now = datetime.now(timezone.utc)
+        if start_at and now < start_at and consultant_joined_at and not client_joined_at:
+            return "Ready"
         return "Meeting now"
     if status == "completed":
         return "Completed"
@@ -287,22 +366,91 @@ def _session_kind_display(session_kind: str) -> str:
 def _build_consultant_join_url(meeting_id: str, consultant_id: str, channel_name: str) -> str:
     bootstrap = _build_consultant_join_bootstrap(meeting_id, consultant_id, channel_name)
     return (
-        f"{_client_app_base_url()}/?meeting_mode=true&autoconnect=true"
+        f"{_client_app_base_url()}/?meeting_mode=true"
         f"&profile={_client_profile_name()}"
         f"&join_bootstrap={bootstrap}"
     )
 
 
 def _meeting_type_join_label(meeting_type: str) -> str:
-    return "Join AI Meeting" if (meeting_type or "").strip().lower() == "ai" else "Join Meeting"
+    return "Join AI Meeting" if (meeting_type or "").strip().lower() == "ai" else "Enter Meeting Room"
+
+
+def _find_host_join_target(db, meeting, now: Optional[datetime] = None):
+    if not meeting or (meeting["meeting_type"] or "human").strip().lower() == "ai":
+        return meeting
+    now = now or datetime.now(timezone.utc)
+    if _meeting_is_joinable_for_host(meeting, now=now):
+        return meeting
+    pair_meetings = db.execute(
+        """
+        SELECT sm.*, c.display_name AS client_name, c.email AS client_email,
+               c.phone_number AS client_phone_number,
+               co.name AS consultant_name, co.email AS consultant_email
+        FROM scheduled_meetings sm
+        JOIN clients c ON c.id = sm.client_id
+        JOIN consultants co ON co.id = sm.consultant_id
+        WHERE sm.client_id = ?
+          AND sm.consultant_id = ?
+          AND sm.meeting_type = 'human'
+          AND sm.id != ?
+          AND sm.status IN ('scheduled', 'client_viewed', 'accepted', 'in_progress')
+        ORDER BY CASE WHEN sm.status = 'in_progress' THEN 0 ELSE 1 END,
+                 CASE WHEN sm.status = 'accepted' THEN 1
+                      WHEN sm.status = 'client_viewed' THEN 2
+                      WHEN sm.status = 'scheduled' THEN 3
+                      ELSE 4 END,
+                 sm.scheduled_start_at DESC
+        """,
+        (meeting["client_id"], meeting["consultant_id"], meeting["id"]),
+    ).fetchall()
+    for candidate in pair_meetings:
+        if _meeting_is_joinable_for_host(candidate, now=now):
+            return candidate
+    return meeting
+
+
+def _find_guest_join_target(db, meeting, now: Optional[datetime] = None):
+    if not meeting or (meeting["meeting_type"] or "human").strip().lower() == "ai":
+        return meeting
+    now = now or datetime.now(timezone.utc)
+    if _meeting_is_joinable_for_guest(meeting, now=now):
+        return meeting
+    pair_meetings = db.execute(
+        """
+        SELECT sm.*, c.display_name AS client_name, c.email AS client_email,
+               c.phone_number AS client_phone_number,
+               co.name AS consultant_name, co.email AS consultant_email
+        FROM scheduled_meetings sm
+        JOIN clients c ON c.id = sm.client_id
+        JOIN consultants co ON co.id = sm.consultant_id
+        WHERE sm.client_id = ?
+          AND sm.consultant_id = ?
+          AND sm.meeting_type = 'human'
+          AND sm.id != ?
+          AND sm.status IN ('scheduled', 'client_viewed', 'accepted', 'declined', 'in_progress')
+        ORDER BY CASE WHEN sm.status = 'in_progress' THEN 0 ELSE 1 END,
+                 CASE WHEN sm.status = 'scheduled' THEN 1
+                      WHEN sm.status = 'client_viewed' THEN 2
+                      WHEN sm.status = 'accepted' THEN 3
+                      WHEN sm.status = 'declined' THEN 4
+                      ELSE 5 END,
+                 sm.scheduled_start_at DESC
+        """,
+        (meeting["client_id"], meeting["consultant_id"], meeting["id"]),
+    ).fetchall()
+    for candidate in pair_meetings:
+        if _meeting_is_joinable_for_guest(candidate, now=now):
+            return candidate
+    return meeting
 
 
 def _render_meeting_launch_page(*, join_url: str, return_url: str, heading: str, detail: str):
     return render_template(
         "shared/meeting_launch.html",
-        brand=current_app.config["BRAND_NAME"],
+        brand=_brand_name(),
         theme="consultant",
-        title=f"{current_app.config['BRAND_NAME']} | Opening Meeting",
+        title=f"{_brand_name()} | Opening Meeting",
         join_url=join_url,
         return_url=return_url,
         heading=heading,
@@ -311,7 +459,7 @@ def _render_meeting_launch_page(*, join_url: str, return_url: str, heading: str,
 
 
 def _consultant_join_route(meeting_id: str) -> str:
-    return url_for("web.consultant_meeting_join", meeting_id=meeting_id)
+    return tenant_url_for("web.consultant_meeting_join", meeting_id=meeting_id)
 
 
 def _default_meeting_start_value(timezone_name: str) -> str:
@@ -352,7 +500,7 @@ def _create_meeting_from_form(db, *, consultant_id: str, client_id: str, form_de
     video_biomarkers_enabled = bool(form_defaults.get("video_biomarkers_enabled"))
     transcription_provider = (form_defaults.get("transcription_provider") or "").strip() if transcription_enabled else ""
     transcription_language = (form_defaults.get("transcription_language") or "").strip() if transcription_enabled else ""
-    default_title = "MindFix AI session" if meeting_type == "ai" else "MindFix session"
+    default_title = f"{_brand_name()} AI session" if meeting_type == "ai" else f"{_brand_name()} session"
     existing_open = find_open_meeting_for_pair(
         db,
         consultant_id=consultant_id,
@@ -427,7 +575,7 @@ def _refresh_meeting_invite_for_immediate_use(
 ):
     timezone_name, start_at, end_at = _parse_meeting_schedule_form(form_defaults)
     meeting_type = (form_defaults.get("meeting_type") or "human").strip().lower()
-    default_title = "MindFix AI session" if meeting_type == "ai" else "MindFix session"
+    default_title = f"{_brand_name()} AI session" if meeting_type == "ai" else f"{_brand_name()} session"
     access_token = new_access_token()
     access_link_id = create_client_access_link(
         db,
@@ -525,13 +673,13 @@ def _meeting_delivery_content(meeting, hosted_link: str, *, reminder_kind: str =
     if meeting_type == "ai":
         if immediate:
             body = (
-                f"{current_app.config['BRAND_NAME']} AI invites you to start a session now.\n\n"
+                f"{_brand_name()} AI invites you to start a session now.\n\n"
                 f"Title: {meeting['title']}\n"
                 f"You can join the AI session any time using the meeting link below.\n"
             )
         else:
             body = (
-                f"{current_app.config['BRAND_NAME']} AI has invited you to an AI session.\n\n"
+                f"{_brand_name()} AI has invited you to an AI session.\n\n"
                 f"When: {start_text}\n"
                 f"Title: {meeting['title']}\n"
             )
@@ -568,15 +716,20 @@ def _is_immediate_meeting(meeting) -> bool:
 def _send_meeting_invite(db, meeting, access_token: str = "", *, reminder_kind: str = ""):
     link = get_client_access_link_by_id(db, meeting["response_access_link_id"])
     response_token = access_token or (_build_signed_meeting_response_token(link) if link else "")
-    hosted_link = build_meeting_response_link(current_app.config, response_token)
+    hosted_link = build_meeting_response_link(current_app.config, response_token, vendor_slug=current_vendor_slug())
+    direct_join_link = build_public_url(
+        current_app.config,
+        tenant_url_for("web.meeting_response_join", token=response_token),
+        vendor_slug=current_vendor_slug(),
+    )
     immediate = _is_immediate_meeting(meeting)
-    consultant_name = meeting["consultant_name"] or current_app.config["BRAND_NAME"]
+    consultant_name = meeting["consultant_name"] or _brand_name()
     meeting_type = (meeting["meeting_type"] or "human").strip().lower()
     if meeting_type == "ai":
         subject = (
-            f"Join {current_app.config['BRAND_NAME']} AI Now"
+            f"Join {_brand_name()} AI Now"
             if immediate
-            else f"AI Meeting Invite from {current_app.config['BRAND_NAME']} AI"
+            else f"AI Meeting Invite from {_brand_name()} AI"
         )
     else:
         subject = (
@@ -588,21 +741,24 @@ def _send_meeting_invite(db, meeting, access_token: str = "", *, reminder_kind: 
         subject = f"Reminder: {subject}"
     elif reminder_kind == "1m":
         if meeting_type == "ai":
-            subject = f"Meet Now with {current_app.config['BRAND_NAME'].upper()} AI"
+            subject = f"Meet Now with {_brand_name().upper()} AI"
         else:
             subject = f"Meet Now with {consultant_name.upper()}"
     delivery_status = "not_sent"
     delivery_error = "no_client_delivery_channel"
     if meeting["client_email"]:
         plain_text = _meeting_delivery_content(meeting, hosted_link, reminder_kind=reminder_kind)
+        cta_link = hosted_link
         if meeting_type == "ai":
             cta = "Join AI Meeting"
         else:
-            cta = "Join Meeting" if immediate else "Review and respond"
+            cta = "Enter Meeting Room" if immediate else "Review and respond"
+            if immediate or reminder_kind == "1m":
+                cta_link = direct_join_link
         html_body = (
             f"<p>{plain_text.replace(chr(10), '<br>')}</p>"
-            f"<p><a href=\"{hosted_link}\">{cta}</a></p>"
-            f"<p>Sent by {current_app.config['BRAND_NAME']}.</p>"
+            f"<p><a href=\"{cta_link}\">{cta}</a></p>"
+            f"<p>Sent by {_brand_name()}.</p>"
         )
         attachments = None
         if not immediate and meeting_type == "human":
@@ -629,18 +785,19 @@ def _send_meeting_invite(db, meeting, access_token: str = "", *, reminder_kind: 
             to_email=meeting["client_email"],
             subject=subject,
             body=plain_text,
-            reply_link=hosted_link,
+            reply_link=cta_link,
             kind="meeting_invite",
             html_override=html_body,
             plain_text_override=plain_text,
             attachments=attachments,
         )
     elif meeting["client_phone_number"]:
+        sms_link = direct_join_link if meeting_type == "human" and (immediate or reminder_kind == "1m") else hosted_link
         delivery_status, delivery_error = deliver_sms(
             current_app.config,
             to_phone=meeting["client_phone_number"],
-            body=f"You have a {current_app.config['BRAND_NAME']} {'meet now' if immediate else 'meeting invite'}.",
-            reply_link=hosted_link,
+            body=f"You have a {_brand_name()} {'meet now' if immediate else 'meeting invite'}.",
+            reply_link=sms_link,
         )
     update_meeting_invite_delivery(
         db,
@@ -920,14 +1077,14 @@ def _send_client_message(db, *, consultant_id: str, client, client_id: str, mess
         token_hash=hash_access_token(token),
         expires_at=default_expiry(),
     )
-    reply_link = build_reply_link(current_app.config, token)
+    reply_link = build_reply_link(current_app.config, token, vendor_slug=current_vendor_slug())
     delivery_channel = choose_delivery_channel(
         client_email=client["email"] or "",
         client_phone=client["phone_number"] or "",
     )
     _subject, outbound_body = build_delivery_content(
         channel=delivery_channel if delivery_channel != "portal" else "email",
-        brand=current_app.config["BRAND_NAME"],
+        brand=_brand_name(),
         client_name=client["display_name"],
         body=message_body,
     )
@@ -935,7 +1092,7 @@ def _send_client_message(db, *, consultant_id: str, client, client_id: str, mess
         delivery_status, delivery_error = deliver_email(
             current_app.config,
             to_email=client["email"] or "",
-            subject=f"{current_app.config['BRAND_NAME']} message",
+            subject=f"{_brand_name()} message",
             body=outbound_body,
             reply_link=reply_link,
             kind="message",
@@ -1104,7 +1261,7 @@ def _format_duration_stat(duration_seconds):
 
 @web_bp.get("/home")
 def home():
-    return render_template("shared/home.html", brand=current_app.config["BRAND_NAME"])
+    return render_template("shared/home.html", brand=_brand_name())
 
 
 @web_bp.get("/consultant/dashboard")
@@ -1119,7 +1276,7 @@ def consultant_dashboard():
     stats["avg_human_duration_display"] = _format_duration_stat(stats.get("avg_human_duration_seconds"))
     return render_template(
         "consultant/dashboard.html",
-        brand=current_app.config["BRAND_NAME"],
+        brand=_brand_name(),
         theme="consultant",
         stats=stats,
         consultant=consultant,
@@ -1140,7 +1297,7 @@ def consultant_clients():
         decorated_clients.append(row)
     return render_template(
         "consultant/clients.html",
-        brand=current_app.config["BRAND_NAME"],
+        brand=_brand_name(),
         theme="consultant",
         clients=decorated_clients,
     )
@@ -1153,7 +1310,7 @@ def _render_consultant_client_new_form(*, form_defaults=None):
     }
     return render_template(
         "consultant/client_new.html",
-        brand=current_app.config["BRAND_NAME"],
+        brand=_brand_name(),
         theme="consultant",
         phone_countries=country_options(),
         form_defaults=form_defaults,
@@ -1239,7 +1396,7 @@ def consultant_client_new():
             db.commit()
             db.close()
             flash("Client created", "muted")
-            return redirect(url_for("web.consultant_client_detail", client_id=client_id))
+            return redirect(tenant_url_for("web.consultant_client_detail", client_id=client_id))
     db.close()
     return _render_consultant_client_new_form(form_defaults=form_defaults)
 
@@ -1431,7 +1588,7 @@ def consultant_client_detail(client_id: str):
     db.close()
     return render_template(
         "consultant/client_detail.html",
-        brand=current_app.config["BRAND_NAME"],
+        brand=_brand_name(),
         theme="consultant",
         client=client,
         sessions=sessions,
@@ -1463,7 +1620,7 @@ def _consultant_meeting_new_page(*, preselected_client_id: str = ""):
 
     form_defaults = {
         "client_id": selected_client_id,
-        "title": "MindFix session",
+        "title": f"{_brand_name()} session",
         "meeting_type": "human",
         "repeat_weekly": False,
         "transcription_enabled": True,
@@ -1584,11 +1741,11 @@ def _consultant_meeting_new_page(*, preselected_client_id: str = ""):
                         join_url = _build_consultant_join_url(meeting_id, consultant_id, meeting["channel_name"])
                         return _render_meeting_launch_page(
                             join_url=join_url,
-                            return_url=url_for("web.consultant_meeting_detail", meeting_id=meeting_id),
+                            return_url=tenant_url_for("web.consultant_meeting_detail", meeting_id=meeting_id),
                             heading="Opening meeting",
                             detail="The meeting is opening in a new tab. Stay on this page to manage the meeting.",
                         )
-                return redirect(url_for("web.consultant_meeting_detail", meeting_id=meeting_id))
+                return redirect(tenant_url_for("web.consultant_meeting_detail", meeting_id=meeting_id))
             current_app.logger.info(
                 "meeting_form_created consultant_id=%s client_id=%s meeting_id=%s immediate=%s",
                 consultant_id,
@@ -1603,12 +1760,12 @@ def _consultant_meeting_new_page(*, preselected_client_id: str = ""):
                 flash("Meeting invite sent. Opening meeting now.", "muted")
                 return _render_meeting_launch_page(
                     join_url=_build_consultant_join_url(meeting_id, consultant_id, meeting["channel_name"]),
-                    return_url=url_for("web.consultant_meeting_detail", meeting_id=meeting_id),
+                    return_url=tenant_url_for("web.consultant_meeting_detail", meeting_id=meeting_id),
                     heading="Opening meeting",
                     detail="The meeting is opening in a new tab. Stay here to manage the invite and meeting details.",
                 )
             flash("Meeting scheduled", "muted")
-            return redirect(url_for("web.consultant_meeting_detail", meeting_id=meeting_id))
+            return redirect(tenant_url_for("web.consultant_meeting_detail", meeting_id=meeting_id))
         except ValueError as exc:
             db.rollback()
             flash(str(exc), "error")
@@ -1616,7 +1773,7 @@ def _consultant_meeting_new_page(*, preselected_client_id: str = ""):
     db.close()
     return render_template(
         "consultant/meeting_new.html",
-        brand=current_app.config["BRAND_NAME"],
+        brand=_brand_name(),
         theme="consultant",
         client=client,
         clients=clients,
@@ -1678,7 +1835,7 @@ def consultant_meetings():
         meetings = filtered
     return render_template(
         "consultant/meetings.html",
-        brand=current_app.config["BRAND_NAME"],
+        brand=_brand_name(),
         theme="consultant",
         meetings=meetings,
         filter_name=filter_name,
@@ -1763,20 +1920,7 @@ def consultant_meeting_detail(meeting_id: str):
             else:
                 flash("This meeting can no longer be marked as a no-show.", "error")
         elif action == "delete":
-            if delete_scheduled_meeting(db, meeting_id=meeting_id):
-                log_audit(
-                    db,
-                    actor_type="consultant",
-                    actor_id=consultant_id,
-                    action="meeting_deleted",
-                    target_type="meeting",
-                    target_id=meeting_id,
-                )
-                db.commit()
-                db.close()
-                flash("Meeting deleted", "muted")
-                return redirect(url_for("web.consultant_meetings"))
-            flash("This meeting cannot be deleted right now.", "error")
+            flash("Meeting deletion is disabled. Cancel the meeting instead so invite links remain valid.", "error")
         meeting = get_scheduled_meeting_detail(db, meeting_id, consultant_id=consultant_id)
 
     events = list_meeting_events(db, meeting_id)
@@ -1789,19 +1933,20 @@ def consultant_meeting_detail(meeting_id: str):
         linked_biomarkers = storage.get_json(meeting["biomarker_storage_key"], meeting["client_id"])
     biomarker_headlines = _build_latest_biomarker_highlights(linked_biomarkers)
     biomarker_sections = _grouped_biomarker_sections(linked_biomarkers)
-    scheduled_start_at = _parse_iso_datetime(meeting["scheduled_start_at"])
     now = datetime.now(timezone.utc)
+    meeting = _decorate_meeting(meeting, now=now)
+    scheduled_start_at = _parse_iso_datetime(meeting["scheduled_start_at"])
     is_now_meeting = bool(scheduled_start_at and scheduled_start_at <= now and meeting["status"] not in {"completed", "cancelled", "declined"})
     is_ai_meeting = (meeting["meeting_type"] or "human").strip().lower() == "ai"
-    can_join = (not is_ai_meeting) and _meeting_is_joinable_for_host(meeting, now=now)
-    join_url = _consultant_join_route(meeting_id) if can_join else ""
+    join_url = _consultant_join_route(meeting_id)
     can_cancel = meeting["status"] in {"scheduled", "client_viewed", "accepted"}
     can_end = meeting["status"] == "in_progress"
-    can_delete = meeting["status"] != "in_progress"
+    can_delete = False
+    can_resend_invite = bool(scheduled_start_at and scheduled_start_at > now and meeting["status"] not in {"completed", "cancelled"})
     db.close()
     return render_template(
         "consultant/meeting_detail.html",
-        brand=current_app.config["BRAND_NAME"],
+        brand=_brand_name(),
         theme="consultant",
         meeting=meeting,
         events=events,
@@ -1809,10 +1954,10 @@ def consultant_meeting_detail(meeting_id: str):
         linked_summary=linked_summary,
         biomarker_headlines=biomarker_headlines,
         biomarker_sections=biomarker_sections,
-        can_join=can_join,
         can_cancel=can_cancel,
         can_end=can_end,
         can_delete=can_delete,
+        can_resend_invite=can_resend_invite,
         is_now_meeting=is_now_meeting,
         is_ai_meeting=is_ai_meeting,
         meeting_type_display=_meeting_type_display(meeting["meeting_type"]),
@@ -1827,16 +1972,16 @@ def consultant_meeting_join(meeting_id: str):
     consultant_id = session.get("consultant_id")
     db = get_db(current_app.config)
     meeting = get_scheduled_meeting_detail(db, meeting_id, consultant_id=consultant_id)
-    db.close()
     if not meeting:
+        db.close()
         abort(404)
     if (meeting["meeting_type"] or "human").strip().lower() == "ai":
+        db.close()
         flash("AI meetings are joined from the client invite link.", "error")
-        return redirect(url_for("web.consultant_meeting_detail", meeting_id=meeting_id))
-    if not _meeting_is_joinable_for_host(meeting):
-        flash("This meeting is not available to join right now.", "error")
-        return redirect(url_for("web.consultant_meeting_detail", meeting_id=meeting_id))
-    return redirect(_build_consultant_join_url(meeting_id, consultant_id, meeting["channel_name"]))
+        return redirect(tenant_url_for("web.consultant_meeting_detail", meeting_id=meeting_id))
+    target_meeting = _find_host_join_target(db, meeting, now=utc_now())
+    db.close()
+    return redirect(_build_consultant_join_url(target_meeting["id"], consultant_id, target_meeting["channel_name"]))
 
 
 @web_bp.get("/meetings/respond/<token>/join")
@@ -1849,16 +1994,18 @@ def meeting_response_join(token: str):
     if error_status == 410:
         db.close()
         abort(410)
-    db.close()
     if not meeting:
+        db.close()
         abort(404)
-    if (meeting["meeting_type"] or "human").strip().lower() == "ai":
-        join_url = _build_ai_join_url(meeting["id"])
+    target_meeting = _find_guest_join_target(db, meeting, now=utc_now())
+    db.close()
+    if (target_meeting["meeting_type"] or "human").strip().lower() == "ai":
+        join_url = _build_ai_join_url(target_meeting["id"])
     else:
         join_url = (
-            f"{_client_app_base_url()}/?meeting_mode=true&autoconnect=true"
+            f"{_client_app_base_url()}/?meeting_mode=true"
             f"&profile={_client_profile_name()}"
-            f"&join_bootstrap={_build_client_join_bootstrap(meeting['id'], link['id'])}"
+            f"&join_bootstrap={_build_client_join_bootstrap(target_meeting['id'], target_meeting['response_access_link_id'])}"
         )
     return redirect(join_url)
 
@@ -1876,7 +2023,7 @@ def meeting_response_ics(token: str):
     db.close()
     if not meeting:
         abort(404)
-    hosted_link = build_meeting_response_link(current_app.config, token)
+    hosted_link = build_meeting_response_link(current_app.config, token, vendor_slug=current_vendor_slug())
     ics = build_meeting_ics(
         uid=f"{meeting['id']}@mindfix.me",
         title=meeting["title"],
@@ -1977,13 +2124,13 @@ def consultant_client_message_new(client_id: str):
                 flash("Message saved, but delivery is not configured yet", "muted")
             else:
                 flash("Message saved, but delivery failed", "error")
-            return redirect(url_for("web.consultant_client_detail", client_id=client_id))
+            return redirect(tenant_url_for("web.consultant_client_detail", client_id=client_id))
 
     messages = _message_preview_rows(db, client_id, consultant_id, limit=20)
     db.close()
     return render_template(
         "consultant/message_compose.html",
-        brand=current_app.config["BRAND_NAME"],
+        brand=_brand_name(),
         theme="consultant",
         client=client,
         messages=messages,
@@ -2003,7 +2150,7 @@ def client_message_portal(token: str):
         db.close()
         return render_template(
             "shared/client_message_portal.html",
-            brand=current_app.config["BRAND_NAME"],
+            brand=_brand_name(),
             expired=True,
             client=link,
             messages=[],
@@ -2046,7 +2193,7 @@ def client_message_portal(token: str):
     db.close()
     return render_template(
         "shared/client_message_portal.html",
-        brand=current_app.config["BRAND_NAME"],
+        brand=_brand_name(),
         client=link,
         expired=False,
         messages=messages,
@@ -2076,7 +2223,7 @@ def meeting_response_page(token: str):
         db.close()
         return render_template(
             "shared/meeting_response.html",
-            brand=current_app.config["BRAND_NAME"],
+            brand=_brand_name(),
             expired=True,
             meeting=None,
             join_url="",
@@ -2110,8 +2257,8 @@ def meeting_response_page(token: str):
                 db.commit()
                 if action == "accept_join":
                     return _render_meeting_launch_page(
-                        join_url=url_for("web.meeting_response_join", token=token),
-                        return_url=url_for("web.meeting_response_page", token=token),
+                        join_url=tenant_url_for("web.meeting_response_join", token=token),
+                        return_url=tenant_url_for("web.meeting_response_page", token=token),
                         heading="Opening meeting",
                         detail="The meeting is opening in a new tab. You can return here if you need the invite details again.",
                     )
@@ -2128,35 +2275,29 @@ def meeting_response_page(token: str):
         meeting = get_meeting_by_response_access_link_id(db, link["id"])
 
     now = utc_now()
-    join_start = _parse_iso_datetime(meeting["join_window_start_at"])
     join_end = _parse_iso_datetime(meeting["join_window_end_at"])
+    target_meeting = _find_guest_join_target(db, meeting, now=now)
+    guest_joinable = (not is_ai_meeting) and _meeting_is_joinable_for_guest(target_meeting, now=now)
     guest_join_start = _parse_iso_datetime(meeting["scheduled_start_at"])
-    immediate_join = bool(
-        not is_ai_meeting
-        and meeting["status"] in {"scheduled", "client_viewed"}
-        and (not guest_join_start or now >= guest_join_start)
-        and (not join_end or now <= join_end)
-    )
-    join_url = ""
-    if is_ai_meeting and meeting["status"] not in {"cancelled", "declined", "completed"}:
-        join_url = _build_ai_join_url(meeting["id"])
-    elif meeting["status"] in {"accepted", "in_progress"} and (not guest_join_start or now >= guest_join_start) and (not join_end or now <= join_end):
-        join_url = _build_client_join_url(token)
+    if guest_join_start:
+        guest_join_start = guest_join_start - timedelta(minutes=10)
+    join_url = _build_client_join_url(token) if not is_ai_meeting else _build_ai_join_url(target_meeting["id"])
     add_to_calendar_url = ""
-    if meeting["status"] in {"accepted", "in_progress"} and not _is_immediate_meeting(meeting) and not is_ai_meeting:
-        add_to_calendar_url = url_for("web.meeting_response_ics", token=token)
+    if not is_ai_meeting and not _is_immediate_meeting(meeting):
+        add_to_calendar_url = tenant_url_for("web.meeting_response_ics", token=token)
+    status_display = _meeting_status_display(meeting)
     db.close()
     return render_template(
         "shared/meeting_response.html",
-        brand=current_app.config["BRAND_NAME"],
+        brand=_brand_name(),
         expired=False,
         meeting=meeting,
         join_url=join_url,
-        immediate_join=immediate_join,
         add_to_calendar_url=add_to_calendar_url,
         join_label=_meeting_type_join_label(meeting["meeting_type"]),
         meeting_type_display=_meeting_type_display(meeting["meeting_type"]),
         is_ai_meeting=is_ai_meeting,
+        status_display=status_display,
     )
 
 
@@ -2183,7 +2324,7 @@ def consultant_client_delete(client_id: str):
     db.commit()
     db.close()
     flash("Client deleted", "muted")
-    return redirect(url_for("web.consultant_clients"))
+    return redirect(tenant_url_for("web.consultant_clients"))
 
 
 @web_bp.get("/consultant/sessions")
@@ -2191,18 +2332,40 @@ def consultant_client_delete(client_id: str):
 def consultant_sessions():
     consultant_id = session.get("consultant_id")
     db = get_db(current_app.config)
+    clients = list_clients_for_consultant(db, consultant_id=consultant_id)
     sessions = list_sessions(db, consultant_id=consultant_id, limit=100)
-    db.close()
+    storage = _storage()
+    selected_client_id = (request.args.get("client_id") or "").strip()
+    search = (request.args.get("q") or "").strip().lower()
     decorated_sessions = []
     for session_row in sessions:
         row = dict(session_row)
+        if selected_client_id and row.get("client_id") != selected_client_id:
+            continue
         row["session_kind_display"] = _session_kind_display(row.get("session_kind", ""))
+        summary_search_text = ""
+        if row.get("summary_storage_key"):
+            summary_payload = storage.get_json(row["summary_storage_key"], row["client_id"]) or {}
+            summary_search_text = " ".join(
+                part for part in [
+                    summary_payload.get("brief_overview", ""),
+                    summary_payload.get("overview", ""),
+                    summary_payload.get("full_summary", ""),
+                ] if part
+            ).strip()
+        row["summary_search_text"] = summary_search_text
+        if search and search not in summary_search_text.lower():
+            continue
         decorated_sessions.append(row)
+    db.close()
     return render_template(
         "consultant/sessions.html",
-        brand=current_app.config["BRAND_NAME"],
+        brand=_brand_name(),
         theme="consultant",
         sessions=decorated_sessions,
+        clients=clients,
+        selected_client_id=selected_client_id,
+        search=search,
     )
 
 
@@ -2281,7 +2444,7 @@ def consultant_session_detail(session_id: str):
     db.close()
     return render_template(
         "consultant/session_detail.html",
-        brand=current_app.config["BRAND_NAME"],
+        brand=_brand_name(),
         theme="consultant",
         session_row=session_row,
         session_kind_display=_session_kind_display(session_row["session_kind"]),
@@ -2330,7 +2493,7 @@ def consultant_session_delete(session_id: str):
     db.commit()
     db.close()
     flash("Session deleted", "muted")
-    return redirect(url_for("web.consultant_client_detail", client_id=client_id))
+    return redirect(tenant_url_for("web.consultant_client_detail", client_id=client_id))
 
 
 @web_bp.get("/admin/dashboard")
@@ -2338,18 +2501,86 @@ def consultant_session_delete(session_id: str):
 def admin_dashboard():
     db = get_db(current_app.config)
     stats = {
+        "vendors": db.execute("SELECT COUNT(*) AS c FROM vendors WHERE is_active = 1").fetchone()["c"],
         "consultants": db.execute("SELECT COUNT(*) AS c FROM consultants WHERE is_active = 1").fetchone()["c"],
         "clients": db.execute("SELECT COUNT(*) AS c FROM clients WHERE is_active = 1").fetchone()["c"],
         "sessions": db.execute("SELECT COUNT(*) AS c FROM sessions").fetchone()["c"],
     }
+    vendors = list_vendors(db)
     consultants = list_consultants(db)[:5]
     db.close()
     return render_template(
         "admin/dashboard.html",
-        brand=current_app.config["BRAND_NAME"],
+        brand=_brand_name(),
         stats=stats,
         admin_email=session.get("admin_email"),
+        vendors=vendors,
         consultants=consultants,
+    )
+
+
+@web_bp.route("/admin/vendors", methods=["GET", "POST"])
+@require_admin
+def admin_vendors():
+    db = get_db(current_app.config)
+    form_defaults = {}
+    if request.method == "POST":
+        action = request.form.get("action", "create").strip()
+        if action == "create":
+            slug = request.form.get("slug", "").strip().lower()
+            name = request.form.get("name", "").strip()
+            storage_root = request.form.get("storage_root", "").strip()
+            www_root = request.form.get("www_root", "").strip()
+            primary_host = request.form.get("primary_host", "").strip()
+            if not slug or not name or not storage_root or not www_root:
+                flash("Slug, name, storage root, and www root are required", "error")
+            else:
+                try:
+                    create_vendor(
+                        db,
+                        slug=slug,
+                        name=name,
+                        storage_root=storage_root,
+                        www_root=www_root,
+                        primary_host=primary_host,
+                    )
+                    db.commit()
+                    flash("Vendor created", "muted")
+                    return redirect(tenant_url_for("web.admin_vendors"))
+                except sqlite3.IntegrityError:
+                    db.rollback()
+                    flash("A vendor with that slug already exists", "error")
+            form_defaults = {
+                "slug": slug,
+                "name": name,
+                "storage_root": storage_root,
+                "www_root": www_root,
+                "primary_host": primary_host,
+            }
+        elif action == "update":
+            vendor_id = request.form.get("vendor_id", "").strip()
+            vendor = get_vendor_by_id(db, vendor_id)
+            if not vendor:
+                flash("Vendor not found", "error")
+            else:
+                update_vendor(
+                    db,
+                    vendor_id=vendor_id,
+                    name=request.form.get("name", "").strip() or vendor["name"],
+                    storage_root=request.form.get("storage_root", "").strip() or vendor["storage_root"],
+                    www_root=request.form.get("www_root", "").strip() or vendor["www_root"],
+                    primary_host=request.form.get("primary_host", "").strip(),
+                )
+                db.commit()
+                flash("Vendor updated", "muted")
+                return redirect(tenant_url_for("web.admin_vendors"))
+    vendors = list_vendors(db)
+    db.close()
+    return render_template(
+        "admin/vendors.html",
+        brand=_brand_name(),
+        vendors=vendors,
+        form_defaults=form_defaults,
     )
 
 
@@ -2357,11 +2588,15 @@ def admin_dashboard():
 @require_admin
 def admin_consultants():
     db = get_db(current_app.config)
+    vendors = list_vendors(db)
+    default_vendor = vendors[0]["id"] if vendors else ""
     form_defaults = {
+        "vendor_id": default_vendor,
         "phone_country_code": "US",
         "escalation_phone_country_code": "US",
     }
     if request.method == "POST":
+        vendor_id = request.form.get("vendor_id", "").strip() or default_vendor
         email = request.form.get("email", "").strip().lower()
         name = request.form.get("name", "").strip()
         phone_country_code = request.form.get("phone_country_code", "US").strip().upper()
@@ -2383,6 +2618,7 @@ def admin_consultants():
                 flash(str(exc), "error")
                 consultants = list_consultants(db)
                 form_defaults = {
+                    "vendor_id": vendor_id,
                     "name": name,
                     "email": email,
                     "phone_number": raw_phone_number,
@@ -2395,7 +2631,7 @@ def admin_consultants():
                 db.close()
                 return render_template(
                     "admin/consultants.html",
-                    brand=current_app.config["BRAND_NAME"],
+                    brand=_brand_name(),
                     consultants=consultants,
                     phone_countries=country_options(),
                     form_defaults=form_defaults,
@@ -2404,6 +2640,7 @@ def admin_consultants():
             try:
                 create_consultant(
                     db,
+                    vendor_id=vendor_id,
                     email=email,
                     name=name,
                     phone_number=phone_number,
@@ -2423,7 +2660,7 @@ def admin_consultants():
                 )
                 db.commit()
                 flash("Consultant created", "muted")
-                return redirect(url_for("web.admin_consultants"))
+                return redirect(tenant_url_for("web.admin_consultants"))
             except sqlite3.IntegrityError:
                 db.rollback()
                 flash("A consultant with that email already exists", "error")
@@ -2431,8 +2668,9 @@ def admin_consultants():
     db.close()
     return render_template(
         "admin/consultants.html",
-        brand=current_app.config["BRAND_NAME"],
+        brand=_brand_name(),
         consultants=consultants,
+        vendors=vendors,
         phone_countries=country_options(),
         form_defaults=form_defaults,
     )
@@ -2519,7 +2757,7 @@ def admin_consultant_detail(consultant_id: str):
     db.close()
     return render_template(
         "admin/consultant_detail.html",
-        brand=current_app.config["BRAND_NAME"],
+        brand=_brand_name(),
         consultant=consultant,
         phone_countries=country_options(),
         phone_form=_phone_form_value(consultant["phone_number"]),
@@ -2550,4 +2788,39 @@ def admin_consultant_delete(consultant_id: str):
     db.commit()
     db.close()
     flash("Consultant deleted", "muted")
-    return redirect(url_for("web.admin_consultants"))
+    return redirect(tenant_url_for("web.admin_consultants"))
+
+
+@web_bp.get("/index.html")
+def vendor_public_index():
+    if not request.environ.get("mindfix.vendor_slug"):
+        return redirect(tenant_url_for("web.home"))
+    return _serve_vendor_public_asset("index.html")
+
+
+@web_bp.get("/privacy.html")
+def vendor_public_privacy():
+    if not request.environ.get("mindfix.vendor_slug"):
+        abort(404)
+    return _serve_vendor_public_asset("privacy.html")
+
+
+@web_bp.get("/terms.html")
+def vendor_public_terms():
+    if not request.environ.get("mindfix.vendor_slug"):
+        abort(404)
+    return _serve_vendor_public_asset("terms.html")
+
+
+@web_bp.get("/css/<path:asset_path>")
+def vendor_public_css(asset_path: str):
+    if not request.environ.get("mindfix.vendor_slug"):
+        abort(404)
+    return _serve_vendor_public_asset(f"css/{asset_path}")
+
+
+@web_bp.get("/img/<path:asset_path>")
+def vendor_public_img(asset_path: str):
+    if not request.environ.get("mindfix.vendor_slug"):
+        abort(404)
+    return _serve_vendor_public_asset(f"img/{asset_path}")

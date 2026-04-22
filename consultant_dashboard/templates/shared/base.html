@@ -7,22 +7,25 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
     <style>
       :root {
-        --accent: #0f6b42;
-        --accent-soft: rgba(15, 107, 66, 0.08);
-        --accent-soft-solid: #ebf4ec;
-        --text-main: #132218;
-        --text-muted: #5a7261;
-        --bg-start: #f4f7f2;
-        --bg-end: #eef5ef;
+        --accent: {{ vendor_branding.accent }};
+        --accent-soft: {{ vendor_branding.accent_soft }};
+        --accent-soft-solid: {{ vendor_branding.accent_soft_solid }};
+        --text-main: {{ vendor_branding.text_main }};
+        --text-muted: {{ vendor_branding.text_muted }};
+        --bg-start: {{ vendor_branding.bg_start }};
+        --bg-end: {{ vendor_branding.bg_end }};
+        --topbar-bg: {{ vendor_branding.topbar_bg }};
+        --topbar-text: {{ vendor_branding.topbar_text }};
+        --topbar-mark: {{ vendor_branding.topbar_mark }};
       }
       body.theme-consultant {
-        --accent: #6b9bd1;
-        --accent-soft: rgba(107, 155, 209, 0.12);
-        --accent-soft-solid: #edf3fb;
-        --text-main: #17314f;
-        --text-muted: #58708b;
-        --bg-start: #f4f8fd;
-        --bg-end: #ecf3fb;
+        --accent: {{ vendor_branding.consultant_accent }};
+        --accent-soft: {{ vendor_branding.consultant_accent_soft }};
+        --accent-soft-solid: {{ vendor_branding.consultant_accent_soft_solid }};
+        --text-main: {{ vendor_branding.consultant_text_main }};
+        --text-muted: {{ vendor_branding.consultant_text_muted }};
+        --bg-start: {{ vendor_branding.consultant_bg_start }};
+        --bg-end: {{ vendor_branding.consultant_bg_end }};
       }
       html, body { min-height: 100%; }
       body {
@@ -35,13 +38,13 @@
       .wrap { max-width: 1120px; margin: 0 auto; padding: 32px 20px; }
       .card { background: white; border-radius: 18px; padding: 24px; box-shadow: 0 8px 24px rgba(0,0,0,.08); }
       .auth-shell { max-width: 460px; margin: 48px auto 0; }
-      .public-topbar-shell { margin: -32px -20px 28px; padding: 10px 22px; background: #1b2838; box-shadow: 0 2px 20px rgba(0, 0, 0, 0.28); }
+      .public-topbar-shell { margin: 0 0 28px; padding: 10px 22px; background: var(--topbar-bg); box-shadow: 0 2px 20px rgba(0, 0, 0, 0.28); }
       .public-topbar-link {
         display: inline-flex;
         align-items: center;
         gap: 8px;
         text-decoration: none;
-        color: #fff;
+        color: var(--topbar-text);
         font-weight: 700;
         font-size: 1.5rem;
         letter-spacing: -0.02em;
@@ -51,9 +54,10 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        color: #2bb58e;
+        color: var(--topbar-mark);
         font-size: 1.05rem;
       }
+      .public-topbar-logo { display: block; height: 24px; width: auto; }
       .grid { display: grid; gap: 16px; }
       .stats { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
       .stat { background: var(--accent-soft-solid); border-radius: 14px; padding: 16px; }
@@ -352,6 +356,9 @@
     </style>
   </head>
   <body class="theme-{{ theme or 'default' }}">
+    {% if request.path.startswith('/consultant') or request.path.startswith('/admin') %}
+      {% include "shared/_public_topbar.html" %}
+    {% endif %}
     <div class="wrap">
       {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}

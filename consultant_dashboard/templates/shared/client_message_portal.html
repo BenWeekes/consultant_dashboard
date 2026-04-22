@@ -17,8 +17,8 @@
         <div
           class="chat-thread"
           data-message-thread
-          data-thread-endpoint="/client/messages/{{ request.view_args['token'] }}/thread"
-          data-thread-ws="/ws/client/messages/{{ request.view_args['token'] }}"
+          data-thread-endpoint="{{ tenant_path('/client/messages/' ~ request.view_args['token'] ~ '/thread') }}"
+          data-thread-ws="{{ tenant_path('/ws/client/messages/' ~ request.view_args['token']) }}"
         >
           {% for message in messages %}
             <div class="chat-row {% if message.direction == 'inbound' %}chat-row-outbound{% else %}chat-row-inbound{% endif %}">

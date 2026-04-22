@@ -63,10 +63,11 @@ class ConsultantDashboardTestCase(unittest.TestCase):
             escalation_phone_number="+447700900000",
         )
         consultant = db.execute(
-            "SELECT id, email FROM consultants WHERE email = ?",
+            "SELECT id, email, vendor_id FROM consultants WHERE email = ?",
             ("consultant@example.com",),
         ).fetchone()
         self.consultant_id = consultant["id"]
+        self.vendor_id = consultant["vendor_id"]
         self.client_id = create_client(
             db,
             consultant_id=self.consultant_id,

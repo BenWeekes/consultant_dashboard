@@ -27,30 +27,30 @@
           <div class="summary-copy">{{ meeting.invite_message }}</div>
         </div>
       {% endif %}
-
       <div class="actions" style="margin-top: 22px;">
         {% if meeting.status in ['scheduled', 'client_viewed', 'accepted', 'declined'] and not is_ai_meeting %}
           <form method="post">
-            <input type="hidden" name="action" value="{{ 'accept_join' if immediate_join and meeting.status in ['scheduled', 'client_viewed'] else 'accept' }}">
-            <button type="submit">{{ "Accept and join now" if immediate_join and meeting.status in ['scheduled', 'client_viewed'] else "Accept" }}</button>
+            <input type="hidden" name="action" value="accept">
+            <button type="submit" class="button-secondary">Accept</button>
           </form>
           <form method="post">
             <input type="hidden" name="action" value="decline">
             <button type="submit" class="button-secondary">Decline</button>
           </form>
         {% endif %}
-        {% if join_url %}
-          <a href="{{ join_url }}" class="button-secondary" target="_blank" rel="noopener">{{ join_label }}</a>
-        {% endif %}
+        <div class="muted" style="font-weight: 600;">Status: {{ status_display }}</div>
+      </div>
+
+      <div class="actions" style="margin-top: 12px;">
+        <a href="{{ join_url }}" class="button-secondary button-link" target="_blank" rel="noopener">{{ join_label }}</a>
         {% if add_to_calendar_url %}
-          <a href="{{ add_to_calendar_url }}" class="button-secondary">Add to calendar</a>
+          <a href="{{ add_to_calendar_url }}" class="button-secondary button-link">Add to calendar</a>
         {% endif %}
       </div>
 
       {% if not is_ai_meeting %}
         <div class="muted" style="margin-top: 16px;">A reminder email with your meeting link will be sent before the meeting starts.</div>
       {% endif %}
-      <div class="muted" style="margin-top: 10px;">Status: {{ meeting.status.replace('_', ' ') }}</div>
     {% endif %}
   </div>
 {% endblock %}

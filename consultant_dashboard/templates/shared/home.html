@@ -7,10 +7,10 @@
       <p class="muted">Consultant dashboard service for AI-assisted consultation workflows.</p>
     </div>
     <div class="grid">
-      <a href="/consultant/login">Consultant Login</a>
-      <a href="/admin/login">Admin Login</a>
-      <a href="/health">Health</a>
-      <a href="/internal/health">Internal Health</a>
+      <a href="{{ tenant_url_for('auth.consultant_login') }}">Consultant Login</a>
+      <a href="{{ tenant_url_for('auth.admin_login') }}">Admin Login</a>
+      <a href="{{ tenant_path('/health') }}">Health</a>
+      <a href="{{ tenant_path('/internal/health') }}">Internal Health</a>
     </div>
   </div>
 {% endblock %}

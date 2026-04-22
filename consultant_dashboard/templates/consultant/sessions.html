@@ -7,6 +7,24 @@
         <h1>Sessions</h1>
       </div>
     </div>
+    <div class="history-toolbar">
+      <form method="get" class="actions" style="align-items: end;">
+        <div>
+          <label class="label" for="client_id">Client</label>
+          <select id="client_id" name="client_id">
+            <option value="">All clients</option>
+            {% for client in clients %}
+              <option value="{{ client.id }}" {% if selected_client_id == client.id %}selected{% endif %}>{{ client.display_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="history-search">
+          <label class="label" for="q">Search summaries</label>
+          <input id="q" type="search" name="q" value="{{ search or '' }}" placeholder="Search summary text">
+        </div>
+        <button type="submit">Filter</button>
+      </form>
+    </div>
     <table class="table">
       <thead>
         <tr>
@@ -14,20 +32,22 @@
           <th>Type</th>
           <th>Time</th>
           <th>Status</th>
+          <th>Summary</th>
           <th>Duration</th>
         </tr>
       </thead>
       <tbody>
         {% for session_row in sessions %}
           <tr>
-            <td><a href="/consultant/sessions/{{ session_row.id }}">{{ session_row.display_name }}</a></td>
+            <td><a href="{{ tenant_path('/consultant/sessions/' ~ session_row.id) }}">{{ session_row.display_name }}</a></td>
             <td>{{ session_row.session_kind_display }}</td>
             <td>{{ (session_row.ended_at or session_row.started_at or session_row.created_at)|display_dt }}</td>
             <td>{{ session_row.status }}{% if session_row.urgent_escalation %} · urgent escalation{% endif %}</td>
+            <td>{{ session_row.summary_search_text or "—" }}</td>
             <td>{{ session_row.duration_seconds }}s</td>
           </tr>
         {% else %}
-          <tr><td colspan="5" class="muted">No sessions yet.</td></tr>
+          <tr><td colspan="6" class="muted">No sessions yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>

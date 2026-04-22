@@ -23,7 +23,7 @@
               <td>{{ consultant.email }}<br>{{ consultant.phone_number }}</td>
               <td>{{ consultant.client_count }}</td>
               <td>{{ consultant.session_count }}</td>
-              <td><a href="/admin/consultants/{{ consultant.id }}">Edit</a></td>
+              <td><a href="{{ tenant_path('/admin/consultants/' ~ consultant.id) }}" class="button-secondary button-link">Edit</a></td>
             </tr>
           {% else %}
             <tr><td colspan="5" class="muted">No consultants yet.</td></tr>
@@ -35,6 +35,13 @@
       <div class="label">New Consultant</div>
       <h2>Add Consultant</h2>
       <form method="post">
+        <label class="field-label">Vendor</label>
+        <select name="vendor_id" required>
+          {% for vendor in vendors %}
+            <option value="{{ vendor.id }}" {% if form_defaults.vendor_id == vendor.id %}selected{% endif %}>{{ vendor.name }} ({{ vendor.slug }})</option>
+          {% endfor %}
+        </select>
+
         <label class="field-label">Name</label>
         <input name="name" placeholder="Name" value="{{ form_defaults.name or '' }}" required>
 

@@ -6,6 +6,10 @@ from typing import Dict, List, Optional
 
 from .client_identity import build_identity_hashes
 
+
+DEFAULT_VENDOR_SLUG = "mindfix"
+
+
 def get_db(config: dict) -> sqlite3.Connection:
     db = sqlite3.connect(config["DB_PATH"])
     db.row_factory = sqlite3.Row
@@ -16,13 +20,36 @@ def get_db(config: dict) -> sqlite3.Connection:
 def init_db(config: dict) -> None:
     db = get_db(config)
     schema_path = Path(__file__).with_name("schema.sql")
+    existing_tables = {
+        row["name"]
+        for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+    }
+    if existing_tables:
+        _ensure_migrations(db, config)
     db.executescript(schema_path.read_text(encoding="utf-8"))
-    _ensure_migrations(db)
+    _ensure_migrations(db, config)
     db.commit()
     db.close()
 
 
-def _ensure_migrations(db: sqlite3.Connection) -> None:
+def _ensure_migrations(db: sqlite3.Connection, config: Optional[dict] = None) -> None:
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS vendors (
+            id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+            slug TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            storage_root TEXT NOT NULL,
+            www_root TEXT NOT NULL DEFAULT '',
+            primary_host TEXT NOT NULL DEFAULT '',
+            brand_config_json TEXT NOT NULL DEFAULT '',
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    _seed_default_vendor(db, config)
     session_columns = {row["name"] for row in db.execute("PRAGMA table_info(sessions)").fetchall()}
     if "session_kind" not in session_columns:
         db.execute("ALTER TABLE sessions ADD COLUMN session_kind TEXT NOT NULL DEFAULT 'avatar_ai_session'")
@@ -37,9 +64,45 @@ def _ensure_migrations(db: sqlite3.Connection) -> None:
     if "video_biomarkers_enabled" not in session_columns:
         db.execute("ALTER TABLE sessions ADD COLUMN video_biomarkers_enabled INTEGER NOT NULL DEFAULT 1")
     client_columns = {row["name"] for row in db.execute("PRAGMA table_info(clients)").fetchall()}
+    consultant_columns = {row["name"] for row in db.execute("PRAGMA table_info(consultants)").fetchall()}
+    default_vendor_id = _default_vendor_id(db, config)
+    if "vendor_id" not in consultant_columns:
+        db.execute("ALTER TABLE consultants ADD COLUMN vendor_id TEXT")
+        db.execute("UPDATE consultants SET vendor_id = ? WHERE vendor_id IS NULL OR vendor_id = ''", (default_vendor_id,))
+    if "vendor_id" not in client_columns:
+        db.execute("ALTER TABLE clients ADD COLUMN vendor_id TEXT")
+        db.execute("UPDATE clients SET vendor_id = ? WHERE vendor_id IS NULL OR vendor_id = ''", (default_vendor_id,))
     if "password_hash" not in client_columns:
         db.execute("ALTER TABLE clients ADD COLUMN password_hash TEXT")
     message_columns = {row["name"] for row in db.execute("PRAGMA table_info(client_messages)").fetchall()}
+    consultant_client_columns = {row["name"] for row in db.execute("PRAGMA table_info(consultant_clients)").fetchall()}
+    if "vendor_id" not in consultant_client_columns:
+        db.execute("ALTER TABLE consultant_clients ADD COLUMN vendor_id TEXT")
+        db.execute(
+            """
+            UPDATE consultant_clients
+            SET vendor_id = COALESCE(
+                (SELECT vendor_id FROM consultants WHERE consultants.id = consultant_clients.consultant_id),
+                ?
+            )
+            WHERE vendor_id IS NULL OR vendor_id = ''
+            """,
+            (default_vendor_id,),
+        )
+    auth_identity_columns = {row["name"] for row in db.execute("PRAGMA table_info(client_auth_identities)").fetchall()}
+    if "vendor_id" not in auth_identity_columns:
+        db.execute("ALTER TABLE client_auth_identities ADD COLUMN vendor_id TEXT")
+        db.execute(
+            """
+            UPDATE client_auth_identities
+            SET vendor_id = COALESCE(
+                (SELECT vendor_id FROM clients WHERE clients.id = client_auth_identities.client_id),
+                ?
+            )
+            WHERE vendor_id IS NULL OR vendor_id = ''
+            """,
+            (default_vendor_id,),
+        )
     if "read_by_client_at" not in message_columns:
         db.execute("ALTER TABLE client_messages ADD COLUMN read_by_client_at TEXT")
     if "read_by_consultant_at" not in message_columns:
@@ -48,6 +111,19 @@ def _ensure_migrations(db: sqlite3.Connection) -> None:
         db.execute("ALTER TABLE client_messages ADD COLUMN notification_pending INTEGER NOT NULL DEFAULT 0")
     if "notified_at" not in message_columns:
         db.execute("ALTER TABLE client_messages ADD COLUMN notified_at TEXT")
+    if "vendor_id" not in message_columns:
+        db.execute("ALTER TABLE client_messages ADD COLUMN vendor_id TEXT")
+        db.execute(
+            """
+            UPDATE client_messages
+            SET vendor_id = COALESCE(
+                (SELECT vendor_id FROM clients WHERE clients.id = client_messages.client_id),
+                ?
+            )
+            WHERE vendor_id IS NULL OR vendor_id = ''
+            """,
+            (default_vendor_id,),
+        )
     db.execute(
         """
         CREATE UNIQUE INDEX IF NOT EXISTS idx_consultant_clients_client_id
@@ -112,6 +188,19 @@ def _ensure_migrations(db: sqlite3.Connection) -> None:
         """
     )
     meeting_columns = {row["name"] for row in db.execute("PRAGMA table_info(scheduled_meetings)").fetchall()}
+    if "vendor_id" not in meeting_columns:
+        db.execute("ALTER TABLE scheduled_meetings ADD COLUMN vendor_id TEXT")
+        db.execute(
+            """
+            UPDATE scheduled_meetings
+            SET vendor_id = COALESCE(
+                (SELECT vendor_id FROM clients WHERE clients.id = scheduled_meetings.client_id),
+                ?
+            )
+            WHERE vendor_id IS NULL OR vendor_id = ''
+            """,
+            (default_vendor_id,),
+        )
     if "meeting_type" not in meeting_columns:
         db.execute("ALTER TABLE scheduled_meetings ADD COLUMN meeting_type TEXT NOT NULL DEFAULT 'human'")
     if "repeat_weekly" not in meeting_columns:
@@ -141,6 +230,7 @@ def _ensure_migrations(db: sqlite3.Connection) -> None:
         """
         CREATE TABLE IF NOT EXISTS meeting_events (
             id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+            vendor_id TEXT,
             meeting_id TEXT NOT NULL,
             actor_type TEXT NOT NULL,
             actor_id TEXT NOT NULL DEFAULT '',
@@ -151,6 +241,265 @@ def _ensure_migrations(db: sqlite3.Connection) -> None:
         )
         """
     )
+    meeting_event_columns = {row["name"] for row in db.execute("PRAGMA table_info(meeting_events)").fetchall()}
+    if "vendor_id" not in meeting_event_columns:
+        db.execute("ALTER TABLE meeting_events ADD COLUMN vendor_id TEXT")
+    db.execute(
+        """
+        UPDATE meeting_events
+        SET vendor_id = COALESCE(
+            (SELECT vendor_id FROM scheduled_meetings WHERE scheduled_meetings.id = meeting_events.meeting_id),
+            ?
+        )
+        WHERE vendor_id IS NULL OR vendor_id = ''
+        """,
+        (default_vendor_id,),
+    )
+    access_link_columns = {row["name"] for row in db.execute("PRAGMA table_info(client_access_links)").fetchall()}
+    if "vendor_id" not in access_link_columns:
+        db.execute("ALTER TABLE client_access_links ADD COLUMN vendor_id TEXT")
+        db.execute(
+            """
+            UPDATE client_access_links
+            SET vendor_id = COALESCE(
+                (SELECT vendor_id FROM clients WHERE clients.id = client_access_links.client_id),
+                ?
+            )
+            WHERE vendor_id IS NULL OR vendor_id = ''
+            """,
+            (default_vendor_id,),
+        )
+    session_alert_columns = {row["name"] for row in db.execute("PRAGMA table_info(session_alerts)").fetchall()}
+    if "vendor_id" not in session_alert_columns:
+        db.execute("ALTER TABLE session_alerts ADD COLUMN vendor_id TEXT")
+        db.execute(
+            """
+            UPDATE session_alerts
+            SET vendor_id = COALESCE(
+                (SELECT vendor_id FROM clients WHERE clients.id = session_alerts.client_id),
+                ?
+            )
+            WHERE vendor_id IS NULL OR vendor_id = ''
+            """,
+            (default_vendor_id,),
+        )
+    note_columns = {row["name"] for row in db.execute("PRAGMA table_info(client_note_revisions)").fetchall()}
+    if "vendor_id" not in note_columns:
+        db.execute("ALTER TABLE client_note_revisions ADD COLUMN vendor_id TEXT")
+        db.execute(
+            """
+            UPDATE client_note_revisions
+            SET vendor_id = COALESCE(
+                (SELECT vendor_id FROM clients WHERE clients.id = client_note_revisions.client_id),
+                ?
+            )
+            WHERE vendor_id IS NULL OR vendor_id = ''
+            """,
+            (default_vendor_id,),
+        )
+    policy_columns = {row["name"] for row in db.execute("PRAGMA table_info(client_policy)").fetchall()}
+    if "vendor_id" not in policy_columns:
+        db.execute("ALTER TABLE client_policy ADD COLUMN vendor_id TEXT")
+        db.execute(
+            """
+            UPDATE client_policy
+            SET vendor_id = COALESCE(
+                (SELECT vendor_id FROM clients WHERE clients.id = client_policy.client_id),
+                ?
+            )
+            WHERE vendor_id IS NULL OR vendor_id = ''
+            """,
+            (default_vendor_id,),
+        )
+    if "vendor_id" not in session_columns:
+        db.execute("ALTER TABLE sessions ADD COLUMN vendor_id TEXT")
+        db.execute(
+            """
+            UPDATE sessions
+            SET vendor_id = COALESCE(
+                (SELECT vendor_id FROM clients WHERE clients.id = sessions.client_id),
+                ?
+            )
+            WHERE vendor_id IS NULL OR vendor_id = ''
+            """,
+            (default_vendor_id,),
+        )
+
+
+def _seed_default_vendor(db: sqlite3.Connection, config: Optional[dict] = None) -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    legacy_storage = str(repo_root / "shared-therapy-storage")
+    legacy_www = str(repo_root / "consultant_dashboard" / "www" / DEFAULT_VENDOR_SLUG)
+    default_storage = (config or {}).get("STORAGE_ROOT", legacy_storage)
+    default_www = str(
+        Path((config or {}).get("WWW_ROOT", str(repo_root / "consultant_dashboard" / "www"))) / DEFAULT_VENDOR_SLUG
+    )
+    default_host = (config or {}).get("PUBLIC_BASE_URL", "")
+    existing = db.execute(
+        "SELECT id, storage_root, www_root, primary_host FROM vendors WHERE slug = ?",
+        (DEFAULT_VENDOR_SLUG,),
+    ).fetchone()
+    if existing:
+        db.execute(
+            """
+            UPDATE vendors
+            SET storage_root = CASE
+                    WHEN storage_root = '' OR storage_root = ? THEN ?
+                    ELSE storage_root
+                END,
+                www_root = CASE
+                    WHEN www_root = '' OR www_root = ? THEN ?
+                    ELSE www_root
+                END,
+                primary_host = CASE
+                    WHEN primary_host = '' OR primary_host = ? THEN ?
+                    ELSE primary_host
+                END,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (
+                legacy_storage,
+                default_storage,
+                legacy_www,
+                default_www,
+                "",
+                default_host,
+                existing["id"],
+            ),
+        )
+        return
+    db.execute(
+        """
+        INSERT INTO vendors (slug, name, storage_root, www_root, primary_host, brand_config_json, is_active)
+        VALUES (?, ?, ?, ?, ?, ?, 1)
+        """,
+        (
+            DEFAULT_VENDOR_SLUG,
+            "MindFix",
+            default_storage,
+            default_www,
+            default_host,
+            json.dumps({"name": "MindFix", "slug": DEFAULT_VENDOR_SLUG}),
+        ),
+    )
+
+
+def _default_vendor_id(db: sqlite3.Connection, config: Optional[dict] = None) -> str:
+    row = db.execute("SELECT id FROM vendors WHERE slug = ?", (DEFAULT_VENDOR_SLUG,)).fetchone()
+    if row is None:
+        _seed_default_vendor(db, config)
+        row = db.execute("SELECT id FROM vendors WHERE slug = ?", (DEFAULT_VENDOR_SLUG,)).fetchone()
+    return row["id"]
+
+
+def list_vendors(db: sqlite3.Connection):
+    return db.execute(
+        """
+        SELECT *
+        FROM vendors
+        WHERE is_active = 1
+        ORDER BY created_at DESC
+        """
+    ).fetchall()
+
+
+def get_vendor_by_slug(db: sqlite3.Connection, slug: str):
+    return db.execute(
+        """
+        SELECT *
+        FROM vendors
+        WHERE slug = ? AND is_active = 1
+        LIMIT 1
+        """,
+        ((slug or DEFAULT_VENDOR_SLUG).strip().lower(),),
+    ).fetchone()
+
+
+def get_vendor_by_id(db: sqlite3.Connection, vendor_id: str):
+    return db.execute(
+        """
+        SELECT *
+        FROM vendors
+        WHERE id = ? AND is_active = 1
+        LIMIT 1
+        """,
+        (vendor_id,),
+    ).fetchone()
+
+
+def create_vendor(
+    db: sqlite3.Connection,
+    *,
+    slug: str,
+    name: str,
+    storage_root: str,
+    www_root: str,
+    primary_host: str = "",
+    brand_config_json: str = "",
+) -> str:
+    db.execute(
+        """
+        INSERT INTO vendors (slug, name, storage_root, www_root, primary_host, brand_config_json, is_active)
+        VALUES (?, ?, ?, ?, ?, ?, 1)
+        """,
+        (
+            slug.strip().lower(),
+            name.strip(),
+            storage_root.strip(),
+            www_root.strip(),
+            primary_host.strip(),
+            brand_config_json.strip(),
+        ),
+    )
+    return db.execute("SELECT id FROM vendors WHERE rowid = last_insert_rowid()").fetchone()["id"]
+
+
+def update_vendor(
+    db: sqlite3.Connection,
+    *,
+    vendor_id: str,
+    name: str,
+    storage_root: str,
+    www_root: str,
+    primary_host: str = "",
+    brand_config_json: str = "",
+) -> None:
+    db.execute(
+        """
+        UPDATE vendors
+        SET name = ?,
+            storage_root = ?,
+            www_root = ?,
+            primary_host = ?,
+            brand_config_json = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (
+            name.strip(),
+            storage_root.strip(),
+            www_root.strip(),
+            primary_host.strip(),
+            brand_config_json.strip(),
+            vendor_id,
+        ),
+    )
+
+
+def _vendor_id_for_consultant(db: sqlite3.Connection, consultant_id: str) -> str:
+    row = db.execute("SELECT vendor_id FROM consultants WHERE id = ? LIMIT 1", (consultant_id,)).fetchone()
+    return (row["vendor_id"] if row and row["vendor_id"] else _default_vendor_id(db))
+
+
+def _vendor_id_for_client(db: sqlite3.Connection, client_id: str) -> str:
+    row = db.execute("SELECT vendor_id FROM clients WHERE id = ? LIMIT 1", (client_id,)).fetchone()
+    return (row["vendor_id"] if row and row["vendor_id"] else _default_vendor_id(db))
+
+
+def _vendor_id_for_meeting(db: sqlite3.Connection, meeting_id: str) -> str:
+    row = db.execute("SELECT vendor_id FROM scheduled_meetings WHERE id = ? LIMIT 1", (meeting_id,)).fetchone()
+    return (row["vendor_id"] if row and row["vendor_id"] else _default_vendor_id(db))
 
 
 def _ensure_scheduled_meetings_channel_not_unique(db: sqlite3.Connection) -> None:
@@ -255,6 +604,7 @@ def _ensure_scheduled_meetings_channel_not_unique(db: sqlite3.Connection) -> Non
 def create_consultant(
     db: sqlite3.Connection,
     *,
+    vendor_id: str = "",
     email: str,
     name: str,
     phone_number: str,
@@ -265,11 +615,12 @@ def create_consultant(
     db.execute(
         """
         INSERT INTO consultants (
-            email, password_hash, name, phone_number,
+            vendor_id, email, password_hash, name, phone_number,
             notification_email, escalation_phone_number, is_active
-        ) VALUES (?, ?, ?, ?, ?, ?, 1)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
         """,
         (
+            vendor_id or _default_vendor_id(db),
             email.lower().strip(),
             password_hash,
             name.strip(),
@@ -280,17 +631,22 @@ def create_consultant(
     )
 
 
-def get_consultant_by_email(db: sqlite3.Connection, email: str):
+def get_consultant_by_email(db: sqlite3.Connection, email: str, vendor_id: str = ""):
     return db.execute(
-        "SELECT * FROM consultants WHERE email = ? AND is_active = 1",
-        (email.lower().strip(),),
+        "SELECT * FROM consultants WHERE email = ? AND vendor_id = ? AND is_active = 1",
+        (email.lower().strip(), vendor_id or _default_vendor_id(db)),
     ).fetchone()
 
 
-def get_consultant_by_id(db: sqlite3.Connection, consultant_id: str):
+def get_consultant_by_id(db: sqlite3.Connection, consultant_id: str, vendor_id: str = ""):
+    params: List[object] = [consultant_id]
+    vendor_sql = ""
+    if vendor_id:
+        vendor_sql = "AND vendor_id = ?"
+        params.append(vendor_id)
     return db.execute(
-        "SELECT * FROM consultants WHERE id = ? AND is_active = 1",
-        (consultant_id,),
+        f"SELECT * FROM consultants WHERE id = ? {vendor_sql} AND is_active = 1",
+        params,
     ).fetchone()
 
 
@@ -479,9 +835,14 @@ def list_recent_biomarker_keys(db: sqlite3.Connection, client_id: str, limit: in
     ).fetchall()
 
 
-def list_consultants(db: sqlite3.Connection):
+def list_consultants(db: sqlite3.Connection, vendor_id: str = ""):
+    params: List[object] = []
+    vendor_sql = ""
+    if vendor_id:
+        vendor_sql = "AND c.vendor_id = ?"
+        params.append(vendor_id)
     return db.execute(
-        """
+        f"""
         SELECT c.*,
                COUNT(DISTINCT cc.client_id) AS client_count,
                COUNT(DISTINCT s.id) AS session_count
@@ -489,9 +850,11 @@ def list_consultants(db: sqlite3.Connection):
         LEFT JOIN consultant_clients cc ON cc.consultant_id = c.id
         LEFT JOIN sessions s ON s.consultant_id = c.id
         WHERE c.is_active = 1
+        {vendor_sql}
         GROUP BY c.id
         ORDER BY c.created_at DESC
-        """
+        """,
+        params,
     ).fetchall()
 
 
@@ -499,6 +862,7 @@ def create_client(
     db: sqlite3.Connection,
     *,
     consultant_id: str,
+    vendor_id: str = "",
     display_name: str,
     email: str,
     password_hash: str = "",
@@ -511,12 +875,13 @@ def create_client(
     db.execute(
         """
         INSERT INTO clients (
-            display_name, email, password_hash, phone_number, notification_email,
+            vendor_id, display_name, email, password_hash, phone_number, notification_email,
             escalation_phone_number, notes_current, direction_current,
             created_by_consultant_id, is_active
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
         """,
         (
+            vendor_id or _vendor_id_for_consultant(db, consultant_id),
             display_name.strip(),
             email.strip(),
             password_hash.strip(),
@@ -531,14 +896,20 @@ def create_client(
     client_id = db.execute("SELECT id FROM clients WHERE rowid = last_insert_rowid()").fetchone()["id"]
     db.execute(
         """
-        INSERT OR REPLACE INTO consultant_clients (id, consultant_id, client_id, role, created_at)
+        INSERT OR REPLACE INTO consultant_clients (id, vendor_id, consultant_id, client_id, role, created_at)
         VALUES (
             COALESCE((SELECT id FROM consultant_clients WHERE client_id = ?), lower(hex(randomblob(16)))),
-            ?, ?, 'primary',
+            ?, ?, ?, 'primary',
             COALESCE((SELECT created_at FROM consultant_clients WHERE client_id = ?), CURRENT_TIMESTAMP)
         )
         """,
-        (client_id, consultant_id, client_id, client_id),
+        (
+            client_id,
+            vendor_id or _vendor_id_for_consultant(db, consultant_id),
+            consultant_id,
+            client_id,
+            client_id,
+        ),
     )
     identity_hashes = build_identity_hashes(display_name, email, phone_number)
     if any(identity_hashes.values()):
@@ -552,17 +923,17 @@ def create_client(
     return client_id
 
 
-def get_client_by_email(db: sqlite3.Connection, email: str):
+def get_client_by_email(db: sqlite3.Connection, email: str, vendor_id: str = ""):
     return db.execute(
         """
         SELECT c.*, cc.consultant_id
         FROM clients c
         LEFT JOIN consultant_clients cc ON cc.client_id = c.id
-        WHERE c.email = ? AND c.is_active = 1
+        WHERE c.email = ? AND c.vendor_id = ? AND c.is_active = 1
         ORDER BY cc.created_at DESC
         LIMIT 1
         """,
-        (email.lower().strip(),),
+        (email.lower().strip(), vendor_id or _default_vendor_id(db)),
     ).fetchone()
 
 
@@ -576,10 +947,10 @@ def create_client_access_link(
 ) -> str:
     db.execute(
         """
-        INSERT INTO client_access_links (client_id, created_by, token_hash, expires_at)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO client_access_links (vendor_id, client_id, created_by, token_hash, expires_at)
+        VALUES (?, ?, ?, ?, ?)
         """,
-        (client_id, created_by, token_hash, expires_at),
+        (_vendor_id_for_client(db, client_id), client_id, created_by, token_hash, expires_at),
     )
     return db.execute("SELECT id FROM client_access_links WHERE rowid = last_insert_rowid()").fetchone()["id"]
 
@@ -637,15 +1008,16 @@ def create_scheduled_meeting(
     db.execute(
         """
         INSERT INTO scheduled_meetings (
-            client_id, consultant_id, meeting_type, repeat_weekly,
+            vendor_id, client_id, consultant_id, meeting_type, repeat_weekly,
             transcription_enabled, audio_biomarkers_enabled, video_biomarkers_enabled,
             transcription_provider, transcription_language,
             title, invite_message, timezone_name,
             scheduled_start_at, scheduled_end_at, join_window_start_at, join_window_end_at,
             channel_name, response_access_link_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
+            _vendor_id_for_client(db, client_id),
             client_id,
             consultant_id,
             (meeting_type or "human").strip().lower(),
@@ -723,10 +1095,11 @@ def record_meeting_event(
 ) -> None:
     db.execute(
         """
-        INSERT INTO meeting_events (meeting_id, actor_type, actor_id, event_type, details_json)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO meeting_events (vendor_id, meeting_id, actor_type, actor_id, event_type, details_json)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
         (
+            _vendor_id_for_meeting(db, meeting_id),
             meeting_id,
             actor_type,
             actor_id,
@@ -991,7 +1364,7 @@ def mark_meeting_joined(
     role_column = _meeting_role_column(participant_role, joined=True)
     meeting = db.execute(
         """
-        SELECT in_progress_at, status
+        SELECT in_progress_at, status, scheduled_start_at, client_joined_at, consultant_joined_at
         FROM scheduled_meetings
         WHERE id = ?
         LIMIT 1
@@ -1000,18 +1373,25 @@ def mark_meeting_joined(
     ).fetchone()
     if not meeting or meeting["status"] not in {"scheduled", "client_viewed", "accepted", "in_progress"}:
         return None
-    first_join = bool(meeting and not meeting["in_progress_at"])
+    first_join = not meeting["client_joined_at"] and not meeting["consultant_joined_at"]
+    start_at = datetime.fromisoformat((meeting["scheduled_start_at"] or "").replace("Z", "+00:00")) if meeting["scheduled_start_at"] else None
+    should_mark_in_progress = (
+        meeting["status"] == "in_progress"
+        or participant_role == "guest"
+        or bool(meeting["client_joined_at"])
+        or bool(start_at and datetime.now(timezone.utc) >= start_at.astimezone(timezone.utc))
+    )
     cursor = db.execute(
         f"""
         UPDATE scheduled_meetings
-        SET status = 'in_progress',
-            in_progress_at = COALESCE(in_progress_at, CURRENT_TIMESTAMP),
+        SET status = CASE WHEN ? THEN 'in_progress' ELSE status END,
+            in_progress_at = CASE WHEN ? THEN COALESCE(in_progress_at, CURRENT_TIMESTAMP) ELSE in_progress_at END,
             {role_column} = COALESCE({role_column}, CURRENT_TIMESTAMP),
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
           AND status IN ('scheduled', 'client_viewed', 'accepted', 'in_progress')
         """,
-        (meeting_id,),
+        (1 if should_mark_in_progress else 0, 1 if should_mark_in_progress else 0, meeting_id),
     )
     if not cursor.rowcount:
         return None
@@ -1206,12 +1586,13 @@ def create_client_message(
     db.execute(
         """
         INSERT INTO client_messages (
-            client_id, consultant_id, direction, channel, subject, body,
+            vendor_id, client_id, consultant_id, direction, channel, subject, body,
             delivery_status, delivery_error, access_link_id, metadata_json,
             read_by_client_at, read_by_consultant_at, notification_pending, notified_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
+            _vendor_id_for_client(db, client_id),
             client_id,
             consultant_id,
             direction,
@@ -1345,23 +1726,25 @@ def upsert_client_auth_identity(
         db.execute(
             """
             UPDATE client_auth_identities
-            SET google_sub_hash = ?,
+            SET vendor_id = COALESCE(vendor_id, ?),
+                google_sub_hash = ?,
                 email_hash = ?,
                 normalized_name_hash = ?,
                 phone_hash = ?,
                 last_verified_at = CURRENT_TIMESTAMP
             WHERE client_id = ?
             """,
-            params,
+            (_vendor_id_for_client(db, client_id),) + params,
         )
         return
     db.execute(
         """
         INSERT INTO client_auth_identities (
-            client_id, google_sub_hash, email_hash, normalized_name_hash, phone_hash, last_verified_at
-        ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            vendor_id, client_id, google_sub_hash, email_hash, normalized_name_hash, phone_hash, last_verified_at
+        ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         """,
         (
+            _vendor_id_for_client(db, client_id),
             client_id,
             google_sub_hash or None,
             email_hash or None,
@@ -1434,14 +1817,15 @@ def upsert_session(
     db.execute(
         """
         INSERT INTO sessions (
-            id, client_id, consultant_id, session_kind, meeting_id,
+            vendor_id, id, client_id, consultant_id, session_kind, meeting_id,
             transcription_enabled, audio_biomarkers_enabled, video_biomarkers_enabled,
             profile_name, channel_name,
             started_at, ended_at, duration_seconds, status,
             summary_storage_key, transcript_storage_key, biomarker_storage_key, memory_storage_key,
             urgent_escalation, escalation_reason
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
+            vendor_id=excluded.vendor_id,
             client_id=excluded.client_id,
             consultant_id=excluded.consultant_id,
             session_kind=excluded.session_kind,
@@ -1463,6 +1847,7 @@ def upsert_session(
             escalation_reason=excluded.escalation_reason
         """,
         (
+            _vendor_id_for_client(db, client_id),
             session_id,
             client_id,
             consultant_id,
@@ -1487,9 +1872,9 @@ def upsert_session(
     )
 
 
-def resolve_client_identity(db: sqlite3.Connection, **hashes: str):
+def resolve_client_identity(db: sqlite3.Connection, vendor_id: str = "", **hashes: str):
     clauses = []
-    params = []
+    params: List[object] = []
     for column in ("google_sub_hash", "email_hash", "normalized_name_hash", "phone_hash"):
         value = hashes.get(column)
         if value:
@@ -1497,12 +1882,17 @@ def resolve_client_identity(db: sqlite3.Connection, **hashes: str):
             params.append(value)
     if not clauses:
         return None
+    vendor_sql = ""
+    if vendor_id:
+        vendor_sql = "AND cai.vendor_id = ?"
+        params.append(vendor_id)
     sql = f"""
         SELECT cai.client_id, cc.consultant_id, c.is_active, c.email, c.display_name, c.phone_number
         FROM client_auth_identities cai
         JOIN clients c ON c.id = cai.client_id
         LEFT JOIN consultant_clients cc ON cc.client_id = cai.client_id
         WHERE ({' OR '.join(clauses)})
+        {vendor_sql}
         ORDER BY cc.created_at DESC
         LIMIT 1
     """
@@ -1701,10 +2091,11 @@ def create_session_alert(
     db.execute(
         """
         INSERT INTO session_alerts (
-            session_id, client_id, severity, source, title, details_storage_key
-        ) VALUES (?, ?, ?, ?, ?, ?)
+            vendor_id, session_id, client_id, severity, source, title, details_storage_key
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         (
+            _vendor_id_for_client(db, client_id),
             session_id,
             client_id,
             severity,

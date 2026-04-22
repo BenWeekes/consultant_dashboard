@@ -6,7 +6,7 @@
       <div>
         <h1>Clients</h1>
       </div>
-      <a href="/consultant/clients/new" class="titlebar-link-button">Add Client</a>
+      <a href="{{ tenant_url_for('web.consultant_client_new') }}" class="titlebar-link-button">Add Client</a>
     </div>
     <table class="table">
       <thead>
@@ -23,7 +23,7 @@
       <tbody>
         {% for client in clients %}
           <tr>
-            <td><a href="/consultant/clients/{{ client.id }}">{{ client.display_name }}</a></td>
+            <td><a href="{{ tenant_path('/consultant/clients/' ~ client.id) }}">{{ client.display_name }}</a></td>
             <td>{{ client.email or client.phone_number or "Not set" }}</td>
             <td>
               {% if client.unread_message_count %}
@@ -43,14 +43,14 @@
             <td>{{ client.session_count }}</td>
             <td>
               {% if client.last_session_at and client.last_session_id %}
-                <a href="/consultant/sessions/{{ client.last_session_id }}">{{ client.last_session_at|display_dt }}</a>
+                <a href="{{ tenant_path('/consultant/sessions/' ~ client.last_session_id) }}">{{ client.last_session_at|display_dt }}</a>
               {% else %}
                 Not yet
               {% endif %}
             </td>
             <td>
               <div class="actions">
-                <a href="/consultant/clients/{{ client.id }}/meetings/new" class="subtle-link">New Meeting</a>
+                <a href="{{ tenant_path('/consultant/clients/' ~ client.id ~ '/meetings/new') }}" class="button-secondary button-link">New Meeting</a>
               </div>
             </td>
           </tr>

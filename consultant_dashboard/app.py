@@ -7,7 +7,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
-from flask import Flask, redirect, url_for
+from flask import Flask, redirect, request, url_for
 from werkzeug.security import generate_password_hash
 
 from .core.auth import auth_bp, configure_session, require_admin_auth_file
@@ -15,6 +15,7 @@ from .core.config import load_config
 from .core.db import create_client, create_consultant, get_db, init_db, upsert_client_auth_identity
 from .core.internal_api import internal_bp
 from .core.realtime import configure_realtime
+from .core.vendors import TenantPrefixMiddleware, current_branding, get_current_vendor, tenant_path, tenant_url_for
 from .core.web import web_bp
 
 PASSWORD_HASH_METHOD = "pbkdf2:sha256"
@@ -46,6 +47,7 @@ def create_app() -> Flask:
         __name__,
         template_folder="templates",
     )
+    app.wsgi_app = TenantPrefixMiddleware(app.wsgi_app)
     config = load_config()
     app.config.update(config)
     app.secret_key = config["SESSION_SECRET"]
@@ -67,8 +69,22 @@ def create_app() -> Flask:
         value, app.config.get("DISPLAY_TIMEZONE", "Europe/London")
     )
 
+    @app.context_processor
+    def inject_vendor_branding():
+        vendor = get_current_vendor()
+        branding = current_branding()
+        return {
+            "current_vendor": vendor,
+            "vendor_branding": branding,
+            "brand_name": branding.get("name") or app.config["BRAND_NAME"],
+            "tenant_path": tenant_path,
+            "tenant_url_for": tenant_url_for,
+        }
+
     @app.route("/")
     def root():
+        if request.environ.get("mindfix.vendor_slug"):
+            return redirect(url_for("web.vendor_public_index"))
         return redirect(url_for("web.home"))
 
     @app.route("/health")

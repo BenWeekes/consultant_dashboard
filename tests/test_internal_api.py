@@ -502,7 +502,7 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
         self.assertEqual(response.json["participant_role"], "host")
         self.assertEqual(response.json["participant_uid"], "103")
 
-    def test_authorize_meeting_join_requires_guest_acceptance(self):
+    def test_authorize_meeting_join_allows_guest_without_acceptance_inside_join_window(self):
         with self.client.application.app_context():
             db = get_db(self.app.config)
             from consultant_dashboard.core.db import create_client_access_link, create_scheduled_meeting
@@ -550,8 +550,8 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
             content_type="application/json",
             headers=self.internal_headers("POST", "/internal/authorize-meeting-join", body),
         )
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(response.json["error"], "meeting_not_joinable_for_guest")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["participant_role"], "guest")
 
     def test_authorize_meeting_join_accepts_guest_bootstrap_lookup(self):
         with self.client.application.app_context():
@@ -607,7 +607,7 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
         self.assertEqual(response.json["participant_role"], "guest")
         self.assertEqual(response.json["participant_uid"], "101")
 
-    def test_authorize_meeting_join_rejects_guest_more_than_ten_minutes_early(self):
+    def test_authorize_meeting_join_allows_guest_outside_original_window_for_human_room(self):
         with self.client.application.app_context():
             db = get_db(self.app.config)
             from consultant_dashboard.core.db import create_client_access_link, create_scheduled_meeting, update_meeting_response_status
@@ -656,5 +656,57 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
             content_type="application/json",
             headers=self.internal_headers("POST", "/internal/authorize-meeting-join", body),
         )
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(response.json["error"], "meeting_too_early")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["participant_role"], "guest")
+
+    def test_authorize_meeting_join_allows_guest_for_declined_human_meeting_room(self):
+        with self.client.application.app_context():
+            db = get_db(self.app.config)
+            from consultant_dashboard.core.db import create_client_access_link, create_scheduled_meeting, update_meeting_response_status
+            from consultant_dashboard.core.meetings import build_join_window, generate_meeting_channel, iso_utc
+            from consultant_dashboard.core.messaging import hash_access_token
+            from datetime import datetime, timedelta, timezone
+
+            start_at = datetime.now(timezone.utc) - timedelta(days=2)
+            end_at = start_at + timedelta(minutes=30)
+            join_start, join_end = build_join_window(start_at, end_at)
+            access_link_id = create_client_access_link(
+                db,
+                client_id=self.client_id,
+                created_by=self.consultant_id,
+                token_hash=hash_access_token("declined-room-token"),
+                expires_at=iso_utc(datetime.now(timezone.utc) + timedelta(days=30)),
+            )
+            meeting_id = create_scheduled_meeting(
+                db,
+                client_id=self.client_id,
+                consultant_id=self.consultant_id,
+                title="Declined Room Test",
+                invite_message="",
+                timezone_name="Europe/London",
+                scheduled_start_at=iso_utc(start_at),
+                scheduled_end_at=iso_utc(end_at),
+                join_window_start_at=iso_utc(join_start),
+                join_window_end_at=iso_utc(join_end),
+                channel_name=generate_meeting_channel(),
+                response_access_link_id=access_link_id,
+            )
+            self.assertTrue(update_meeting_response_status(db, meeting_id=meeting_id, status="declined"))
+            db.commit()
+            db.close()
+
+        body = json.dumps(
+            {
+                "participant_role": "guest",
+                "access_token": "declined-room-token",
+            },
+            separators=(",", ":"),
+        )
+        response = self.client.post(
+            "/internal/authorize-meeting-join",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/authorize-meeting-join", body),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["participant_role"], "guest")

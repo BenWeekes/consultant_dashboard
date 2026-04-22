@@ -1,5 +1,7 @@
+import json
 import sqlite3
 import time
+from urllib.parse import parse_qs, urlparse
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 from zoneinfo import ZoneInfo
@@ -12,7 +14,7 @@ from consultant_dashboard.core.db import (
     get_consultant_by_email,
     get_db,
 )
-from consultant_dashboard.core.meetings import get_pair_channel, make_signed_meeting_access_token
+from consultant_dashboard.core.meetings import get_pair_channel, make_signed_meeting_access_token, verify_signed_join_bootstrap
 from consultant_dashboard.core.messaging import hash_access_token
 
 
@@ -22,10 +24,21 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             datetime.now(timezone.utc) + timedelta(days=days, minutes=minutes)
         ).astimezone(ZoneInfo(timezone_name)).strftime("%Y-%m-%dT%H:%M")
 
+    def _extract_meeting_response_token(self, reply_link: str) -> str:
+        path = urlparse(reply_link).path.rstrip("/")
+        if path.endswith("/join"):
+            path = path[: -len("/join")]
+        return path.rsplit("/", 1)[-1]
+
     def test_consultant_routes_require_login(self):
         response = self.client.get("/consultant/dashboard", follow_redirects=False)
         self.assertEqual(response.status_code, 302)
         self.assertIn("/consultant/login", response.location)
+
+    def test_tenant_prefixed_consultant_routes_require_tenant_login(self):
+        response = self.client.get("/v/mindfix/consultant/dashboard", follow_redirects=False)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/v/mindfix/consultant/login", response.location)
 
     def test_admin_routes_require_login(self):
         response = self.client.get("/admin/dashboard", follow_redirects=False)
@@ -55,6 +68,113 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertIn(b"Consultant Dashboard", response.data)
         self.assertIn(b"Signed in as Test Consultant", response.data)
         self.assertIn(b"Linked Clients", response.data)
+
+    def test_tenant_prefixed_consultant_login_flow_preserves_prefix(self):
+        response = self.client.post(
+            "/v/mindfix/consultant/login",
+            data={"email": "consultant@example.com", "password": "consultpass123"},
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/v/mindfix/consultant/verify", response.location)
+
+        response = self.client.post(
+            "/v/mindfix/consultant/verify",
+            data={"code": "000000"},
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/v/mindfix/consultant/dashboard", response.location)
+
+        dashboard = self.client.get("/v/mindfix/consultant/dashboard")
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertIn(b"/v/mindfix/consultant/clients", dashboard.data)
+
+    def test_tenant_prefixed_public_index_serves_vendor_site(self):
+        response = self.client.get("/v/mindfix/", follow_redirects=False)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/v/mindfix/index.html", response.location)
+
+        response = self.client.get("/v/mindfix/index.html")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"MindFix \xe2\x80\x94 AI-Powered Mental Wellness", response.data)
+        self.assertIn(b'/v/mindfix/consultant/login', response.data)
+        self.assertIn(b'/v/mindfix/admin/login', response.data)
+        self.assertIn(b'/v/mindfix/app', response.data)
+
+    def test_consultant_login_uses_vendor_topbar_wordmark(self):
+        response = self.client.get("/v/mindfix/consultant/login")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"MindFix", response.data)
+        self.assertIn(b"/v/mindfix/consultant/dashboard", response.data)
+        self.assertIn(b"/v/mindfix/consultant/google", response.data)
+
+    def test_consultant_google_dev_flow_uses_same_account_and_vendor_prefix(self):
+        response = self.client.get("/v/mindfix/consultant/google", follow_redirects=False)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/v/mindfix/consultant/google/callback?code=dev-mode", response.location)
+
+        response = self.client.get(response.location, follow_redirects=False)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/v/mindfix/consultant/verify", response.location)
+
+    def test_consultant_google_callback_redirects_to_verify_for_matching_vendor_email(self):
+        self.app.config["AUTH_DEV_MODE"] = False
+        self.app.config["GOOGLE_CLIENT_ID"] = "google-client-id"
+        self.app.config["GOOGLE_CLIENT_SECRET"] = "google-client-secret"
+
+        token_payload = {
+            "sub": "google-sub-123",
+            "email": "consultant@example.com",
+            "name": "Test Consultant",
+        }
+        token_segment = b'eyJhbGciOiJub25lIn0'
+        import base64, json as _json
+        payload_segment = base64.urlsafe_b64encode(_json.dumps(token_payload).encode()).rstrip(b"=")
+        fake_id_token = token_segment.decode() + "." + payload_segment.decode() + ".sig"
+
+        class FakeGoogleTokenResponse:
+            def read(self):
+                import json as _json
+                return _json.dumps({"id_token": fake_id_token}).encode()
+            def __enter__(self):
+                return self
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        self.client.get("/v/mindfix/consultant/login")
+        with mock.patch("urllib.request.urlopen", return_value=FakeGoogleTokenResponse()), \
+             mock.patch("consultant_dashboard.core.auth._send_or_store_code", return_value=None):
+            response = self.client.get("/consultant/google/callback?code=test-code", follow_redirects=False)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/v/mindfix/consultant/verify", response.location)
+
+    @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
+    def test_tenant_prefixed_meeting_invite_links_stay_in_vendor(self, mocked_deliver_email):
+        response = self.client.post(
+            "/v/mindfix/consultant/login",
+            data={"email": "consultant@example.com", "password": "consultpass123"},
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 302)
+        self.client.post("/v/mindfix/consultant/verify", data={"code": "000000"}, follow_redirects=False)
+
+        response = self.client.post(
+            "/v/mindfix/consultant/meetings/new",
+            data={
+                "client_id": self.client_id,
+                "title": "Tenant Invite",
+                "scheduled_start_at": self._future_local_time(days=1),
+                "duration_minutes": "30",
+                "timezone_name": "Europe/London",
+                "invite_message": "",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        reply_link = mocked_deliver_email.call_args.kwargs["reply_link"]
+        self.assertIn("/v/mindfix/meetings/respond/", reply_link)
+
 
     def test_consultant_can_create_client_and_view_detail(self):
         self.consultant_login()
@@ -571,14 +691,14 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             db.execute(
                 """
                 INSERT INTO scheduled_meetings (
-                    client_id, consultant_id, status, title, timezone_name,
+                    vendor_id, client_id, consultant_id, status, title, timezone_name,
                     scheduled_start_at, scheduled_end_at, join_window_start_at, join_window_end_at,
                     channel_name, response_access_link_id, cancelled_at
-                ) VALUES (?, ?, 'cancelled', 'Cancelled Meeting', 'Europe/London',
+                ) VALUES (?, ?, ?, 'cancelled', 'Cancelled Meeting', 'Europe/London',
                           '2026-04-20T10:00:00Z', '2026-04-20T10:30:00Z', '2026-04-20T09:45:00Z', '2026-04-20T11:00:00Z',
                           'CANCEL1234', ?, CURRENT_TIMESTAMP)
                 """,
-                (self.client_id, self.consultant_id, access_link_id),
+                (self.vendor_id, self.client_id, self.consultant_id, access_link_id),
             )
             db.commit()
             db.close()
@@ -655,14 +775,14 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             db.execute(
                 """
                 INSERT INTO scheduled_meetings (
-                    client_id, consultant_id, status, title, timezone_name,
+                    vendor_id, client_id, consultant_id, status, title, timezone_name,
                     scheduled_start_at, scheduled_end_at, join_window_start_at, join_window_end_at,
                     channel_name, response_access_link_id, completed_at
-                ) VALUES (?, ?, 'completed', 'Completed Meeting', 'Europe/London',
+                ) VALUES (?, ?, ?, 'completed', 'Completed Meeting', 'Europe/London',
                           '2026-04-20T10:00:00Z', '2026-04-20T10:30:00Z', '2026-04-20T09:45:00Z', '2026-04-20T11:00:00Z',
                           'DONE123456', ?, CURRENT_TIMESTAMP)
                 """,
-                (self.client_id, self.consultant_id, access_link_id),
+                (self.vendor_id, self.client_id, self.consultant_id, access_link_id),
             )
             meeting_id = db.execute(
                 "SELECT id FROM scheduled_meetings WHERE channel_name = 'DONE123456'"
@@ -697,14 +817,14 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             db.execute(
                 """
                 INSERT INTO scheduled_meetings (
-                    client_id, consultant_id, status, title, timezone_name,
+                    vendor_id, client_id, consultant_id, status, title, timezone_name,
                     scheduled_start_at, scheduled_end_at, join_window_start_at, join_window_end_at,
                     channel_name, response_access_link_id, completed_at
-                ) VALUES (?, ?, 'completed', 'Completed No Show', 'Europe/London',
+                ) VALUES (?, ?, ?, 'completed', 'Completed No Show', 'Europe/London',
                           '2026-04-20T10:00:00Z', '2026-04-20T10:30:00Z', '2026-04-20T09:45:00Z', '2026-04-20T11:00:00Z',
                           'NOSHOWDONE1', ?, CURRENT_TIMESTAMP)
                 """,
-                (self.client_id, self.consultant_id, access_link_id),
+                (self.vendor_id, self.client_id, self.consultant_id, access_link_id),
             )
             meeting_id = db.execute(
                 "SELECT id FROM scheduled_meetings WHERE channel_name = 'NOSHOWDONE1'"
@@ -734,14 +854,14 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             db.execute(
                 """
                 INSERT INTO scheduled_meetings (
-                    client_id, consultant_id, status, title, timezone_name,
+                    vendor_id, client_id, consultant_id, status, title, timezone_name,
                     scheduled_start_at, scheduled_end_at, join_window_start_at, join_window_end_at,
                     channel_name, response_access_link_id
-                ) VALUES (?, ?, 'accepted', 'Open No Show', 'Europe/London',
+                ) VALUES (?, ?, ?, 'accepted', 'Open No Show', 'Europe/London',
                           '2026-04-20T10:00:00Z', '2026-04-20T10:30:00Z', '2026-04-20T09:45:00Z', '2026-04-20T11:00:00Z',
                           'NOSHOWOPEN1', ?)
                 """,
-                (self.client_id, self.consultant_id, access_link_id),
+                (self.vendor_id, self.client_id, self.consultant_id, access_link_id),
             )
             meeting_id = db.execute(
                 "SELECT id FROM scheduled_meetings WHERE channel_name = 'NOSHOWOPEN1'"
@@ -794,7 +914,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         db.close()
         self.assertIsNotNone(link)
         mocked_link = mocked_deliver_email.call_args.kwargs["reply_link"]
-        token = mocked_link.rsplit("/", 1)[-1]
+        token = self._extract_meeting_response_token(mocked_link)
 
         response = self.client.post(
             f"/meetings/respond/{token}",
@@ -812,6 +932,28 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         db.close()
         self.assertEqual(meeting["status"], "accepted")
         self.assertTrue(meeting["accepted_at"])
+
+    @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
+    def test_immediate_meeting_email_links_directly_to_join(self, mocked_deliver_email):
+        self.consultant_login()
+        response = self.client.post(
+            "/consultant/meetings/new",
+            data={
+                "client_id": self.client_id,
+                "title": "Meet Now Direct Join",
+                "scheduled_start_at": self._future_local_time(days=0, minutes=0),
+                "duration_minutes": "30",
+                "timezone_name": "Europe/London",
+                "invite_message": "",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 200)
+        reply_link = mocked_deliver_email.call_args.kwargs["reply_link"]
+        html_body = mocked_deliver_email.call_args.kwargs["html_override"]
+        self.assertIn("/meetings/respond/", reply_link)
+        self.assertIn("/join", reply_link)
+        self.assertIn(reply_link, html_body)
 
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_client_can_toggle_between_accept_and_decline(self, mocked_deliver_email):
@@ -832,7 +974,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             "SELECT id FROM scheduled_meetings ORDER BY created_at DESC LIMIT 1"
         ).fetchone()["id"]
         db.close()
-        token = mocked_deliver_email.call_args.kwargs["reply_link"].rsplit("/", 1)[-1]
+        token = self._extract_meeting_response_token(mocked_deliver_email.call_args.kwargs["reply_link"])
 
         accept_response = self.client.post(
             f"/meetings/respond/{token}",
@@ -874,7 +1016,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             },
             follow_redirects=True,
         )
-        first_token = mocked_deliver_email.call_args.kwargs["reply_link"].rsplit("/", 1)[-1]
+        first_token = self._extract_meeting_response_token(mocked_deliver_email.call_args.kwargs["reply_link"])
         self.client.post(
             f"/meetings/respond/{first_token}",
             data={"action": "decline"},
@@ -920,10 +1062,10 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Join Meeting", response.data)
+        self.assertIn(b"Enter Meeting Room", response.data)
         self.assertIn(b"Join Flow Test", response.data)
 
-        token = mocked_deliver_email.call_args.kwargs["reply_link"].rsplit("/", 1)[-1]
+        token = self._extract_meeting_response_token(mocked_deliver_email.call_args.kwargs["reply_link"])
         response = self.client.post(
             f"/meetings/respond/{token}",
             data={"action": "accept"},
@@ -931,9 +1073,10 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Meeting accepted", response.data)
-        self.assertNotIn(b"Join Meeting", response.data)
+        self.assertIn(b"Status: Accepted", response.data)
+        self.assertIn(b"Enter Meeting Room", response.data)
         self.assertIn(b"Add to calendar", response.data)
-        self.assertNotIn(f"/meetings/respond/{token}/join".encode("utf-8"), response.data)
+        self.assertIn(f"/meetings/respond/{token}/join".encode("utf-8"), response.data)
         self.assertNotIn(b"join_bootstrap=", response.data)
         self.assertNotIn(b"access_token=", response.data)
 
@@ -953,10 +1096,13 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             },
             follow_redirects=True,
         )
-        token = mocked_deliver_email.call_args.kwargs["reply_link"].rsplit("/", 1)[-1]
+        token = self._extract_meeting_response_token(mocked_deliver_email.call_args.kwargs["reply_link"])
         response = self.client.get(f"/meetings/respond/{token}")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Accept and join now", response.data)
+        self.assertIn(b">Accept<", response.data)
+        self.assertIn(b">Decline<", response.data)
+        self.assertIn(b"Status: Invited", response.data)
+        self.assertIn(b"Enter Meeting Room", response.data)
 
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_meeting_response_shows_toggle_actions_after_accept(self, mocked_deliver_email):
@@ -973,7 +1119,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             },
             follow_redirects=True,
         )
-        token = mocked_deliver_email.call_args.kwargs["reply_link"].rsplit("/", 1)[-1]
+        token = self._extract_meeting_response_token(mocked_deliver_email.call_args.kwargs["reply_link"])
         self.client.post(
             f"/meetings/respond/{token}",
             data={"action": "accept"},
@@ -983,8 +1129,195 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'value="accept"', response.data)
         self.assertIn(b'value="decline"', response.data)
-        self.assertIn(b"Status: accepted", response.data)
+        self.assertIn(b"Add to calendar", response.data)
+        self.assertIn(b"Status: Accepted", response.data)
         self.assertIn(b"reminder email with your meeting link", response.data)
+
+    @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
+    def test_early_host_join_does_not_show_in_progress_to_client_before_start(self, mocked_deliver_email):
+        self.consultant_login()
+        start_at = (datetime.now(timezone.utc) + timedelta(minutes=12)).astimezone(ZoneInfo("Europe/London"))
+        self.client.post(
+            "/consultant/meetings/new",
+            data={
+                "client_id": self.client_id,
+                "title": "Early Host Join",
+                "scheduled_start_at": start_at.strftime("%Y-%m-%dT%H:%M"),
+                "duration_minutes": "30",
+                "timezone_name": "Europe/London",
+                "invite_message": "",
+            },
+            follow_redirects=True,
+        )
+        token = self._extract_meeting_response_token(mocked_deliver_email.call_args.kwargs["reply_link"])
+        self.client.post(
+            f"/meetings/respond/{token}",
+            data={"action": "accept"},
+            follow_redirects=True,
+        )
+        db = get_db(self.app.config)
+        meeting = db.execute(
+            "SELECT id, consultant_id FROM scheduled_meetings ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        db.close()
+        body = json.dumps(
+            {
+                "meeting_id": meeting["id"],
+                "participant_role": "host",
+                "consultant_id": meeting["consultant_id"],
+            },
+            separators=(",", ":"),
+        )
+        auth_response = self.client.post(
+            "/internal/authorize-meeting-join",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/authorize-meeting-join", body),
+        )
+        self.assertEqual(auth_response.status_code, 200)
+        joined_body = json.dumps(
+            {
+                "meeting_id": meeting["id"],
+                "participant_role": "host",
+                "participant_id": meeting["consultant_id"],
+            },
+            separators=(",", ":"),
+        )
+        joined_response = self.client.post(
+            "/internal/meeting-joined",
+            data=joined_body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/meeting-joined", joined_body),
+        )
+        self.assertEqual(joined_response.status_code, 200)
+        response = self.client.get(f"/meetings/respond/{token}")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Status: Accepted", response.data)
+        self.assertNotIn(b"Status: in progress", response.data)
+        self.assertNotIn(b"Meeting now", response.data)
+        self.assertIn(b"Enter Meeting Room", response.data)
+
+    @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
+    def test_cancelled_invite_page_can_still_enter_current_pair_meeting(self, mocked_deliver_email):
+        self.consultant_login()
+        start_at = (datetime.now(timezone.utc) + timedelta(minutes=5)).astimezone(ZoneInfo("Europe/London"))
+        self.client.post(
+            "/consultant/meetings/new",
+            data={
+                "client_id": self.client_id,
+                "title": "Old Invite",
+                "scheduled_start_at": start_at.strftime("%Y-%m-%dT%H:%M"),
+                "duration_minutes": "30",
+                "timezone_name": "Europe/London",
+                "invite_message": "",
+            },
+            follow_redirects=True,
+        )
+        old_token = self._extract_meeting_response_token(mocked_deliver_email.call_args.kwargs["reply_link"])
+        db = get_db(self.app.config)
+        old_meeting_id = db.execute(
+            "SELECT id FROM scheduled_meetings ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()["id"]
+        db.close()
+        self.client.post(
+            f"/consultant/meetings/{old_meeting_id}",
+            data={"action": "cancel"},
+            follow_redirects=True,
+        )
+        self.client.post(
+            "/consultant/meetings/new",
+            data={
+                "client_id": self.client_id,
+                "title": "Current Meeting",
+                "scheduled_start_at": start_at.strftime("%Y-%m-%dT%H:%M"),
+                "duration_minutes": "30",
+                "timezone_name": "Europe/London",
+                "invite_message": "",
+            },
+            follow_redirects=True,
+        )
+        response = self.client.get(f"/meetings/respond/{old_token}")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Status: Cancelled", response.data)
+        self.assertIn(b"Enter Meeting Room", response.data)
+
+    @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
+    def test_old_consultant_meeting_join_uses_current_pair_context(self, mocked_deliver_email):
+        self.consultant_login()
+        start_at = (datetime.now(timezone.utc) + timedelta(minutes=5)).astimezone(ZoneInfo("Europe/London"))
+        self.client.post(
+            "/consultant/meetings/new",
+            data={
+                "client_id": self.client_id,
+                "title": "Old Consultant Meeting",
+                "scheduled_start_at": start_at.strftime("%Y-%m-%dT%H:%M"),
+                "duration_minutes": "30",
+                "timezone_name": "Europe/London",
+                "invite_message": "",
+            },
+            follow_redirects=True,
+        )
+        db = get_db(self.app.config)
+        old_meeting_id = db.execute(
+            "SELECT id FROM scheduled_meetings ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()["id"]
+        db.close()
+        self.client.post(
+            f"/consultant/meetings/{old_meeting_id}",
+            data={"action": "cancel"},
+            follow_redirects=True,
+        )
+        self.client.post(
+            "/consultant/meetings/new",
+            data={
+                "client_id": self.client_id,
+                "title": "Current Consultant Meeting",
+                "scheduled_start_at": start_at.strftime("%Y-%m-%dT%H:%M"),
+                "duration_minutes": "30",
+                "timezone_name": "Europe/London",
+                "invite_message": "",
+            },
+            follow_redirects=True,
+        )
+        db = get_db(self.app.config)
+        current_meeting = db.execute(
+            "SELECT id, channel_name FROM scheduled_meetings WHERE title = ? ORDER BY created_at DESC LIMIT 1",
+            ("Current Consultant Meeting",),
+        ).fetchone()
+        db.close()
+
+        response = self.client.get(f"/consultant/meetings/{old_meeting_id}/join", follow_redirects=False)
+        self.assertEqual(response.status_code, 302)
+        params = parse_qs(urlparse(response.location).query)
+        self.assertNotIn("autoconnect", params)
+        token = params["join_bootstrap"][0]
+        payload = verify_signed_join_bootstrap(self.app.config["INTERNAL_SHARED_SECRET"], token)
+        self.assertEqual(payload["meeting_id"], current_meeting["id"])
+        self.assertEqual(payload["channel_name"], current_meeting["channel_name"])
+
+    @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
+    def test_meeting_response_join_redirects_to_tech_check_first(self, mocked_deliver_email):
+        self.consultant_login()
+        start_at = (datetime.now(timezone.utc) + timedelta(minutes=5)).astimezone(ZoneInfo("Europe/London"))
+        self.client.post(
+            "/consultant/meetings/new",
+            data={
+                "client_id": self.client_id,
+                "title": "Tech Check Redirect",
+                "scheduled_start_at": start_at.strftime("%Y-%m-%dT%H:%M"),
+                "duration_minutes": "30",
+                "timezone_name": "Europe/London",
+                "invite_message": "",
+            },
+            follow_redirects=True,
+        )
+        token = self._extract_meeting_response_token(mocked_deliver_email.call_args.kwargs["reply_link"])
+        response = self.client.get(f"/meetings/respond/{token}/join", follow_redirects=False)
+        self.assertEqual(response.status_code, 302)
+        params = parse_qs(urlparse(response.location).query)
+        self.assertEqual(params.get("meeting_mode"), ["true"])
+        self.assertNotIn("autoconnect", params)
+        self.assertIn("join_bootstrap", params)
 
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_consultant_meeting_detail_shows_client_response_status(self, mocked_deliver_email):
@@ -1001,7 +1334,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             },
             follow_redirects=True,
         )
-        token = mocked_deliver_email.call_args.kwargs["reply_link"].rsplit("/", 1)[-1]
+        token = self._extract_meeting_response_token(mocked_deliver_email.call_args.kwargs["reply_link"])
         self.client.post(
             f"/meetings/respond/{token}",
             data={"action": "accept"},
@@ -1032,7 +1365,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             },
             follow_redirects=True,
         )
-        token = mocked_deliver_email.call_args.kwargs["reply_link"].rsplit("/", 1)[-1]
+        token = self._extract_meeting_response_token(mocked_deliver_email.call_args.kwargs["reply_link"])
         self.client.post(
             f"/meetings/respond/{token}",
             data={"action": "accept"},
@@ -1061,9 +1394,105 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Cancel Meeting", response.data)
+        self.assertIn(b"Resend Invite", response.data)
+        self.assertIn(b"Enter Meeting Room", response.data)
 
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
-    def test_consultant_can_delete_meeting_from_detail_page(self, mocked_deliver_email):
+    def test_past_meeting_detail_hides_resend_invite_but_keeps_room_entry(self, mocked_deliver_email):
+        self.consultant_login()
+        response = self.client.post(
+            "/consultant/meetings/new",
+            data={
+                "client_id": self.client_id,
+                "title": "Past Meeting",
+                "scheduled_start_at": "2026-04-20T10:00",
+                "duration_minutes": "30",
+                "timezone_name": "Europe/London",
+                "invite_message": "",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        db = get_db(self.app.config)
+        meeting_id = db.execute(
+            "SELECT id FROM scheduled_meetings ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()["id"]
+        db.close()
+        response = self.client.get(f"/consultant/meetings/{meeting_id}")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(b"Resend Invite", response.data)
+        self.assertIn(b"Enter Meeting Room", response.data)
+
+    def test_consultant_sessions_support_client_filter_and_summary_search(self):
+        payload = {
+            "client_id": self.client_id,
+            "consultant_id": self.consultant_id,
+            "session_id": "sess_a",
+            "profile": "therapy",
+            "channel": "channel-a",
+            "started_at": "2026-04-13T18:00:00Z",
+            "ended_at": "2026-04-13T18:05:00Z",
+            "duration_seconds": 300,
+            "status": "completed",
+            "summary": {"brief_overview": "Sleep is improving"},
+            "biomarkers": {"averages": {"stress_index": 40.0}},
+            "alerts": [],
+        }
+        body = json.dumps(payload, separators=(",", ":"))
+        response = self.client.post(
+            "/internal/session-complete",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/session-complete", body),
+        )
+        self.assertEqual(response.status_code, 200)
+        db = get_db(self.app.config)
+        from consultant_dashboard.core.db import create_client
+        other_client_id = create_client(
+            db,
+            consultant_id=self.consultant_id,
+            display_name="Other Client",
+            email="other@example.com",
+            password_hash="",
+            phone_number="+447700900222",
+            notification_email="other@example.com",
+            escalation_phone_number="+447700900222",
+            notes="",
+            direction="",
+        )
+        db.commit()
+        db.close()
+        payload = {
+            "client_id": other_client_id,
+            "consultant_id": self.consultant_id,
+            "session_id": "sess_b",
+            "profile": "therapy",
+            "channel": "channel-b",
+            "started_at": "2026-04-14T18:00:00Z",
+            "ended_at": "2026-04-14T18:05:00Z",
+            "duration_seconds": 300,
+            "status": "completed",
+            "summary": {"brief_overview": "Work stress remains high"},
+            "biomarkers": {"averages": {"stress_index": 70.0}},
+            "alerts": [],
+        }
+        body = json.dumps(payload, separators=(",", ":"))
+        response = self.client.post(
+            "/internal/session-complete",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/session-complete", body),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.consultant_login()
+        response = self.client.get(f"/consultant/sessions?client_id={self.client_id}&q=sleep")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Sleep is improving", response.data)
+        self.assertNotIn(b"Work stress remains high", response.data)
+        self.assertIn(b"All clients", response.data)
+
+    @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
+    def test_consultant_cannot_delete_meeting_from_detail_page(self, mocked_deliver_email):
         self.consultant_login()
         response = self.client.post(
             "/consultant/meetings/new",
@@ -1092,7 +1521,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Meeting deleted", response.data)
+        self.assertIn(b"Meeting deletion is disabled", response.data)
 
         db = get_db(self.app.config)
         deleted = db.execute(
@@ -1100,7 +1529,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             (row["id"],),
         ).fetchone()
         db.close()
-        self.assertIsNone(deleted)
+        self.assertIsNotNone(deleted)
 
     def test_consultant_client_create_rejects_invalid_phone(self):
         self.consultant_login()
@@ -1142,8 +1571,8 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         response = self.client.get("/consultant/sessions/sess_web_001")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Elevated stress", response.data)
-        self.assertIn(f'action="/consultant/clients/{self.client_id}/messages/send"'.encode(), response.data)
-        self.assertIn(f'data-thread-endpoint="/consultant/clients/{self.client_id}/messages/thread"'.encode(), response.data)
+        self.assertIn(f'action="/v/mindfix/consultant/clients/{self.client_id}/messages/send"'.encode(), response.data)
+        self.assertIn(f'data-thread-endpoint="/v/mindfix/consultant/clients/{self.client_id}/messages/thread"'.encode(), response.data)
 
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_consultant_can_send_email_message(self, mocked_deliver_email):
@@ -1334,16 +1763,16 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         db.execute(
             """
             INSERT INTO consultants (
-                email, password_hash, name, phone_number, notification_email, escalation_phone_number, is_active
-            ) VALUES (?, ?, ?, ?, ?, ?, 1)
+                vendor_id, email, password_hash, name, phone_number, notification_email, escalation_phone_number, is_active
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
             """,
-            ("other@example.com", "hash", "Other", "+447700900222", "other@example.com", "+447700900222"),
+            (self.vendor_id, "other@example.com", "hash", "Other", "+447700900222", "other@example.com", "+447700900222"),
         )
         other_id = db.execute("SELECT id FROM consultants WHERE email = ?", ("other@example.com",)).fetchone()["id"]
         with self.assertRaises(sqlite3.IntegrityError):
             db.execute(
-                "INSERT INTO consultant_clients (consultant_id, client_id, role) VALUES (?, ?, 'primary')",
-                (other_id, self.client_id),
+                "INSERT INTO consultant_clients (vendor_id, consultant_id, client_id, role) VALUES (?, ?, ?, 'primary')",
+                (self.vendor_id, other_id, self.client_id),
             )
         db.close()
 

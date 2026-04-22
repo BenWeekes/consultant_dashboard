@@ -26,7 +26,7 @@
 
         <div class="actions">
           <button type="submit">Send Message</button>
-          <a href="/consultant/clients/{{ client.id }}" class="button-secondary button-link">Back to Client</a>
+          <a href="{{ tenant_path('/consultant/clients/' ~ client.id) }}" class="button-secondary button-link">Back to Client</a>
         </div>
       </form>
     </div>

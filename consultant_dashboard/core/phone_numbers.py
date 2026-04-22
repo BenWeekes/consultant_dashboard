@@ -28,6 +28,8 @@ def normalize_phone(raw_phone: str, country_code: str = "US") -> str:
 
     if compact.startswith("+"):
         digits = "+" + re.sub(r"[^\d]", "", compact[1:])
+        if digits.startswith("+440") and len(digits) == 14:
+            digits = "+44" + digits[4:]
         if digits.startswith("+1") and len(digits) == 12:
             return digits
         if digits.startswith("+44") and len(digits) == 13:

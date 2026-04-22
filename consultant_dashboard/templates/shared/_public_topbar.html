@@ -1,0 +1,19 @@
+{% if request.path.startswith('/consultant') %}
+  {% set topbar_href = tenant_url_for('web.consultant_dashboard') %}
+{% elif request.path.startswith('/admin') %}
+  {% set topbar_href = tenant_url_for('web.admin_dashboard') %}
+{% else %}
+  {% set topbar_href = tenant_url_for('web.home') %}
+{% endif %}
+<div class="public-topbar-shell">
+  <a class="public-topbar-link" href="{{ topbar_href }}" aria-label="Go to home page">
+    <span class="public-topbar-mark">
+      {% if vendor_branding.logo_url %}
+        <img src="{{ tenant_path(vendor_branding.logo_url) if vendor_branding.logo_url.startswith('/img/') else vendor_branding.logo_url }}" alt="" class="public-topbar-logo">
+      {% else %}
+        <i class="{{ vendor_branding.icon_class }}" aria-hidden="true"></i>
+      {% endif %}
+    </span>
+    <span>{{ vendor_branding.wordmark }}</span>
+  </a>
+</div>

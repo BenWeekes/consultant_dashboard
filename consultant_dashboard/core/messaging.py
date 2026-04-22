@@ -7,13 +7,16 @@ from typing import Dict, List, Optional, Tuple
 from urllib import error, parse, request
 
 
-def build_public_url(config: dict, path: str) -> str:
+def build_public_url(config: dict, path: str, vendor_slug: str = "") -> str:
     base = config.get("PUBLIC_BASE_URL", "").rstrip("/")
     if not base:
         host = config.get("HOST", "127.0.0.1")
         port = config.get("PORT", 8090)
         base = f"http://{host}:{port}"
-    return f"{base}{path}"
+    target = path if path.startswith("/") else f"/{path}"
+    if vendor_slug and not target.startswith("/v/"):
+        target = f"/v/{vendor_slug}{target}"
+    return f"{base}{target}"
 
 
 def new_access_token() -> str:
@@ -28,12 +31,12 @@ def default_expiry(hours: int = 24 * 14) -> str:
     return (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
 
 
-def build_reply_link(config: dict, token: str) -> str:
-    return build_public_url(config, f"/client/messages/{token}")
+def build_reply_link(config: dict, token: str, vendor_slug: str = "") -> str:
+    return build_public_url(config, f"/client/messages/{token}", vendor_slug=vendor_slug)
 
 
-def build_meeting_response_link(config: dict, token: str) -> str:
-    return build_public_url(config, f"/meetings/respond/{token}")
+def build_meeting_response_link(config: dict, token: str, vendor_slug: str = "") -> str:
+    return build_public_url(config, f"/meetings/respond/{token}", vendor_slug=vendor_slug)
 
 
 def build_meeting_ics(
@@ -60,7 +63,7 @@ def build_meeting_ics(
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
-        "PRODID:-//MindFix//Consultant Dashboard//EN",
+        "PRODID:-//Tenant Wellness Platform//Consultant Dashboard//EN",
         "CALSCALE:GREGORIAN",
         "METHOD:REQUEST",
         "BEGIN:VEVENT",

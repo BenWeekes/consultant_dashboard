@@ -21,7 +21,7 @@
         <input name="confirm_password" type="password" required>
         <button type="submit">Update Password</button>
       </form>
-      <form method="post" action="/consultant/logout" style="margin-top: 16px;">
+      <form method="post" action="{{ tenant_url_for('auth.consultant_logout') }}" style="margin-top: 16px;">
         <button type="submit" class="button-secondary">Log Out</button>
       </form>
     </div>

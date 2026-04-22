@@ -6,7 +6,7 @@
     <div>
       <h1>{{ session_kind_display }}</h1>
       <div class="client-contact-line">
-        <span><a href="/consultant/clients/{{ session_row.client_id }}">{{ session_row.display_name }}</a></span>
+        <span><a href="{{ tenant_path('/consultant/clients/' ~ session_row.client_id) }}">{{ session_row.display_name }}</a></span>
         <span class="client-sep">·</span>
         <span>{{ (session_row.ended_at or session_row.started_at or session_row.created_at)|display_dt }}</span>
         <span class="client-sep">·</span>
@@ -18,7 +18,7 @@
       </div>
     </div>
     <div class="actions">
-      <form method="post" action="/consultant/sessions/{{ session_row.id }}/delete" onsubmit="return confirm('Delete this session?');">
+      <form method="post" action="{{ tenant_path('/consultant/sessions/' ~ session_row.id ~ '/delete') }}" onsubmit="return confirm('Delete this session?');">
         <button type="submit" class="titlebar-link-button">Delete Session</button>
       </form>
     </div>
@@ -176,8 +176,8 @@
       <div
         class="chat-thread chat-thread-scroll"
         data-message-thread
-        data-thread-endpoint="/consultant/clients/{{ session_row.client_id }}/messages/thread"
-        data-thread-ws="/ws/consultant/clients/{{ session_row.client_id }}/messages"
+        data-thread-endpoint="{{ tenant_path('/consultant/clients/' ~ session_row.client_id ~ '/messages/thread') }}"
+        data-thread-ws="{{ tenant_path('/ws/consultant/clients/' ~ session_row.client_id ~ '/messages') }}"
         data-empty-text="No client messages yet."
       >
         {% for message in messages %}
@@ -196,11 +196,11 @@
           <div class="muted">No client messages yet.</div>
         {% endfor %}
       </div>
-      <form class="chat-compose" method="post" action="/consultant/clients/{{ session_row.client_id }}/messages/send" data-message-compose="/consultant/clients/{{ session_row.client_id }}/messages/send">
+      <form class="chat-compose" method="post" action="{{ tenant_path('/consultant/clients/' ~ session_row.client_id ~ '/messages/send') }}" data-message-compose="{{ tenant_path('/consultant/clients/' ~ session_row.client_id ~ '/messages/send') }}">
         <label class="field-label">New message</label>
         <textarea name="message_body" class="chat-compose-box" placeholder="Write a message to the client"></textarea>
         <div class="row" style="justify-content: space-between;">
-          <div class="chat-status-note" data-compose-status>Messages are sent through MindFix and clients reply through a secure web link.</div>
+          <div class="chat-status-note" data-compose-status>Messages are sent through {{ brand }} and clients reply through a secure web link.</div>
           <button type="submit">Send Message</button>
         </div>
       </form>

@@ -8,6 +8,7 @@
       <p class="muted">Signed in as {{ admin_email }}</p>
     </div>
     <div class="stats">
+      <div class="stat"><div class="label">Vendors</div><div class="value">{{ stats.vendors }}</div></div>
       <div class="stat"><div class="label">Consultants</div><div class="value">{{ stats.consultants }}</div></div>
       <div class="stat"><div class="label">Clients</div><div class="value">{{ stats.clients }}</div></div>
       <div class="stat"><div class="label">Sessions</div><div class="value">{{ stats.sessions }}</div></div>
@@ -16,10 +17,30 @@
   <div class="card" style="margin-top: 16px;">
     <div class="row" style="justify-content: space-between;">
       <div>
+        <div class="label">Active Vendors</div>
+        <h2>Tenants</h2>
+      </div>
+      <a href="{{ tenant_url_for('web.admin_vendors') }}" class="button-secondary button-link">Manage Vendors</a>
+    </div>
+    <div class="list">
+      {% for vendor in vendors %}
+        <div class="item">
+          <strong>{{ vendor.name }}</strong>
+          <div class="muted">{{ vendor.slug }}</div>
+          <div class="muted">{{ vendor.storage_root }}</div>
+        </div>
+      {% else %}
+        <div class="muted">No vendors yet.</div>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="card" style="margin-top: 16px;">
+    <div class="row" style="justify-content: space-between;">
+      <div>
         <div class="label">Recent Consultants</div>
         <h2>Team</h2>
       </div>
-      <a href="/admin/consultants">Manage Consultants</a>
+      <a href="{{ tenant_url_for('web.admin_consultants') }}" class="button-secondary button-link">Manage Consultants</a>
     </div>
     <div class="list">
       {% for consultant in consultants %}
@@ -32,6 +53,6 @@
         <div class="muted">No consultants yet.</div>
       {% endfor %}
     </div>
-    <form method="post" action="/admin/logout"><button type="submit">Logout</button></form>
+    <form method="post" action="{{ tenant_url_for('auth.admin_logout') }}"><button type="submit">Logout</button></form>
   </div>
 {% endblock %}

@@ -15,7 +15,7 @@
       </div>
     </div>
     <div class="actions">
-      <a href="/consultant/clients/{{ client.id }}/meetings/new" class="subtle-link">New Meeting</a>
+      <a href="{{ tenant_path('/consultant/clients/' ~ client.id ~ '/meetings/new') }}" class="button-secondary button-link">New Meeting</a>
       <button type="button" class="titlebar-link-button" data-open-contact-editor>Edit Client</button>
     </div>
   </div>
@@ -148,8 +148,8 @@
       <div
         class="chat-thread chat-thread-scroll"
         data-message-thread
-        data-thread-endpoint="/consultant/clients/{{ client.id }}/messages/thread"
-        data-thread-ws="/ws/consultant/clients/{{ client.id }}/messages"
+        data-thread-endpoint="{{ tenant_path('/consultant/clients/' ~ client.id ~ '/messages/thread') }}"
+        data-thread-ws="{{ tenant_path('/ws/consultant/clients/' ~ client.id ~ '/messages') }}"
         data-empty-text="No client messages yet."
       >
         {% for message in messages %}
@@ -168,11 +168,11 @@
           <div class="muted">No client messages yet.</div>
         {% endfor %}
       </div>
-      <form class="chat-compose" method="post" action="/consultant/clients/{{ client.id }}/messages/send" data-message-compose="/consultant/clients/{{ client.id }}/messages/send">
+      <form class="chat-compose" method="post" action="{{ tenant_path('/consultant/clients/' ~ client.id ~ '/messages/send') }}" data-message-compose="{{ tenant_path('/consultant/clients/' ~ client.id ~ '/messages/send') }}">
         <label class="field-label">New message</label>
         <textarea name="message_body" class="chat-compose-box" placeholder="Write a message to the client"></textarea>
         <div class="row" style="justify-content: space-between;">
-          <div class="chat-status-note" data-compose-status>Messages are sent through MindFix and clients reply through a secure web link.</div>
+          <div class="chat-status-note" data-compose-status>Messages are sent through {{ brand }} and clients reply through a secure web link.</div>
           <button type="submit">Send Message</button>
         </div>
       </form>
@@ -191,7 +191,7 @@
       </div>
         <div class="list history-list-scroll" id="meeting-history-list">
         {% for meeting in meetings %}
-          <a class="item session-history-link" href="/consultant/meetings/{{ meeting.id }}" data-search="{{ meeting.scheduled_start_at|display_dt }} {{ meeting.title }} {{ meeting.meeting_type_display }} {{ meeting.status }}">
+          <a class="item session-history-link" href="{{ tenant_path('/consultant/meetings/' ~ meeting.id) }}" data-search="{{ meeting.scheduled_start_at|display_dt }} {{ meeting.title }} {{ meeting.meeting_type_display }} {{ meeting.status }}">
             <div class="details-summary">
               <div class="session-history-summary">
                 <strong>{{ meeting.scheduled_start_at|display_dt }}</strong>
@@ -223,7 +223,7 @@
         {% set brief_summary = session_summary.brief_overview or session_summary.overview or session_summary.full_summary or '' %}
         <a
           class="item session-history-item session-history-link"
-          href="/consultant/sessions/{{ session_row.id }}"
+          href="{{ tenant_path('/consultant/sessions/' ~ session_row.id) }}"
           data-search="{{ (session_row.ended_at or session_row.started_at or session_row.created_at)|display_dt }} {{ session_row.status }} {{ brief_summary }}"
         >
           <div class="details-summary">
@@ -308,7 +308,7 @@
         </div>
       </form>
       <div class="section-divider"></div>
-      <form method="post" action="/consultant/clients/{{ client.id }}/delete" onsubmit="return confirm('Delete this client?');">
+      <form method="post" action="{{ tenant_path('/consultant/clients/' ~ client.id ~ '/delete') }}" onsubmit="return confirm('Delete this client?');">
         <button type="submit" class="button-danger">Delete Client</button>
       </form>
     </div>

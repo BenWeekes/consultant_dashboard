@@ -9,9 +9,6 @@
           <div class="panel-kicker">Meeting</div>
           <h1>{{ meeting.title }}</h1>
         </div>
-        {% if can_join %}
-          <a href="{{ join_url }}" class="button-secondary" target="_blank" rel="noopener">Join Meeting</a>
-        {% endif %}
       </div>
       <div class="section-stack">
         <div class="meta-block">
@@ -35,7 +32,7 @@
               {% if meeting.status in ["accepted", "declined"] %}
                 {{ status_display }}
               {% elif meeting.status in ["scheduled", "client_viewed"] %}
-                Sent
+                Invited
               {% else %}
                 {{ status_display }}
               {% endif %}
@@ -46,20 +43,17 @@
           </div>
         {% endif %}
         <div class="actions" style="margin-top: 4px;">
-          <form method="post">
-            <input type="hidden" name="action" value="resend_invite">
-            <button type="submit">Resend Invite</button>
-          </form>
+          {% if can_resend_invite %}
+            <form method="post">
+              <input type="hidden" name="action" value="resend_invite">
+              <button type="submit">Resend Invite</button>
+            </form>
+          {% endif %}
+          <a href="{{ join_url }}" class="button-secondary button-link" target="_blank" rel="noopener">{{ join_label }}</a>
           {% if can_cancel %}
             <form method="post" onsubmit="return confirm('Cancel this meeting?');">
               <input type="hidden" name="action" value="cancel">
               <button type="submit" class="button-danger">Cancel Meeting</button>
-            </form>
-          {% endif %}
-          {% if can_delete %}
-            <form method="post" onsubmit="return confirm('Delete this meeting?');">
-              <input type="hidden" name="action" value="delete">
-              <button type="submit" class="button-secondary">Delete Meeting</button>
             </form>
           {% endif %}
         </div>
@@ -69,7 +63,9 @@
         {% if meeting.linked_session_id %}
           <div class="summary-card">
             <h3>Linked session</h3>
-            <div class="summary-copy"><a href="/consultant/sessions/{{ meeting.linked_session_id }}">Open Session</a></div>
+            <div class="actions" style="margin-top: 10px;">
+              <a href="{{ tenant_path('/consultant/sessions/' ~ meeting.linked_session_id) }}" class="button-secondary button-link">Open Session</a>
+            </div>
           </div>
         {% endif %}
         {% if linked_summary %}
@@ -111,9 +107,9 @@
         <div class="summary-card">
           <h3>Signals</h3>
           <div class="meta-list">
-            <div class="meta-line"><strong>Speech-to-text</strong><span class="muted">{{ "On" if meeting.transcription_enabled_display else "Off" }}</span></div>
-            <div class="meta-line"><strong>Audio biomarkers</strong><span class="muted">{{ "On" if meeting.audio_biomarkers_enabled_display else "Off" }}</span></div>
-            <div class="meta-line"><strong>Video biomarkers</strong><span class="muted">{{ "On" if meeting.video_biomarkers_enabled_display else "Off" }}</span></div>
+            <div class="meta-line"><strong>Speech-to-text</strong><span class="muted">{{ "Enabled" if meeting.transcription_enabled_display else "No" }}</span></div>
+            <div class="meta-line"><strong>Audio biomarkers</strong><span class="muted">{{ "Enabled" if meeting.audio_biomarkers_enabled_display else "No" }}</span></div>
+            <div class="meta-line"><strong>Video biomarkers</strong><span class="muted">{{ "Enabled" if meeting.video_biomarkers_enabled_display else "No" }}</span></div>
           </div>
         </div>
       </div>

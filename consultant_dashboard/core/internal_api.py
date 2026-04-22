@@ -16,6 +16,7 @@ from .db import (
     get_meeting_by_response_access_link_id,
     get_db,
     get_scheduled_meeting,
+    get_vendor_by_slug,
     log_audit,
     mark_meeting_participant_left,
     mark_meeting_joined,
@@ -26,6 +27,7 @@ from .db import (
 from .meetings import utc_now
 from .messaging import hash_access_token
 from .storage import EncryptedStorage
+from .vendors import storage_root_for_client
 from .web import run_due_meeting_reminders
 
 internal_bp = Blueprint("internal", __name__, url_prefix="/internal")
@@ -76,8 +78,10 @@ def internal_health():
 @internal_bp.get("/resolve-client")
 def resolve_client():
     db = get_db(current_app.config)
+    vendor = get_vendor_by_slug(db, request.args.get("vendor_slug", "").strip())
     row = resolve_client_identity(
         db,
+        vendor_id=vendor["id"] if vendor else "",
         google_sub_hash=request.args.get("google_sub_hash", ""),
         email_hash=request.args.get("email_hash", ""),
         normalized_name_hash=request.args.get("normalized_name_hash", ""),
@@ -90,6 +94,7 @@ def resolve_client():
         "found": True,
         "client_id": row["client_id"],
         "consultant_id": row["consultant_id"],
+        "vendor_slug": request.args.get("vendor_slug", "").strip().lower(),
         "is_active": bool(row["is_active"]),
         "email": row["email"] or "",
         "display_name": row["display_name"] or "",
@@ -108,7 +113,7 @@ def client_context():
         db.close()
         return jsonify({"error": "client not found"}), 404
     client, alerts = result
-    storage = EncryptedStorage(current_app.config["STORAGE_ROOT"], current_app.config["MASTER_KEY"])
+    storage = EncryptedStorage(storage_root_for_client(client_id), current_app.config["MASTER_KEY"])
     latest_summary = None
     baseline = None
     recent_summaries = []
@@ -143,7 +148,8 @@ def verify_client_password():
         return jsonify({"error": "email and password required"}), 400
 
     db = get_db(current_app.config)
-    client = get_client_by_email(db, email)
+    vendor = get_vendor_by_slug(db, (payload.get("vendor_slug") or "").strip())
+    client = get_client_by_email(db, email, vendor_id=vendor["id"] if vendor else "")
     db.close()
     if not client:
         return jsonify({"error": "invalid_credentials"}), 401
@@ -156,6 +162,7 @@ def verify_client_password():
         "ok": True,
         "client_id": client["id"],
         "consultant_id": client["consultant_id"],
+        "vendor_slug": (payload.get("vendor_slug") or "").strip().lower(),
         "display_name": client["display_name"],
         "email": client["email"],
         "phone_number": client["phone_number"],
@@ -205,6 +212,10 @@ def _should_ensure_meeting_services(meeting) -> bool:
     if not meeting:
         return False
     return not bool(meeting["in_progress_at"])
+
+
+def _meeting_uses_stable_pair_room(meeting) -> bool:
+    return bool(meeting) and (meeting["meeting_type"] or "human").strip().lower() == "human"
 
 
 @internal_bp.post("/authorize-meeting-join")
@@ -258,7 +269,7 @@ def authorize_meeting_join():
         if not meeting:
             db.close()
             return jsonify({"error": "meeting_not_found"}), 404
-        if meeting["status"] not in {"accepted", "in_progress"}:
+        if not _meeting_uses_stable_pair_room(meeting) and meeting["status"] not in {"scheduled", "client_viewed", "accepted", "declined", "in_progress"}:
             db.close()
             return jsonify({"error": "meeting_not_joinable_for_guest"}), 403
     else:
@@ -274,19 +285,20 @@ def authorize_meeting_join():
         if meeting["consultant_id"] != consultant_id:
             db.close()
             return jsonify({"error": "meeting_not_owned_by_host"}), 403
-        if meeting["status"] not in {"scheduled", "client_viewed", "accepted", "in_progress"}:
+        if not _meeting_uses_stable_pair_room(meeting) and meeting["status"] not in {"scheduled", "client_viewed", "accepted", "in_progress"}:
             db.close()
             return jsonify({"error": "meeting_not_joinable_for_host"}), 403
 
-    if meeting["status"] == "cancelled":
-        db.close()
-        return jsonify({"error": "meeting_cancelled"}), 403
-    if meeting["status"] == "declined":
-        db.close()
-        return jsonify({"error": "meeting_declined"}), 403
-    if meeting["status"] == "completed":
-        db.close()
-        return jsonify({"error": "meeting_completed"}), 403
+    if not _meeting_uses_stable_pair_room(meeting):
+        if meeting["status"] == "cancelled":
+            db.close()
+            return jsonify({"error": "meeting_cancelled"}), 403
+        if meeting["status"] == "declined":
+            db.close()
+            return jsonify({"error": "meeting_declined"}), 403
+        if meeting["status"] == "completed":
+            db.close()
+            return jsonify({"error": "meeting_completed"}), 403
 
     now = utc_now()
     join_start = _parse_dt(meeting["join_window_start_at"])
@@ -294,14 +306,14 @@ def authorize_meeting_join():
     guest_join_start = _parse_dt(meeting["scheduled_start_at"])
     if guest_join_start and participant_role == "guest":
         guest_join_start = guest_join_start - timedelta(minutes=10)
-    if join_start and now < join_start:
+    if join_start and now < join_start and not _meeting_uses_stable_pair_room(meeting):
         if participant_role == "host":
             db.close()
             return jsonify({"error": "meeting_too_early"}), 403
-    if guest_join_start and participant_role == "guest" and now < guest_join_start:
+    if guest_join_start and participant_role == "guest" and now < guest_join_start and not _meeting_uses_stable_pair_room(meeting):
         db.close()
         return jsonify({"error": "meeting_too_early"}), 403
-    if join_end and now > join_end:
+    if join_end and now > join_end and not _meeting_uses_stable_pair_room(meeting):
         db.close()
         return jsonify({"error": "meeting_join_window_expired"}), 403
 
@@ -345,9 +357,11 @@ def meeting_joined():
         return jsonify({"error": "meeting_not_found"}), 404
 
     ensure_services = mark_meeting_joined(db, meeting_id=meeting_id, participant_role=participant_role)
-    if ensure_services is None:
+    if ensure_services is None and not _meeting_uses_stable_pair_room(meeting):
         db.close()
         return jsonify({"error": "meeting_not_joinable"}), 409
+    if ensure_services is None:
+        ensure_services = _should_ensure_meeting_services(meeting)
     record_meeting_event(
         db,
         meeting_id=meeting_id,
@@ -533,7 +547,7 @@ def session_complete():
         f"client_id={client_id} session_id={session_id} "
         f"profile={payload.get('profile', 'default')} urgent={bool(payload.get('urgent_escalation'))}"
     )
-    storage = EncryptedStorage(current_app.config["STORAGE_ROOT"], current_app.config["MASTER_KEY"])
+    storage = EncryptedStorage(storage_root_for_client(client_id), current_app.config["MASTER_KEY"])
 
     summary_key = None
     transcript_key = None

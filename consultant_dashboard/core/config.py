@@ -56,6 +56,8 @@ def load_config() -> dict:
         "SENDGRID_API_KEY": os.environ.get("CONSULTANT_SENDGRID_API_KEY", ""),
         "EMAIL_FROM": os.environ.get("CONSULTANT_EMAIL_FROM", ""),
         "EMAIL_REPLY_TO": os.environ.get("CONSULTANT_EMAIL_REPLY_TO", ""),
+        "GOOGLE_CLIENT_ID": os.environ.get("CONSULTANT_GOOGLE_CLIENT_ID", os.environ.get("THERAPY_GOOGLE_CLIENT_ID", "")),
+        "GOOGLE_CLIENT_SECRET": os.environ.get("CONSULTANT_GOOGLE_CLIENT_SECRET", os.environ.get("THERAPY_GOOGLE_CLIENT_SECRET", "")),
         "OUTBOUND_REQUEST_TIMEOUT_SECONDS": int(os.environ.get("CONSULTANT_OUTBOUND_REQUEST_TIMEOUT_SECONDS", "8")),
         "BRAND_NAME": os.environ.get("THERAPY_DASHBOARD_BRAND_NAME", "mindfix.me"),
         "DISPLAY_TIMEZONE": os.environ.get("CONSULTANT_DISPLAY_TIMEZONE", "Europe/London"),

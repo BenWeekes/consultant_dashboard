@@ -118,7 +118,7 @@
 
       <div class="actions">
         <button id="meeting-submit" type="submit">Send meet now invite</button>
-        <a href="/consultant/meetings" class="button-secondary">Cancel</a>
+        <a href="{{ tenant_url_for('web.consultant_meetings') }}" class="button-secondary">Cancel</a>
       </div>
     </form>
   </div>
@@ -168,7 +168,7 @@
           : (isAi ? 'Send AI meeting invite' : 'Send meeting invite');
         kicker.textContent = 'New Meeting';
         if (!title.dataset.userEdited) {
-          title.value = isAi ? 'MindFix AI session' : 'MindFix session';
+          title.value = isAi ? '{{ brand }} AI session' : '{{ brand }} session';
         }
       }
 

@@ -1,6 +1,20 @@
+CREATE TABLE IF NOT EXISTS vendors (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    slug TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    storage_root TEXT NOT NULL,
+    www_root TEXT NOT NULL DEFAULT '',
+    primary_host TEXT NOT NULL DEFAULT '',
+    brand_config_json TEXT NOT NULL DEFAULT '',
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS consultants (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-    email TEXT NOT NULL UNIQUE,
+    vendor_id TEXT NOT NULL,
+    email TEXT NOT NULL,
     password_hash TEXT NOT NULL,
     name TEXT NOT NULL,
     phone_number TEXT NOT NULL,
@@ -8,11 +22,16 @@ CREATE TABLE IF NOT EXISTS consultants (
     escalation_phone_number TEXT NOT NULL,
     is_active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (vendor_id) REFERENCES vendors(id)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_consultants_vendor_email
+ON consultants(vendor_id, email);
 
 CREATE TABLE IF NOT EXISTS clients (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    vendor_id TEXT NOT NULL,
     display_name TEXT NOT NULL,
     email TEXT,
     password_hash TEXT,
@@ -27,15 +46,21 @@ CREATE TABLE IF NOT EXISTS clients (
     is_active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (created_by_consultant_id) REFERENCES consultants(id)
+    FOREIGN KEY (created_by_consultant_id) REFERENCES consultants(id),
+    FOREIGN KEY (vendor_id) REFERENCES vendors(id)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_vendor_email
+ON clients(vendor_id, email);
 
 CREATE TABLE IF NOT EXISTS consultant_clients (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    vendor_id TEXT NOT NULL,
     consultant_id TEXT NOT NULL,
     client_id TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'primary',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (vendor_id) REFERENCES vendors(id),
     FOREIGN KEY (consultant_id) REFERENCES consultants(id) ON DELETE CASCADE,
     FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
     UNIQUE (consultant_id, client_id)
@@ -46,6 +71,7 @@ ON consultant_clients(client_id);
 
 CREATE TABLE IF NOT EXISTS client_auth_identities (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    vendor_id TEXT NOT NULL,
     client_id TEXT NOT NULL,
     google_sub_hash TEXT,
     email_hash TEXT,
@@ -53,11 +79,13 @@ CREATE TABLE IF NOT EXISTS client_auth_identities (
     phone_hash TEXT,
     last_verified_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (vendor_id) REFERENCES vendors(id),
     FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
+    vendor_id TEXT NOT NULL,
     client_id TEXT NOT NULL,
     consultant_id TEXT,
     session_kind TEXT NOT NULL DEFAULT 'avatar_ai_session',
@@ -78,12 +106,14 @@ CREATE TABLE IF NOT EXISTS sessions (
     urgent_escalation INTEGER NOT NULL DEFAULT 0,
     escalation_reason TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (vendor_id) REFERENCES vendors(id),
     FOREIGN KEY (client_id) REFERENCES clients(id),
     FOREIGN KEY (consultant_id) REFERENCES consultants(id)
 );
 
 CREATE TABLE IF NOT EXISTS scheduled_meetings (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    vendor_id TEXT NOT NULL,
     client_id TEXT NOT NULL,
     consultant_id TEXT NOT NULL,
     meeting_type TEXT NOT NULL DEFAULT 'human',
@@ -124,6 +154,7 @@ CREATE TABLE IF NOT EXISTS scheduled_meetings (
     linked_session_id TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (vendor_id) REFERENCES vendors(id),
     FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
     FOREIGN KEY (consultant_id) REFERENCES consultants(id) ON DELETE CASCADE,
     FOREIGN KEY (response_access_link_id) REFERENCES client_access_links(id) ON DELETE RESTRICT,
@@ -132,12 +163,14 @@ CREATE TABLE IF NOT EXISTS scheduled_meetings (
 
 CREATE TABLE IF NOT EXISTS meeting_events (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    vendor_id TEXT NOT NULL,
     meeting_id TEXT NOT NULL,
     actor_type TEXT NOT NULL,
     actor_id TEXT NOT NULL DEFAULT '',
     event_type TEXT NOT NULL,
     details_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (vendor_id) REFERENCES vendors(id),
     FOREIGN KEY (meeting_id) REFERENCES scheduled_meetings(id) ON DELETE CASCADE
 );
 
@@ -146,6 +179,7 @@ ON scheduled_meetings(channel_name);
 
 CREATE TABLE IF NOT EXISTS session_alerts (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    vendor_id TEXT NOT NULL,
     session_id TEXT NOT NULL,
     client_id TEXT NOT NULL,
     severity TEXT NOT NULL,
@@ -155,28 +189,33 @@ CREATE TABLE IF NOT EXISTS session_alerts (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     acknowledged_at TEXT,
     acknowledged_by TEXT,
+    FOREIGN KEY (vendor_id) REFERENCES vendors(id),
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
     FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS client_note_revisions (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    vendor_id TEXT NOT NULL,
     client_id TEXT NOT NULL,
     field_type TEXT NOT NULL,
     content TEXT NOT NULL,
     edited_by TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (vendor_id) REFERENCES vendors(id),
     FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS client_access_links (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    vendor_id TEXT NOT NULL,
     client_id TEXT NOT NULL,
     created_by TEXT NOT NULL,
     token_hash TEXT NOT NULL,
     expires_at TEXT NOT NULL,
     used_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (vendor_id) REFERENCES vendors(id),
     FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
 );
 
@@ -185,6 +224,7 @@ ON client_access_links(token_hash);
 
 CREATE TABLE IF NOT EXISTS client_messages (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    vendor_id TEXT NOT NULL,
     client_id TEXT NOT NULL,
     consultant_id TEXT NOT NULL,
     direction TEXT NOT NULL,
@@ -200,12 +240,14 @@ CREATE TABLE IF NOT EXISTS client_messages (
     notification_pending INTEGER NOT NULL DEFAULT 0,
     notified_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (vendor_id) REFERENCES vendors(id),
     FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
     FOREIGN KEY (consultant_id) REFERENCES consultants(id) ON DELETE CASCADE,
     FOREIGN KEY (access_link_id) REFERENCES client_access_links(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS client_policy (
+    vendor_id TEXT NOT NULL,
     client_id TEXT PRIMARY KEY,
     consent_version TEXT,
     consent_captured_at TEXT,
@@ -213,6 +255,7 @@ CREATE TABLE IF NOT EXISTS client_policy (
     retention_until TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (vendor_id) REFERENCES vendors(id),
     FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
 );
 
