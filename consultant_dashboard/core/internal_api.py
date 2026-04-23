@@ -1,7 +1,7 @@
 import hashlib
 import hmac
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 
 from flask import Blueprint, current_app, jsonify, request
@@ -218,6 +218,17 @@ def _meeting_uses_stable_pair_room(meeting) -> bool:
     return bool(meeting) and (meeting["meeting_type"] or "human").strip().lower() == "human"
 
 
+def _host_end_should_complete_meeting(meeting) -> bool:
+    if not meeting:
+        return False
+    if meeting["client_joined_at"]:
+        return True
+    scheduled_start_at = _parse_dt(meeting["scheduled_start_at"] or "")
+    if not scheduled_start_at:
+        return False
+    return utc_now() >= scheduled_start_at.astimezone(timezone.utc)
+
+
 @internal_bp.post("/authorize-meeting-join")
 def authorize_meeting_join():
     payload = request.get_json(force=True)
@@ -428,7 +439,11 @@ def meeting_ended():
         event_type="participant_left",
         details={"ended_by_role": ended_by_role},
     )
-    if participant_role == "host" and meeting["status"] in {"scheduled", "client_viewed", "accepted", "in_progress"}:
+    if (
+        participant_role == "host"
+        and meeting["status"] in {"scheduled", "client_viewed", "accepted", "in_progress"}
+        and _host_end_should_complete_meeting(meeting)
+    ):
         attendance_outcome = "completed" if meeting["client_joined_at"] else "client_no_show"
         completed = complete_scheduled_meeting(
             db,

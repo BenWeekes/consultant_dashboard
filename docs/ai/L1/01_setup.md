@@ -135,6 +135,10 @@ Meeting flow:
 - consultants schedule meetings from `/consultant/clients/<client_id>/meetings/new`
 - meeting creation also creates the `client_access_links` row used by the hosted response page
 - clients accept or decline from `/meetings/respond/<token>`
+- clients still need to authenticate through `simple-backend` before they can actually enter the room; the email link is not the final auth factor
+- once authenticated, the client session is carried by a shared 1-hour auth cookie so invite pages and room entry do not trigger a second OTP inside that window
+- consultant dashboard sessions are also configured for a 1-hour TTL in production so unattended devices do not stay logged in for long periods
+- the durable user-facing entry point is the hosted meeting page, which mints a fresh short-lived room bootstrap when `Enter Meeting Room` is clicked
 - `simple-backend` calls signed `POST /internal/authorize-meeting-join` before minting RTC/RTM tokens
 - `server-custom-llm` posts deterministic meeting artifacts back through `POST /internal/session-complete`
 - meeting reminders are sent by calling the signed internal reminder sweep endpoint through `scripts/run_reminders.py`

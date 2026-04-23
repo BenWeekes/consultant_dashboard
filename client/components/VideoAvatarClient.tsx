@@ -122,6 +122,23 @@ function setSessionValue(key: string, value: string) {
   }
 }
 
+function decodeJoinBootstrapRole(token: string): string {
+  if (!token || !token.includes(".")) return "";
+  try {
+    const [encoded] = token.split(".", 1);
+    const padded = encoded.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(encoded.length / 4) * 4, "=");
+    const payload = JSON.parse(window.atob(padded));
+    return String(payload?.participant_role || "").trim().toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function fallbackConsultantDashboardUrl() {
+  if (typeof window === "undefined") return "/consultant/dashboard";
+  return `${window.location.origin}/consultant/dashboard`;
+}
+
 export function VideoAvatarClient() {
   const [backendUrl, setBackendUrl] = useState(DEFAULT_BACKEND_URL);
   const [agentId, setAgentId] = useState<string | undefined>(undefined);
@@ -175,12 +192,13 @@ export function VideoAvatarClient() {
   const previewAudioContextRef = useRef<AudioContext | null>(null);
   const previewAnalyserRef = useRef<AnalyserNode | null>(null);
   const previewAnimationFrameRef = useRef<number | null>(null);
-  // Token held in memory only — never persisted to sessionStorage/localStorage/cookies.
-  // On page refresh the user must re-authenticate. This prevents a second person on
-  // the same machine from accessing a previous user's session.
+  // Legacy bearer fallback held in memory only. Normal auth now rides on the
+  // 1-hour backend cookie so hosted meeting/invite flows do not leak auth state
+  // through URLs.
   const authTokenRef = useRef<string | null>(null);
 
-  // Helper — sends Authorization header if token exists in memory
+  // Helper — sends backend cookies and, for legacy compatibility, an
+  // Authorization header if a transient in-memory token exists.
   const fetchWithAuth = (url: string, options?: RequestInit) => {
     const headers: Record<string, string> = {
       ...(options?.headers as Record<string, string> || {}),
@@ -188,7 +206,7 @@ export function VideoAvatarClient() {
     if (authTokenRef.current) {
       headers["Authorization"] = `Bearer ${authTokenRef.current}`;
     }
-    return fetch(url, { ...options, headers });
+    return fetch(url, { ...options, headers, credentials: "include" });
   };
 
   // Read URL parameters on mount + auth check
@@ -238,7 +256,8 @@ export function VideoAvatarClient() {
 
       let cleanedUrl = false;
 
-      // Handle auth_token from URL (returned from auth flow)
+      // Legacy compatibility: accept an auth token in the URL if an older
+      // auth flow returns one, but prefer the shared auth cookie.
       const authToken = params.get("auth_token");
       if (authToken) {
         // Store in memory only — not sessionStorage
@@ -252,19 +271,6 @@ export function VideoAvatarClient() {
         window.history.replaceState({}, "", cleanUrl);
       }
 
-      if (params.get("meeting_mode") === "true") {
-        const hasMeetingCredential = Boolean(
-          meetingAccessTokenRef.current || meetingJoinBootstrapRef.current,
-        );
-        setMeetingJoinReady(hasMeetingCredential);
-        if (!hasMeetingCredential) {
-          setMeetingInitError("This meeting link is missing or expired.");
-        }
-        setAuthChecked(true);
-        return;
-      }
-
-      // Auth check — determine if this profile requires authentication
       const effectiveProfile = urlProfile || DEFAULT_PROFILE;
       const effectiveBackend = backendOverride || DEFAULT_BACKEND_URL;
       const token = authTokenRef.current;
@@ -272,9 +278,31 @@ export function VideoAvatarClient() {
       const authHeaders: Record<string, string> = {};
       if (token) authHeaders["Authorization"] = `Bearer ${token}`;
 
+      if (params.get("meeting_mode") === "true") {
+        const hasMeetingCredential = Boolean(
+          meetingAccessTokenRef.current || meetingJoinBootstrapRef.current,
+        );
+        setMeetingJoinReady(hasMeetingCredential);
+        if (!hasMeetingCredential) {
+          setMeetingInitError("This meeting link is missing or expired.");
+          setAuthChecked(true);
+          return;
+        }
+
+        const participantRole = meetingAccessTokenRef.current
+          ? "guest"
+          : decodeJoinBootstrapRole(meetingJoinBootstrapRef.current || "");
+        if (participantRole === "host") {
+          setAuthChecked(true);
+          return;
+        }
+      }
+
+      // Auth check — determine if this profile requires authentication
+
       fetch(
         `${effectiveBackend}/auth-check?profile=${encodeURIComponent(effectiveProfile)}&return_url=${encodeURIComponent(currentUrl)}`,
-        { headers: authHeaders },
+        { headers: authHeaders, credentials: "include" },
       )
         .then((res) => res.json())
         .then((data) => {
@@ -644,7 +672,7 @@ export function VideoAvatarClient() {
           throw new Error("This meeting link is missing or expired.");
         }
         stopMeetingPreview();
-        const joinResponse = await fetch(`${backendUrl}/join-meeting`, {
+        const joinResponse = await fetchWithAuth(`${backendUrl}/join-meeting`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -683,7 +711,7 @@ export function VideoAvatarClient() {
           setLocalVideoTrack(videoTrack);
           setIsLocalVideoActive(true);
         }
-        await fetch(`${backendUrl}/meeting-participant-event`, {
+        await fetchWithAuth(`${backendUrl}/meeting-participant-event`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -811,6 +839,9 @@ export function VideoAvatarClient() {
   }, [autoConnect, authChecked, authError]);
 
   const handleStop = async () => {
+    const isHostMeetingParticipant =
+      meetingMode && meetingParticipantRole === "host";
+
     // Stop and close local video track to release camera hardware
     if (localVideoTrack) {
       localVideoTrack.stop();
@@ -820,7 +851,7 @@ export function VideoAvatarClient() {
     }
 
     if (meetingMode) {
-      await fetch(`${backendUrl}/meeting-participant-event`, {
+      await fetchWithAuth(`${backendUrl}/meeting-participant-event`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -835,7 +866,7 @@ export function VideoAvatarClient() {
       if (meetingJoinBootstrapRef.current && channelRef.current) {
         try {
           const transcript = getMeetingTranscriptArtifact();
-          await fetch(`${backendUrl}/end-meeting`, {
+          await fetchWithAuth(`${backendUrl}/end-meeting`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -864,10 +895,22 @@ export function VideoAvatarClient() {
     setSessionAgentId(null);
     setSessionPayload(null);
     if (meetingMode) {
-      setSessionValue(MEETING_BOOTSTRAP_STORAGE_KEY, "");
-      setSessionValue(MEETING_ACCESS_TOKEN_STORAGE_KEY, "");
-      setMeetingParticipantRole(null);
+      if (isHostMeetingParticipant) {
+        setSessionValue(MEETING_BOOTSTRAP_STORAGE_KEY, "");
+        setSessionValue(MEETING_ACCESS_TOKEN_STORAGE_KEY, "");
+        setMeetingParticipantRole(null);
+      }
       setMeetingTranscriptionEnabled(false);
+      setMeetingInitError(null);
+      setMeetingJoinReady(
+        Boolean(
+          meetingAccessTokenRef.current || meetingJoinBootstrapRef.current,
+        ),
+      );
+    }
+    if (isHostMeetingParticipant) {
+      window.location.href = returnUrl || fallbackConsultantDashboardUrl();
+      return;
     }
     if (returnUrl) {
       window.location.href = returnUrl;
@@ -923,9 +966,18 @@ export function VideoAvatarClient() {
   const getMeetingMessageLabel = (msg: (typeof messageList)[number] | typeof currentInProgressMessage) => {
     if (!msg) return "Message";
     const role = (msg as { role?: "host" | "guest" }).role;
-    if (role === "host") return "Consultant";
-    if (role === "guest") return "Client";
-    return meetingParticipantRole === "host" ? "Client" : "Consultant";
+    const baseLabel =
+      role === "host"
+        ? "Consultant"
+        : role === "guest"
+          ? "Client"
+          : meetingParticipantRole === "host"
+            ? "Client"
+            : "Consultant";
+    if ((msg as { transcriptSource?: boolean }).transcriptSource) {
+      return `${baseLabel} transcript`;
+    }
+    return baseLabel;
   };
 
   const isOwnMeetingMessage = (

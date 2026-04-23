@@ -8,6 +8,7 @@
     <style>
       :root {
         --accent: {{ vendor_branding.accent }};
+        --action-accent: {{ vendor_branding.topbar_mark }};
         --accent-soft: {{ vendor_branding.accent_soft }};
         --accent-soft-solid: {{ vendor_branding.accent_soft_solid }};
         --text-main: {{ vendor_branding.text_main }};
@@ -136,9 +137,29 @@
       input, select, textarea { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid #bfd0c3; box-sizing: border-box; background: #fff; }
       textarea { min-height: 120px; resize: vertical; }
       input:focus, select:focus, textarea:focus { outline: 2px solid color-mix(in srgb, var(--accent) 35%, white); border-color: var(--accent); }
-      button { background: var(--accent); color: white; border: 0; border-radius: 12px; padding: 12px 16px; cursor: pointer; font-weight: 600; }
+      button { background: var(--action-accent); color: white; border: 0; border-radius: 12px; padding: 12px 16px; cursor: pointer; font-weight: 600; }
       .button-link { display: inline-block; text-decoration: none; padding: 12px 16px; border-radius: 12px; }
-      .button-secondary { background: white; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 28%, white); }
+      .button-primary { background: var(--action-accent); color: white; }
+      .button-secondary { background: white; color: var(--action-accent); border: 1px solid color-mix(in srgb, var(--action-accent) 28%, white); }
+      .oauth-button {
+        width: 100%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        text-align: center;
+        font-weight: 600;
+        box-sizing: border-box;
+        background: white;
+        color: var(--text-main);
+        border: 1px solid #bfd0c3;
+      }
+      .oauth-button:hover { background: #f8fbf9; }
+      .oauth-button svg {
+        width: 20px;
+        height: 20px;
+        flex: 0 0 auto;
+      }
       .button-disabled, button:disabled { background: #f6f8fb; color: var(--text-muted); border: 1px solid #d7e0ea; cursor: not-allowed; }
       .button-danger { background: #b94242; }
       .muted { color: var(--text-muted); }

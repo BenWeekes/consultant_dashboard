@@ -278,6 +278,75 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
         self.assertTrue(meeting_row["biomarker_storage_key"])
         self.assertTrue(meeting_row["completed_at"])
 
+    @mock.patch("consultant_dashboard.core.internal_api.utc_now")
+    def test_meeting_ended_does_not_complete_future_meeting_when_host_leaves_early(self, mocked_utc_now):
+        with self.client.application.app_context():
+            db = get_db(self.app.config)
+            from consultant_dashboard.core.db import create_client_access_link, create_scheduled_meeting
+            from consultant_dashboard.core.meetings import build_join_window, generate_meeting_channel
+            from consultant_dashboard.core.messaging import hash_access_token
+
+            start_at = datetime.now(timezone.utc) + timedelta(minutes=45)
+            end_at = start_at + timedelta(minutes=30)
+            join_start, join_end = build_join_window(start_at, end_at)
+            access_link_id = create_client_access_link(
+                db,
+                client_id=self.client_id,
+                created_by=self.consultant_id,
+                token_hash=hash_access_token("meeting-ended-future-token"),
+                expires_at=iso_utc(end_at + timedelta(days=1)),
+            )
+            meeting_id = create_scheduled_meeting(
+                db,
+                client_id=self.client_id,
+                consultant_id=self.consultant_id,
+                title="Future host leave test",
+                invite_message="",
+                timezone_name="Europe/London",
+                scheduled_start_at=iso_utc(start_at),
+                scheduled_end_at=iso_utc(end_at),
+                join_window_start_at=iso_utc(join_start),
+                join_window_end_at=iso_utc(join_end),
+                channel_name=generate_meeting_channel(),
+                response_access_link_id=access_link_id,
+            )
+            db.commit()
+            db.close()
+
+        mocked_utc_now.return_value = start_at - timedelta(minutes=10)
+        body = json.dumps(
+            {
+                "meeting_id": meeting_id,
+                "participant_role": "host",
+                "ended_by_role": "host",
+                "ended_by_id": self.consultant_id,
+            },
+            separators=(",", ":"),
+        )
+        response = self.client.post(
+            "/internal/meeting-ended",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/meeting-ended", body),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json["ok"])
+
+        conn = get_db(self.app.config)
+        row = conn.execute(
+            """
+            SELECT status, attendance_outcome, completed_at, consultant_left_at
+            FROM scheduled_meetings
+            WHERE id = ?
+            """,
+            (meeting_id,),
+        ).fetchone()
+        conn.close()
+        self.assertEqual(row["status"], "scheduled")
+        self.assertFalse(row["attendance_outcome"])
+        self.assertFalse(row["completed_at"])
+        self.assertTrue(row["consultant_left_at"])
+
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_run_reminders_sends_due_24h_reminder(self, mocked_deliver_email):
         with self.client.application.app_context():

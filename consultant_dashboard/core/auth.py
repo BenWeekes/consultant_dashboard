@@ -1,4 +1,7 @@
 import configparser
+import base64
+import hashlib
+import hmac
 import json
 import os
 import random
@@ -134,11 +137,65 @@ def _google_oauth_enabled() -> bool:
     return bool(current_app.config.get("GOOGLE_CLIENT_ID"))
 
 
-def _consultant_google_callback_url() -> str:
+def _shared_google_callback_url() -> str:
     base = current_app.config.get("PUBLIC_BASE_URL", "").rstrip("/")
     if not base:
         base = request.url_root.rstrip("/")
-    return f"{base}/consultant/google/callback"
+    return f"{base}/auth/google/callback"
+
+
+def _sign_dashboard_handoff(payload: Dict) -> str:
+    body = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    signature = hmac.new(
+        current_app.config["INTERNAL_SHARED_SECRET"].encode("utf-8"),
+        body.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{body}.{signature}"
+
+
+def _peek_dashboard_handoff(token: str) -> Optional[Dict]:
+    try:
+        body, _sig = token.split(".", 1)
+        padded = body + "=" * (-len(body) % 4)
+        return json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except Exception:
+        return None
+
+
+def _verify_dashboard_handoff(token: str, *, purpose: str) -> Optional[Dict]:
+    try:
+        body, supplied_signature = token.split(".", 1)
+    except ValueError:
+        return None
+    expected_signature = hmac.new(
+        current_app.config["INTERNAL_SHARED_SECRET"].encode("utf-8"),
+        body.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(expected_signature, supplied_signature):
+        return None
+    payload = _peek_dashboard_handoff(token)
+    if not payload or payload.get("purpose") != purpose:
+        return None
+    if int(payload.get("exp") or 0) < int(time.time()):
+        return None
+    return payload
+
+
+def _consultant_google_state() -> str:
+    complete_url = f"{request.host_url.rstrip('/')}{tenant_url_for('auth.consultant_google_callback')}"
+    return _sign_dashboard_handoff(
+        {
+            "purpose": "consultant_google_state",
+            "vendor_slug": current_vendor_slug(),
+            "complete_url": complete_url,
+            "profile": "therapy",
+            "exp": int(time.time()) + 600,
+        }
+    )
 
 
 def _decode_google_id_token(id_token: str) -> Dict[str, str]:
@@ -252,11 +309,12 @@ def consultant_google():
     params = urllib.parse.urlencode(
         {
             "client_id": client_id,
-            "redirect_uri": _consultant_google_callback_url(),
+            "redirect_uri": _shared_google_callback_url(),
             "response_type": "code",
             "scope": "openid email profile",
             "access_type": "offline",
             "prompt": "select_account",
+            "state": _consultant_google_state(),
         }
     )
     return redirect(f"https://accounts.google.com/o/oauth2/v2/auth?{params}")
@@ -264,7 +322,17 @@ def consultant_google():
 
 @auth_bp.route("/consultant/google/callback", methods=["GET"])
 def consultant_google_callback():
-    if current_app.config["AUTH_DEV_MODE"] and request.args.get("code") == "dev-mode":
+    consultant_token = request.args.get("consultant_token", "").strip()
+    if consultant_token:
+        handoff = _verify_dashboard_handoff(consultant_token, purpose="consultant_google_complete")
+        if not handoff:
+            flash("Google authentication failed.", "error")
+            return redirect(tenant_url_for("auth.consultant_login"))
+        if handoff.get("vendor_slug") and handoff.get("vendor_slug") != current_vendor_slug():
+            flash("Google authentication failed.", "error")
+            return redirect(tenant_url_for("auth.consultant_login"))
+        email = (handoff.get("email") or "").strip().lower()
+    elif current_app.config["AUTH_DEV_MODE"] and request.args.get("code") == "dev-mode":
         email = session.get("consultant_google_email", "consultant@example.com").strip().lower()
     else:
         code = request.args.get("code", "").strip()
@@ -277,7 +345,7 @@ def consultant_google_callback():
                 "code": code,
                 "client_id": current_app.config.get("GOOGLE_CLIENT_ID", ""),
                 "client_secret": current_app.config.get("GOOGLE_CLIENT_SECRET", ""),
-                "redirect_uri": _consultant_google_callback_url(),
+                "redirect_uri": _shared_google_callback_url(),
                 "grant_type": "authorization_code",
             }
         ).encode("utf-8")
@@ -439,7 +507,7 @@ def consultant_logout():
     consultant_id = session.get("consultant_id") or "unknown"
     _clear_consultant_session()
     _record_audit("consultant", str(consultant_id), "logout")
-    return redirect(tenant_url_for("web.home"))
+    return redirect(tenant_url_for("auth.consultant_login"))
 
 
 @auth_bp.route("/admin/logout", methods=["POST"])
@@ -447,16 +515,20 @@ def admin_logout():
     admin_email = session.get("admin_email") or "unknown"
     _clear_admin_session()
     _record_audit("admin", str(admin_email), "logout")
-    return redirect(tenant_url_for("web.home"))
+    return redirect(tenant_url_for("auth.admin_login"))
 
 
 @auth_bp.route("/logout", methods=["POST"])
 def logout():
-    actor_id = session.get("consultant_id") or session.get("admin_email") or "unknown"
+    consultant_id = session.get("consultant_id")
+    admin_email = session.get("admin_email")
+    actor_id = consultant_id or admin_email or "unknown"
     _clear_consultant_session()
     _clear_admin_session()
     _record_audit("unknown", str(actor_id), "logout")
-    return redirect(tenant_url_for("web.home"))
+    if admin_email and not consultant_id:
+        return redirect(tenant_url_for("auth.admin_login"))
+    return redirect(tenant_url_for("auth.consultant_login"))
 
 
 def require_consultant(fn):

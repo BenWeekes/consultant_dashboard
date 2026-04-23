@@ -25,31 +25,33 @@
         <button type="submit">Filter</button>
       </form>
     </div>
-    <table class="table">
-      <thead>
-        <tr>
-          <th>Client</th>
-          <th>Type</th>
-          <th>Time</th>
-          <th>Status</th>
-          <th>Summary</th>
-          <th>Duration</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for session_row in sessions %}
-          <tr>
-            <td><a href="{{ tenant_path('/consultant/sessions/' ~ session_row.id) }}">{{ session_row.display_name }}</a></td>
-            <td>{{ session_row.session_kind_display }}</td>
-            <td>{{ (session_row.ended_at or session_row.started_at or session_row.created_at)|display_dt }}</td>
-            <td>{{ session_row.status }}{% if session_row.urgent_escalation %} · urgent escalation{% endif %}</td>
-            <td>{{ session_row.summary_search_text or "—" }}</td>
-            <td>{{ session_row.duration_seconds }}s</td>
-          </tr>
-        {% else %}
-          <tr><td colspan="6" class="muted">No sessions yet.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="list">
+      {% for session_row in sessions %}
+        <a class="item session-history-link" href="{{ tenant_path('/consultant/sessions/' ~ session_row.id) }}">
+          <div class="details-summary">
+            <div class="session-history-summary">
+              <strong>{{ session_row.display_name }}</strong>
+              <span class="muted summary-copy">
+                {{ session_row.session_kind_display }} ·
+                {{ (session_row.ended_at or session_row.started_at or session_row.created_at)|display_dt }}
+              </span>
+            </div>
+            <div class="actions">
+              <span class="status-chip {% if session_row.urgent_escalation %}unread{% endif %}">
+                {{ session_row.status }}{% if session_row.urgent_escalation %} · urgent escalation{% endif %}
+              </span>
+            </div>
+          </div>
+          <div class="session-history-body">
+            <div class="summary-copy">{{ session_row.summary_search_text or "—" }}</div>
+            <div class="session-history-meta">
+              <span>Duration: {{ session_row.duration_seconds }}s</span>
+            </div>
+          </div>
+        </a>
+      {% else %}
+        <div class="muted">No sessions yet.</div>
+      {% endfor %}
+    </div>
   </div>
 {% endblock %}

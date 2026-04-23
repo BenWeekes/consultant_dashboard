@@ -5,6 +5,7 @@ import os
 import tempfile
 import time
 import unittest
+import base64
 from typing import Optional
 
 from werkzeug.security import generate_password_hash
@@ -47,6 +48,8 @@ class ConsultantDashboardTestCase(unittest.TestCase):
         os.environ["CONSULTANT_SESSION_TTL"] = "28800"
         os.environ["CONSULTANT_AUTH_DEV_MODE"] = "true"
         os.environ["THERAPY_DASHBOARD_BRAND_NAME"] = "mindfix.me"
+        os.environ["THERAPY_AUTH_JWT_SECRET"] = "test-jwt-secret"
+        os.environ["CONSULTANT_CLIENT_AUTH_JWT_SECRET"] = "test-jwt-secret"
 
         self.app = create_app()
         self.app.testing = True
@@ -110,6 +113,40 @@ class ConsultantDashboardTestCase(unittest.TestCase):
             "X-Consultant-Timestamp": ts,
             "X-Consultant-Signature": signature,
         }
+
+    def client_auth_cookie(self, client_id: Optional[str] = None, vendor_slug: str = "mindfix") -> str:
+        header = {"alg": "HS256", "typ": "JWT"}
+        payload = {
+            "user_id": self.sha256(f"client|{client_id or self.client_id}"),
+            "client_id": client_id or self.client_id,
+            "vendor_slug": vendor_slug,
+            "email": "alex@example.com",
+            "name": "Alex Demo",
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 3600,
+        }
+        header_b64 = base64.urlsafe_b64encode(
+            json.dumps(header, separators=(",", ":")).encode("utf-8")
+        ).decode("ascii").rstrip("=")
+        payload_b64 = base64.urlsafe_b64encode(
+            json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        ).decode("ascii").rstrip("=")
+        signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
+        signature = hmac.new(
+            self.app.config["CLIENT_AUTH_JWT_SECRET"].encode("utf-8"),
+            signing_input,
+            hashlib.sha256,
+        ).digest()
+        sig_b64 = base64.urlsafe_b64encode(signature).decode("ascii").rstrip("=")
+        return f"{header_b64}.{payload_b64}.{sig_b64}"
+
+    def authenticate_client_session(
+        self, client_id: Optional[str] = None, vendor_slug: str = "mindfix"
+    ) -> None:
+        self.client.set_cookie(
+            key="mindfix_client_auth",
+            value=self.client_auth_cookie(client_id=client_id, vendor_slug=vendor_slug),
+        )
 
     def consultant_login(self):
         response = self.client.post(

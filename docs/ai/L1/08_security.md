@@ -24,6 +24,7 @@ Consultants:
 - authenticate with email/password from the `consultants` table
 - then complete OTP verification
 - session is stored in Flask’s session cookie
+- production TTL is configured to 1 hour
 
 Admins:
 
@@ -35,6 +36,7 @@ Current state:
 - consultant flow has 2FA
 - admin flow is password-only today
 - clients can also reach hosted secure pages through hashed `client_access_links`
+- client-authenticated browser access is carried by a shared 1-hour auth cookie after successful backend login + OTP
 
 ## Internal Service Auth
 
@@ -51,8 +53,9 @@ Protections:
 
 Meeting-specific trust rule:
 
-- the hosted client meeting token is the trust anchor for guest join
+- the hosted client meeting token is the room locator and meeting-context anchor for guest join
 - but the token never grants media access by itself
+- guest room entry must also present a valid `simple-backend` auth session that resolves to the same dashboard client as the meeting
 - `simple-backend` must call signed `POST /internal/authorize-meeting-join` and mint RTC/RTM only after the dashboard confirms:
   - current meeting state
   - join window
@@ -78,6 +81,7 @@ Hosted token handling:
 - only token hashes are stored in SQLite
 - hosted realtime and hosted HTTP routes both enforce token expiry
 - consultant join uses a short-lived signed bootstrap URL rather than trusting raw browser parameters
+- hosted client pages still require a valid client auth cookie; the bearer link only identifies the target resource
 
 ## What Stays in SQLite vs Encrypted Artifacts
 
@@ -137,7 +141,7 @@ Be careful not to add raw personal or clinical detail into audit payloads unless
 - there is no key rotation mechanism yet for `THERAPY_MASTER_KEY`
 - there is no outbox/retry queue yet for failed external event delivery because this repo currently only receives events
 - session deletion is still a hard delete; soft-delete plus preserved audit semantics is still pending
-- hosted links are bearer-style URLs, so email interception remains the main practical attack surface until a stronger second factor is added to that flow
+- hosted meeting and message pages still begin from bearer-style URLs, so email interception remains part of the attack surface even though guest room entry is separately gated by backend auth
 
 ## Roadmap Security / Integrity Items
 

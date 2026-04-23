@@ -14,6 +14,13 @@ Purpose: preserve the practical traps that are easy to rediscover the hard way.
 - **The repo currently uses direct schema initialization, not migrations.** Changing `schema.sql` is simple now, but production-safe schema evolution will need a migration story later.
 - **Encrypted artifacts and SQLite must stay logically aligned.** A session row may point at storage keys; if callers change key formats without updating readers, dashboards break.
 - **Current UI is server-rendered Flask templates.** Do not assume a JS app/router exists.
+- **Meeting-mode auth has two layers and both matter.**
+  - the hosted invite/response link is only a room locator and meeting-context anchor
+  - actual guest room entry must still pass through `simple-backend` auth and resolve to the same dashboard client as the meeting
+  - if meeting-mode UI changes skip `/auth-check`, email-link possession turns back into an auth bypass
+- **Cookie-based client auth still needs explicit fetch credentials in local split-port dev.**
+  - production works on one origin behind nginx, so the shared 1-hour auth cookie is straightforward
+  - local direct-port mode (`:8084` client calling `:8082` backend) is cross-origin, so frontend fetches must use `credentials: "include"` or auth appears to fail only on localhost
 - **If local changes do not appear, you may still be hitting an old bound process.**
   - dashboard/template drift: check which PID is listening on `127.0.0.1:8090`, kill that specific process, and restart the dashboard cleanly
   - backend/join-flow drift: check which PID is listening on `127.0.0.1:8082`, kill that specific process, and restart `simple-backend` cleanly

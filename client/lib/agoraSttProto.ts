@@ -19,6 +19,7 @@ export type MeetingTranscriptLine = {
   time: string;
   text: string;
   source_lang: string;
+  is_final: boolean;
 };
 
 const root = Root.fromJSON({
@@ -103,7 +104,7 @@ export function decodeAgoraSttStreamMessage(data: Uint8Array | ArrayBuffer): Ago
   }
 }
 
-export function extractFinalTranscriptLine(
+export function extractTranscriptLine(
   data: Uint8Array | ArrayBuffer,
 ): MeetingTranscriptLine | null {
   const msg = decodeAgoraSttStreamMessage(data);
@@ -118,12 +119,18 @@ export function extractFinalTranscriptLine(
   if (!text) return null;
 
   const hasFinal = msg.words.some((word) => word?.isFinal === true) || msg.end_of_segment === true;
-  if (!hasFinal) return null;
-
   return {
     uid: String(msg.uid ?? ""),
     time: toIsoTime(msg.time),
     text,
     source_lang: msg.lang != null ? String(msg.lang) : "",
+    is_final: hasFinal,
   };
+}
+
+export function extractFinalTranscriptLine(
+  data: Uint8Array | ArrayBuffer,
+): MeetingTranscriptLine | null {
+  const line = extractTranscriptLine(data);
+  return line?.is_final ? line : null;
 }

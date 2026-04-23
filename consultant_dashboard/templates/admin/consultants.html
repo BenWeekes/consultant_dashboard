@@ -23,7 +23,7 @@
               <td>{{ consultant.email }}<br>{{ consultant.phone_number }}</td>
               <td>{{ consultant.client_count }}</td>
               <td>{{ consultant.session_count }}</td>
-              <td><a href="{{ tenant_path('/admin/consultants/' ~ consultant.id) }}" class="button-secondary button-link">Edit</a></td>
+              <td><a href="{{ tenant_path('/admin/consultants/' ~ consultant.id) }}">Edit</a></td>
             </tr>
           {% else %}
             <tr><td colspan="5" class="muted">No consultants yet.</td></tr>

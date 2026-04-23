@@ -1,6 +1,10 @@
 import base64
+import hashlib
+import hmac
+import json
 import sqlite3
 import time
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -93,10 +97,66 @@ from .vendors import current_branding, current_storage_root, current_vendor_slug
 from werkzeug.security import generate_password_hash
 
 web_bp = Blueprint("web", __name__)
+CLIENT_AUTH_COOKIE_NAME = "mindfix_client_auth"
 
 
 def _brand_name() -> str:
     return current_branding().get("name") or current_app.config["BRAND_NAME"]
+
+
+def _decode_client_auth_token(token: str) -> Optional[dict]:
+    secret = current_app.config.get("CLIENT_AUTH_JWT_SECRET", "")
+    if not secret or not token:
+        return None
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return None
+        header_b64, payload_b64, signature_b64 = parts
+        signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
+        expected = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
+        encoded_expected = base64.urlsafe_b64encode(expected).decode("ascii").rstrip("=")
+        if not hmac.compare_digest(encoded_expected, signature_b64):
+            return None
+        padded = payload_b64 + "=" * (-len(payload_b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+        exp = int(payload.get("exp") or 0)
+        if exp and exp < int(time.time()):
+            return None
+        return payload
+    except Exception:
+        return None
+
+
+def _current_client_claims() -> Optional[dict]:
+    token = (request.cookies.get(CLIENT_AUTH_COOKIE_NAME) or "").strip()
+    claims = _decode_client_auth_token(token)
+    if claims:
+        return claims
+    query_token = (request.args.get("auth_token") or "").strip()
+    return _decode_client_auth_token(query_token)
+
+
+def _client_auth_redirect(*, reauth: bool = False):
+    params = {
+        "profile": _client_profile_name(),
+        "return": request.url,
+    }
+    if reauth:
+        params["reauth"] = "1"
+    return redirect(f"{tenant_path('/auth/login')}?{urllib.parse.urlencode(params)}")
+
+
+def _require_client_link_session(expected_client_id: str):
+    claims = _current_client_claims()
+    if not claims:
+        return None, _client_auth_redirect()
+    current_vendor = current_vendor_slug()
+    if current_vendor and claims.get("vendor_slug") and claims.get("vendor_slug") != current_vendor:
+        return None, _client_auth_redirect(reauth=True)
+    if expected_client_id and claims.get("client_id") != expected_client_id:
+        return None, _client_auth_redirect(reauth=True)
+    return claims, None
 
 
 def _phone_form_value(phone_number: str):
@@ -369,6 +429,7 @@ def _build_consultant_join_url(meeting_id: str, consultant_id: str, channel_name
         f"{_client_app_base_url()}/?meeting_mode=true"
         f"&profile={_client_profile_name()}"
         f"&join_bootstrap={bootstrap}"
+        f"&returnurl={urllib.parse.quote(tenant_url_for('web.consultant_dashboard'), safe='')}"
     )
 
 
@@ -1997,6 +2058,10 @@ def meeting_response_join(token: str):
     if not meeting:
         db.close()
         abort(404)
+    _claims, auth_redirect = _require_client_link_session(meeting["client_id"])
+    if auth_redirect is not None:
+        db.close()
+        return auth_redirect
     target_meeting = _find_guest_join_target(db, meeting, now=utc_now())
     db.close()
     if (target_meeting["meeting_type"] or "human").strip().lower() == "ai":
@@ -2020,6 +2085,11 @@ def meeting_response_ics(token: str):
     if error_status == 410:
         db.close()
         abort(410)
+    if meeting:
+        _claims, auth_redirect = _require_client_link_session(meeting["client_id"])
+        if auth_redirect is not None:
+            db.close()
+            return auth_redirect
     db.close()
     if not meeting:
         abort(404)
@@ -2156,6 +2226,11 @@ def client_message_portal(token: str):
             messages=[],
         ), 410
 
+    _claims, auth_redirect = _require_client_link_session(link["client_id"])
+    if auth_redirect is not None:
+        db.close()
+        return auth_redirect
+
     mark_client_access_link_used(db, link["id"])
     db.commit()
     if request.method == "POST":
@@ -2207,6 +2282,10 @@ def client_message_portal_thread(token: str):
     if not link:
         db.close()
         abort(404)
+    _claims, auth_redirect = _require_client_link_session(link["client_id"])
+    if auth_redirect is not None:
+        db.close()
+        return auth_redirect
     messages = _serialize_message_rows(list(reversed(list_client_messages(db, client_id=link["client_id"], limit=100))))
     db.close()
     return jsonify({"messages": messages})
@@ -2231,6 +2310,11 @@ def meeting_response_page(token: str):
     if not meeting:
         db.close()
         abort(404)
+
+    _claims, auth_redirect = _require_client_link_session(meeting["client_id"])
+    if auth_redirect is not None:
+        db.close()
+        return auth_redirect
 
     if meeting["status"] == "scheduled":
         db.execute(

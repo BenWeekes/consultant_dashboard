@@ -19,7 +19,7 @@ import {
 } from "agora-agent-client-toolkit";
 import { MicButtonState } from "@agora/agent-ui-kit";
 import {
-  extractFinalTranscriptLine,
+  extractTranscriptLine,
   type MeetingTranscriptLine,
 } from "@/lib/agoraSttProto";
 
@@ -45,6 +45,8 @@ export interface IMessageListItem {
   timestamp?: number;
   role?: "host" | "guest";
   messageId?: string;
+  isFinal?: boolean;
+  transcriptSource?: boolean;
 }
 
 export function useAgoraVideoClient() {
@@ -321,16 +323,55 @@ export function useAgoraVideoClient() {
             const parsed = JSON.parse(raw);
             if (mode === "meeting" && parsed?.object === "meeting_chat") {
               const messageId = String(parsed.message_id || "");
-              if (messageId && seenMeetingMessageIdsRef.current.has(messageId)) {
+              const isTranscript = parsed.transcript === true || messageId.startsWith("stt:");
+              const isFinal = parsed.is_final === true;
+              if (!isTranscript && messageId && seenMeetingMessageIdsRef.current.has(messageId)) {
                 return;
               }
-              if (messageId) {
+              if (!isTranscript && messageId) {
                 seenMeetingMessageIdsRef.current.add(messageId);
               }
               const timestamp = Number(parsed.timestamp || Date.now());
               const senderUid = String(parsed.sender_uid || event.publisher || "unknown");
               const senderRole =
                 parsed.sender_role === "host" ? "host" : "guest";
+              if (isTranscript) {
+                console.log(
+                  "[MeetingTranscript][RTM]",
+                  JSON.stringify({
+                    messageId,
+                    senderUid,
+                    senderRole,
+                    isFinal,
+                    text: String(parsed.text || ""),
+                  }),
+                );
+                const transcriptItem = {
+                  turn_id: timestamp,
+                  uid: senderUid,
+                  role: senderRole,
+                  text: String(parsed.text || ""),
+                  status: isFinal ? TurnStatus.FINAL : TurnStatus.IN_PROGRESS,
+                  timestamp,
+                  messageId: messageId || `${senderUid}:${timestamp}`,
+                  isFinal,
+                  transcriptSource: true,
+                };
+                if (isFinal) {
+                  setCurrentInProgressMessage((prev) =>
+                    prev?.messageId === transcriptItem.messageId ? null : prev,
+                  );
+                  setMessageList((prev) => {
+                    const withoutExisting = prev.filter(
+                      (item) => item.messageId !== transcriptItem.messageId,
+                    );
+                    return [...withoutExisting, transcriptItem];
+                  });
+                } else {
+                  setCurrentInProgressMessage(transcriptItem);
+                }
+                return;
+              }
               setMessageList((prev) => [
                 ...prev,
                 {
@@ -373,8 +414,20 @@ export function useAgoraVideoClient() {
           rtcClient.on(
             "stream-message",
             (_uid: number, data: Uint8Array | ArrayBuffer) => {
-              const line = extractFinalTranscriptLine(data);
+              const line = extractTranscriptLine(data);
               if (!line) return;
+              console.log(
+                "[MeetingTranscript][RTC]",
+                JSON.stringify({
+                  uid: line.uid,
+                  time: line.time,
+                  isFinal: line.is_final,
+                  text: line.text,
+                }),
+              );
+              if (!line.is_final) {
+                return;
+              }
               const transcriptKey = `${line.uid}:${line.time}:${line.text}`;
               if (seenTranscriptLineKeysRef.current.has(transcriptKey)) {
                 return;

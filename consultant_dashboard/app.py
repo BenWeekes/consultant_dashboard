@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from flask import Flask, redirect, request, url_for
 from werkzeug.security import generate_password_hash
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .core.auth import auth_bp, configure_session, require_admin_auth_file
 from .core.config import load_config
@@ -47,6 +48,7 @@ def create_app() -> Flask:
         __name__,
         template_folder="templates",
     )
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     app.wsgi_app = TenantPrefixMiddleware(app.wsgi_app)
     config = load_config()
     app.config.update(config)

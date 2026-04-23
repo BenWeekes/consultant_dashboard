@@ -49,7 +49,7 @@
               <button type="submit">Resend Invite</button>
             </form>
           {% endif %}
-          <a href="{{ join_url }}" class="button-secondary button-link" target="_blank" rel="noopener">{{ join_label }}</a>
+          <a href="{{ join_url }}" class="button-primary button-link" target="_blank" rel="noopener">{{ join_label }}</a>
           {% if can_cancel %}
             <form method="post" onsubmit="return confirm('Cancel this meeting?');">
               <input type="hidden" name="action" value="cancel">

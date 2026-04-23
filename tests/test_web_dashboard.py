@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import time
+import urllib.parse
 from urllib.parse import parse_qs, urlparse
 from datetime import datetime, timedelta, timezone
 from unittest import mock
@@ -44,6 +45,22 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         response = self.client.get("/admin/dashboard", follow_redirects=False)
         self.assertEqual(response.status_code, 302)
         self.assertIn("/admin/login", response.location)
+
+    def test_admin_consultants_table_uses_text_link_for_edit(self):
+        self.admin_login()
+        response = self.client.get("/admin/consultants")
+        self.assertEqual(response.status_code, 200)
+        db = get_db(self.app.config)
+        consultant = get_consultant_by_email(db, "consultant@example.com", vendor_id=self.vendor_id)
+        db.close()
+        self.assertIn(
+            f'href="/v/mindfix/admin/consultants/{consultant["id"]}">Edit</a>'.encode(),
+            response.data,
+        )
+        self.assertNotIn(
+            f'href="/v/mindfix/admin/consultants/{consultant["id"]}" class="button-secondary button-link">'.encode(),
+            response.data,
+        )
 
     def test_consultant_login_rejects_bad_password(self):
         response = self.client.post(
@@ -108,6 +125,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertIn(b"MindFix", response.data)
         self.assertIn(b"/v/mindfix/consultant/dashboard", response.data)
         self.assertIn(b"/v/mindfix/consultant/google", response.data)
+        self.assertIn(b">Continue<", response.data)
 
     def test_consultant_google_dev_flow_uses_same_account_and_vendor_prefix(self):
         response = self.client.get("/v/mindfix/consultant/google", follow_redirects=False)
@@ -115,6 +133,44 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertIn("/v/mindfix/consultant/google/callback?code=dev-mode", response.location)
 
         response = self.client.get(response.location, follow_redirects=False)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/v/mindfix/consultant/verify", response.location)
+
+    def test_consultant_google_uses_shared_google_callback_uri(self):
+        self.app.config["AUTH_DEV_MODE"] = False
+        self.app.config["GOOGLE_CLIENT_ID"] = "google-client-id"
+        response = self.client.get("/v/mindfix/consultant/google", follow_redirects=False)
+        self.assertEqual(response.status_code, 302)
+        parsed = urlparse(response.location)
+        params = parse_qs(parsed.query)
+        self.assertEqual(
+            params["redirect_uri"],
+            [f"{self.app.config['PUBLIC_BASE_URL']}/auth/google/callback"],
+        )
+        self.assertIn("state", params)
+        from consultant_dashboard.core.auth import _peek_dashboard_handoff
+        state_payload = _peek_dashboard_handoff(params["state"][0])
+        self.assertEqual(
+            state_payload["complete_url"],
+            "http://localhost/v/mindfix/consultant/google/callback",
+        )
+
+    def test_consultant_google_callback_accepts_signed_handoff_token(self):
+        from consultant_dashboard.core.auth import _sign_dashboard_handoff
+        with self.app.app_context():
+            consultant_token = _sign_dashboard_handoff(
+                {
+                    "purpose": "consultant_google_complete",
+                    "email": "consultant@example.com",
+                    "vendor_slug": "mindfix",
+                    "exp": int(time.time()) + 300,
+                }
+            )
+        with mock.patch("consultant_dashboard.core.auth._send_or_store_code", return_value=None):
+            response = self.client.get(
+                f"/v/mindfix/consultant/google/callback?consultant_token={urllib.parse.quote(consultant_token)}",
+                follow_redirects=False,
+            )
         self.assertEqual(response.status_code, 302)
         self.assertIn("/v/mindfix/consultant/verify", response.location)
 
@@ -201,6 +257,19 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         row = db.execute("SELECT password_hash FROM clients WHERE email = ?", ("jamie@example.com",)).fetchone()
         db.close()
         self.assertTrue(row["password_hash"])
+
+    def test_clients_table_uses_text_link_for_new_meeting_action(self):
+        self.consultant_login()
+        response = self.client.get("/consultant/clients")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            f'href="/v/mindfix/consultant/clients/{self.client_id}/meetings/new">New Meeting</a>'.encode(),
+            response.data,
+        )
+        self.assertNotIn(
+            f'href="/v/mindfix/consultant/clients/{self.client_id}/meetings/new" class="button-secondary button-link">'.encode(),
+            response.data,
+        )
 
     def test_consultant_client_creation_rejects_short_initial_password(self):
         self.consultant_login()
@@ -703,6 +772,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             db.commit()
             db.close()
 
+        self.authenticate_client_session()
         response = self.client.post(
             "/meetings/respond/cancelled-meeting-token",
             data={"action": "accept"},
@@ -757,9 +827,45 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             access_link_id,
             int(time.time()) + 3600,
         )
-        response = self.client.get(f"/meetings/respond/{signed_token}")
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Signed Access Meeting", response.data)
+        response = self.client.get(f"/meetings/respond/{signed_token}", base_url="https://mindfix.me")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/auth/login", response.location)
+        self.assertIn("return=https%3A%2F%2Fmindfix.me%2Fmeetings%2Frespond%2F", response.location)
+
+        self.client.set_cookie(key="mindfix_client_auth", value=self.client_auth_cookie())
+        authed_response = self.client.get(f"/meetings/respond/{signed_token}")
+        self.assertEqual(authed_response.status_code, 200)
+        self.assertIn(b"Signed Access Meeting", authed_response.data)
+
+    def test_meeting_response_page_reauths_when_wrong_client_is_signed_in(self):
+        with self.client.application.app_context():
+            db = get_db(self.app.config)
+            access_link_id = create_client_access_link(
+                db,
+                client_id=self.client_id,
+                created_by=self.consultant_id,
+                token_hash=hash_access_token("wrong-client-token"),
+                expires_at="2099-01-01T00:00:00Z",
+            )
+            db.execute(
+                """
+                INSERT INTO scheduled_meetings (
+                    vendor_id, client_id, consultant_id, meeting_type, status, title, timezone_name,
+                    scheduled_start_at, scheduled_end_at, join_window_start_at, join_window_end_at,
+                    channel_name, response_access_link_id
+                ) VALUES (?, ?, ?, 'human', 'scheduled', 'Wrong Client Meeting', 'Europe/London',
+                          '2026-04-20T10:00:00Z', '2026-04-20T10:30:00Z', '2026-04-20T09:45:00Z', '2026-04-20T11:00:00Z',
+                          'WRONGCLIENT1', ?)
+                """,
+                (self.vendor_id, self.client_id, self.consultant_id, access_link_id),
+            )
+            db.commit()
+            db.close()
+
+        self.client.set_cookie(key="mindfix_client_auth", value=self.client_auth_cookie(client_id="someone-else"))
+        response = self.client.get("/meetings/respond/wrong-client-token")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("reauth=1", response.location)
 
     def test_completed_meeting_cannot_be_cancelled(self):
         self.consultant_login()
@@ -915,6 +1021,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertIsNotNone(link)
         mocked_link = mocked_deliver_email.call_args.kwargs["reply_link"]
         token = self._extract_meeting_response_token(mocked_link)
+        self.authenticate_client_session()
 
         response = self.client.post(
             f"/meetings/respond/{token}",
@@ -975,6 +1082,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         ).fetchone()["id"]
         db.close()
         token = self._extract_meeting_response_token(mocked_deliver_email.call_args.kwargs["reply_link"])
+        self.authenticate_client_session()
 
         accept_response = self.client.post(
             f"/meetings/respond/{token}",
@@ -1017,6 +1125,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             follow_redirects=True,
         )
         first_token = self._extract_meeting_response_token(mocked_deliver_email.call_args.kwargs["reply_link"])
+        self.authenticate_client_session()
         self.client.post(
             f"/meetings/respond/{first_token}",
             data={"action": "decline"},
@@ -1066,6 +1175,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertIn(b"Join Flow Test", response.data)
 
         token = self._extract_meeting_response_token(mocked_deliver_email.call_args.kwargs["reply_link"])
+        self.authenticate_client_session()
         response = self.client.post(
             f"/meetings/respond/{token}",
             data={"action": "accept"},
@@ -1097,6 +1207,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             follow_redirects=True,
         )
         token = self._extract_meeting_response_token(mocked_deliver_email.call_args.kwargs["reply_link"])
+        self.authenticate_client_session()
         response = self.client.get(f"/meetings/respond/{token}")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b">Accept<", response.data)
@@ -1120,6 +1231,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             follow_redirects=True,
         )
         token = self._extract_meeting_response_token(mocked_deliver_email.call_args.kwargs["reply_link"])
+        self.authenticate_client_session()
         self.client.post(
             f"/meetings/respond/{token}",
             data={"action": "accept"},
@@ -1150,6 +1262,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             follow_redirects=True,
         )
         token = self._extract_meeting_response_token(mocked_deliver_email.call_args.kwargs["reply_link"])
+        self.authenticate_client_session()
         self.client.post(
             f"/meetings/respond/{token}",
             data={"action": "accept"},
@@ -1236,6 +1349,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             },
             follow_redirects=True,
         )
+        self.authenticate_client_session()
         response = self.client.get(f"/meetings/respond/{old_token}")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Status: Cancelled", response.data)
@@ -1312,6 +1426,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             follow_redirects=True,
         )
         token = self._extract_meeting_response_token(mocked_deliver_email.call_args.kwargs["reply_link"])
+        self.authenticate_client_session()
         response = self.client.get(f"/meetings/respond/{token}/join", follow_redirects=False)
         self.assertEqual(response.status_code, 302)
         params = parse_qs(urlparse(response.location).query)
@@ -1335,6 +1450,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             follow_redirects=True,
         )
         token = self._extract_meeting_response_token(mocked_deliver_email.call_args.kwargs["reply_link"])
+        self.authenticate_client_session()
         self.client.post(
             f"/meetings/respond/{token}",
             data={"action": "accept"},
@@ -1366,6 +1482,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             follow_redirects=True,
         )
         token = self._extract_meeting_response_token(mocked_deliver_email.call_args.kwargs["reply_link"])
+        self.authenticate_client_session()
         self.client.post(
             f"/meetings/respond/{token}",
             data={"action": "accept"},
@@ -1396,6 +1513,17 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertIn(b"Cancel Meeting", response.data)
         self.assertIn(b"Resend Invite", response.data)
         self.assertIn(b"Enter Meeting Room", response.data)
+        db = get_db(self.app.config)
+        meeting_id = db.execute(
+            "SELECT id FROM scheduled_meetings ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()["id"]
+        db.close()
+        join_response = self.client.get(
+            f"/consultant/meetings/{meeting_id}/join",
+            follow_redirects=False,
+        )
+        self.assertEqual(join_response.status_code, 302)
+        self.assertIn("returnurl=%2Fv%2Fmindfix%2Fconsultant%2Fdashboard", join_response.location)
 
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_past_meeting_detail_hides_resend_invite_but_keeps_room_entry(self, mocked_deliver_email):
@@ -1674,6 +1802,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         call_kwargs = mocked_deliver_email.call_args.kwargs
         reply_link = call_kwargs["reply_link"]
         token = reply_link.rsplit("/", 1)[-1]
+        self.authenticate_client_session()
 
         response = self.client.get(f"/client/messages/{token}")
         self.assertEqual(response.status_code, 200)
@@ -1735,6 +1864,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         )
         reply_link = mocked_deliver_email.call_args.kwargs["reply_link"]
         token = reply_link.rsplit("/", 1)[-1]
+        self.authenticate_client_session()
         response = self.client.get(f"/client/messages/{token}/thread")
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
@@ -1824,7 +1954,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.consultant_login()
         response = self.client.post("/consultant/logout", follow_redirects=False)
         self.assertEqual(response.status_code, 302)
-        self.assertIn("/home", response.location)
+        self.assertIn("/consultant/login", response.location)
 
         response = self.client.get("/consultant/dashboard", follow_redirects=False)
         self.assertEqual(response.status_code, 302)
@@ -1846,7 +1976,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
 
         response = self.client.post("/admin/logout", follow_redirects=False)
         self.assertEqual(response.status_code, 302)
-        self.assertIn("/home", response.location)
+        self.assertIn("/admin/login", response.location)
 
         response = self.client.get("/consultant/dashboard", follow_redirects=False)
         self.assertEqual(response.status_code, 200)

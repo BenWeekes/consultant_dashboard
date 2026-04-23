@@ -49,9 +49,7 @@
               {% endif %}
             </td>
             <td>
-              <div class="actions">
-                <a href="{{ tenant_path('/consultant/clients/' ~ client.id ~ '/meetings/new') }}" class="button-secondary button-link">New Meeting</a>
-              </div>
+              <a href="{{ tenant_path('/consultant/clients/' ~ client.id ~ '/meetings/new') }}">New Meeting</a>
             </td>
           </tr>
         {% else %}
