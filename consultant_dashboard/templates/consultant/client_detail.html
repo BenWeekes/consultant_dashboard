@@ -256,15 +256,29 @@
       </div>
       <div class="muted">Clients sign in with email or Google plus SMS, so changing email or phone here changes who can access this record.</div>
       <form method="post">
-        <label class="field-label">Client Name</label>
-        <input name="display_name" value="{{ client.display_name }}" required>
+        <div class="field-grid-two">
+          <div class="field-group-inline">
+            <label class="field-label" for="edit_first_name">First Name</label>
+            <input id="edit_first_name" name="first_name" value="{{ client.first_name or '' }}" required>
+          </div>
+          <div class="field-group-inline">
+            <label class="field-label" for="edit_last_name">Last Name</label>
+            <input id="edit_last_name" name="last_name" value="{{ client.last_name or '' }}">
+          </div>
+        </div>
 
-        <label class="field-label">Email</label>
-        <input name="email" type="email" value="{{ client.email or '' }}">
-        <div class="field-help">Used for client sign-in. Gmail users can still use Google sign-in if the email matches.</div>
-
-        <label class="field-label">Set Temporary Password <span class="tooltip" tabindex="0" data-tooltip="Optional. If filled, the client can sign in with email, password, and SMS. This replaces any existing client password.">?</span></label>
-        <input name="reset_password" type="password" placeholder="Leave blank to keep current password">
+        <div class="field-grid-two">
+          <div class="field-group-inline">
+            <label class="field-label" for="edit_email">Email</label>
+            <input id="edit_email" name="email" type="email" value="{{ client.email or '' }}" data-client-email>
+            <div class="field-help field-help-reserved">Used for client sign-in. Gmail users can still use Google sign-in if the email matches.</div>
+          </div>
+          <div class="field-group-inline" data-password-group>
+            <label class="field-label" for="edit_password">Password <span class="tooltip" tabindex="0" data-tooltip="Optional. For non-Gmail clients, this replaces the existing password. Gmail clients should use Google plus SMS.">?</span></label>
+            <input id="edit_password" name="password" type="password" placeholder="Leave blank to keep current password" data-client-password>
+            <div class="field-help field-help-reserved" data-password-help>Leave blank to keep the current password.</div>
+          </div>
+        </div>
 
         <label class="field-label">Phone Number</label>
         <div class="phone-row">
@@ -323,6 +337,26 @@
       document.querySelectorAll('[data-close-contact-editor]').forEach((button) => {
         button.addEventListener('click', () => contactDialog?.close());
       });
+      const emailInput = contactDialog?.querySelector('[data-client-email]');
+      const passwordInput = contactDialog?.querySelector('[data-client-password]');
+      const passwordGroup = contactDialog?.querySelector('[data-password-group]');
+      const passwordHelp = contactDialog?.querySelector('[data-password-help]');
+      const syncPasswordState = () => {
+        if (!emailInput || !passwordInput || !passwordGroup || !passwordHelp) {
+          return;
+        }
+        const gmail = (emailInput.value || '').trim().toLowerCase().endsWith('@gmail.com');
+        passwordInput.disabled = gmail;
+        if (gmail) {
+          passwordInput.value = '';
+        }
+        passwordGroup.classList.toggle('field-disabled', gmail);
+        passwordHelp.textContent = gmail
+          ? 'Gmail uses Google + SMS.'
+          : 'Leave blank to keep the current password.';
+      };
+      emailInput?.addEventListener('input', syncPasswordState);
+      syncPasswordState();
       const sessionSearch = document.getElementById('session-search');
       const meetingSearch = document.getElementById('meeting-search');
 

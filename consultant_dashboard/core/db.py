@@ -32,6 +32,22 @@ def init_db(config: dict) -> None:
     db.close()
 
 
+def split_client_name(display_name: str) -> tuple[str, str]:
+    collapsed = " ".join((display_name or "").strip().split())
+    if not collapsed:
+        return "", ""
+    parts = collapsed.split(" ", 1)
+    return parts[0], parts[1] if len(parts) > 1 else ""
+
+
+def compose_client_display_name(first_name: str, last_name: str) -> str:
+    return " ".join(part for part in ((first_name or "").strip(), (last_name or "").strip()) if part).strip()
+
+
+def is_gmail_address(email: str) -> bool:
+    return (email or "").strip().lower().endswith("@gmail.com")
+
+
 def _ensure_migrations(db: sqlite3.Connection, config: Optional[dict] = None) -> None:
     db.execute(
         """
@@ -74,6 +90,11 @@ def _ensure_migrations(db: sqlite3.Connection, config: Optional[dict] = None) ->
         db.execute("UPDATE clients SET vendor_id = ? WHERE vendor_id IS NULL OR vendor_id = ''", (default_vendor_id,))
     if "password_hash" not in client_columns:
         db.execute("ALTER TABLE clients ADD COLUMN password_hash TEXT")
+    if "first_name" not in client_columns:
+        db.execute("ALTER TABLE clients ADD COLUMN first_name TEXT NOT NULL DEFAULT ''")
+    if "last_name" not in client_columns:
+        db.execute("ALTER TABLE clients ADD COLUMN last_name TEXT NOT NULL DEFAULT ''")
+    _backfill_client_name_fields(db)
     message_columns = {row["name"] for row in db.execute("PRAGMA table_info(client_messages)").fetchall()}
     consultant_client_columns = {row["name"] for row in db.execute("PRAGMA table_info(consultant_clients)").fetchall()}
     if "vendor_id" not in consultant_client_columns:
@@ -631,6 +652,37 @@ def create_consultant(
     )
 
 
+def _backfill_client_name_fields(db: sqlite3.Connection) -> None:
+    rows = db.execute(
+        """
+        SELECT id, first_name, last_name, display_name
+        FROM clients
+        WHERE COALESCE(first_name, '') = '' OR COALESCE(display_name, '') = ''
+        """
+    ).fetchall()
+    for row in rows:
+        first_name = (row["first_name"] or "").strip()
+        last_name = (row["last_name"] or "").strip()
+        display_name = (row["display_name"] or "").strip()
+        if not first_name:
+            derived_first_name, derived_last_name = split_client_name(display_name)
+            first_name = derived_first_name
+            if not last_name:
+                last_name = derived_last_name
+        if not display_name:
+            display_name = compose_client_display_name(first_name, last_name)
+        db.execute(
+            """
+            UPDATE clients
+            SET first_name = ?,
+                last_name = ?,
+                display_name = ?
+            WHERE id = ?
+            """,
+            (first_name, last_name, display_name, row["id"]),
+        )
+
+
 def get_consultant_by_email(db: sqlite3.Connection, email: str, vendor_id: str = ""):
     return db.execute(
         "SELECT * FROM consultants WHERE email = ? AND vendor_id = ? AND is_active = 1",
@@ -717,7 +769,8 @@ def update_client(
     db: sqlite3.Connection,
     *,
     client_id: str,
-    display_name: str,
+    first_name: str,
+    last_name: str,
     email: str,
     phone_number: str,
     notification_email: str,
@@ -728,7 +781,9 @@ def update_client(
     db.execute(
         """
         UPDATE clients
-        SET display_name = ?,
+        SET first_name = ?,
+            last_name = ?,
+            display_name = ?,
             email = ?,
             phone_number = ?,
             notification_email = ?,
@@ -739,7 +794,9 @@ def update_client(
         WHERE id = ?
         """,
         (
-            display_name.strip(),
+            first_name.strip(),
+            last_name.strip(),
+            compose_client_display_name(first_name, last_name),
             email.strip(),
             phone_number.strip(),
             notification_email.strip(),
@@ -863,7 +920,8 @@ def create_client(
     *,
     consultant_id: str,
     vendor_id: str = "",
-    display_name: str,
+    first_name: str,
+    last_name: str = "",
     email: str,
     password_hash: str = "",
     phone_number: str,
@@ -875,14 +933,16 @@ def create_client(
     db.execute(
         """
         INSERT INTO clients (
-            vendor_id, display_name, email, password_hash, phone_number, notification_email,
+            vendor_id, first_name, last_name, display_name, email, password_hash, phone_number, notification_email,
             escalation_phone_number, notes_current, direction_current,
             created_by_consultant_id, is_active
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
         """,
         (
             vendor_id or _vendor_id_for_consultant(db, consultant_id),
-            display_name.strip(),
+            first_name.strip(),
+            last_name.strip(),
+            compose_client_display_name(first_name, last_name),
             email.strip(),
             password_hash.strip(),
             phone_number.strip(),
@@ -911,7 +971,7 @@ def create_client(
             client_id,
         ),
     )
-    identity_hashes = build_identity_hashes(display_name, email, phone_number)
+    identity_hashes = build_identity_hashes(compose_client_display_name(first_name, last_name), email, phone_number)
     if any(identity_hashes.values()):
         upsert_client_auth_identity(
             db,
@@ -1205,6 +1265,18 @@ def get_scheduled_meeting(db: sqlite3.Connection, meeting_id: str):
         JOIN clients c ON c.id = sm.client_id
         JOIN consultants co ON co.id = sm.consultant_id
         WHERE sm.id = ?
+        LIMIT 1
+        """,
+        (meeting_id,),
+    ).fetchone()
+
+
+def get_meeting_signal_flags(db: sqlite3.Connection, meeting_id: str):
+    return db.execute(
+        """
+        SELECT transcription_enabled, audio_biomarkers_enabled, video_biomarkers_enabled
+        FROM scheduled_meetings
+        WHERE id = ?
         LIMIT 1
         """,
         (meeting_id,),
@@ -1887,7 +1959,7 @@ def resolve_client_identity(db: sqlite3.Connection, vendor_id: str = "", **hashe
         vendor_sql = "AND cai.vendor_id = ?"
         params.append(vendor_id)
     sql = f"""
-        SELECT cai.client_id, cc.consultant_id, c.is_active, c.email, c.display_name, c.phone_number
+        SELECT cai.client_id, cc.consultant_id, c.is_active, c.email, c.first_name, c.last_name, c.display_name, c.phone_number
         FROM client_auth_identities cai
         JOIN clients c ON c.id = cai.client_id
         LEFT JOIN consultant_clients cc ON cc.client_id = cai.client_id

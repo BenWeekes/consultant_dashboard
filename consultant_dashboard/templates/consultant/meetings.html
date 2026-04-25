@@ -22,22 +22,29 @@
         <input type="search" name="q" value="{{ search or '' }}" placeholder="Search client, title or date">
       </form>
     </div>
-    <div class="list">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>Client</th>
+          <th>Type</th>
+          <th>Title</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
       {% for meeting in meetings %}
-        <a class="item session-history-link" href="{{ tenant_path('/consultant/meetings/' ~ meeting.id) }}">
-          <div class="details-summary">
-            <div class="session-history-summary">
-              <strong>{{ meeting.scheduled_start_at|display_dt }}</strong>
-              <span class="muted summary-copy">{{ meeting.client_name }} · {{ meeting.meeting_type_display }} · {{ meeting.title }}</span>
-            </div>
-            <div class="actions">
-              <span class="status-chip {% if meeting.is_live_display %}live{% endif %}">{{ meeting.status_display }}</span>
-            </div>
-          </div>
-        </a>
+        <tr>
+          <td><a href="{{ tenant_path('/consultant/meetings/' ~ meeting.id) }}">{{ meeting.scheduled_start_at|display_dt }}</a></td>
+          <td>{{ meeting.client_name }}</td>
+          <td>{{ meeting.meeting_type_display }}</td>
+          <td>{{ meeting.title }}</td>
+          <td><span class="status-chip {% if meeting.is_live_display %}live{% endif %}">{{ meeting.status_display }}</span></td>
+        </tr>
       {% else %}
-        <div class="muted">No meetings yet. Create one for now or schedule one for later.</div>
+        <tr><td colspan="5" class="muted">No meetings yet. Create one for now or schedule one for later.</td></tr>
       {% endfor %}
-    </div>
+      </tbody>
+    </table>
   </div>
 {% endblock %}

@@ -77,7 +77,11 @@
       }
       .toggle-option input { width: auto; margin: 0; }
       .field-help { margin-top: -6px; font-size: 12px; color: var(--text-muted); }
+      .field-help-reserved { min-height: 18px; }
       .phone-row { display: grid; gap: 12px; grid-template-columns: 200px 1fr; align-items: end; }
+      .field-grid-two { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; align-items: end; }
+      .field-group-inline { display: flex; flex-direction: column; gap: 6px; }
+      .field-disabled { opacity: 0.6; }
       .tooltip {
         position: relative;
         display: inline-flex;
@@ -368,7 +372,7 @@
         .client-top-grid, .client-bottom-grid { grid-template-columns: 1fr; }
         .chat-panel { min-height: 0; }
         .chat-thread-scroll { max-height: 45vh; }
-        .phone-row { grid-template-columns: 1fr; }
+        .phone-row, .field-grid-two { grid-template-columns: 1fr; }
         .history-toolbar { align-items: stretch; }
         .history-search { min-width: 0; max-width: none; width: 100%; }
         .toast-stack { left: 16px; right: 16px; top: 16px; }

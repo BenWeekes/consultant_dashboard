@@ -21,6 +21,26 @@ Purpose: preserve the practical traps that are easy to rediscover the hard way.
 - **Cookie-based client auth still needs explicit fetch credentials in local split-port dev.**
   - production works on one origin behind nginx, so the shared 1-hour auth cookie is straightforward
   - local direct-port mode (`:8084` client calling `:8082` backend) is cross-origin, so frontend fetches must use `credentials: "include"` or auth appears to fail only on localhost
+- **Playwright on a fresh server needs browser runtime packages, not just `npm install`.**
+  - `@playwright/test` alone is not enough
+  - Chromium launch will fail with missing shared libraries like `libatk-1.0.so.0` until you run:
+    - `npx playwright install chromium`
+    - `sudo npx playwright install-deps chromium`
+- **Authenticated Playwright UI checks need a real client auth cookie.**
+  - the `Biomarkers` screenshot test does not log in interactively
+  - it expects `PLAYWRIGHT_CLIENT_AUTH_COOKIE` to contain a valid `mindfix_client_auth` cookie
+  - if that cookie is expired, the browser test will bounce into auth and stop proving the in-session layout
+- **Use fake media devices for browser automation or meeting/app tests will hang behind camera/mic prompts.**
+  - Playwright launch args should include:
+    - `--use-fake-ui-for-media-stream`
+    - `--use-fake-device-for-media-stream`
+    - `--autoplay-policy=no-user-gesture-required`
+- **For the Next client, a successful build is not enough by itself.**
+  - if `mindfix-client` is restarted before the build finishes, the live app can serve stale or missing chunk references and render a blank page
+  - after changing the React client:
+    1. finish `npm run build`
+    2. restart `mindfix-client`
+    3. verify the live page in a browser or Playwright before trusting the result
 - **If local changes do not appear, you may still be hitting an old bound process.**
   - dashboard/template drift: check which PID is listening on `127.0.0.1:8090`, kill that specific process, and restart the dashboard cleanly
   - backend/join-flow drift: check which PID is listening on `127.0.0.1:8082`, kill that specific process, and restart `simple-backend` cleanly

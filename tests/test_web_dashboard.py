@@ -46,7 +46,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("/admin/login", response.location)
 
-    def test_admin_consultants_table_uses_text_link_for_edit(self):
+    def test_admin_consultants_page_uses_name_link_and_add_consultant_link(self):
         self.admin_login()
         response = self.client.get("/admin/consultants")
         self.assertEqual(response.status_code, 200)
@@ -54,13 +54,43 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         consultant = get_consultant_by_email(db, "consultant@example.com", vendor_id=self.vendor_id)
         db.close()
         self.assertIn(
-            f'href="/v/mindfix/admin/consultants/{consultant["id"]}">Edit</a>'.encode(),
+            f'href="/v/mindfix/admin/consultants/{consultant["id"]}">Test Consultant</a>'.encode(),
             response.data,
         )
-        self.assertNotIn(
-            f'href="/v/mindfix/admin/consultants/{consultant["id"]}" class="button-secondary button-link">'.encode(),
-            response.data,
+        self.assertIn(b'href="/v/mindfix/admin/consultants/new"', response.data)
+        self.assertNotIn(b">Edit</a>", response.data)
+
+    def test_admin_vendors_page_uses_vendors_label_and_add_vendor_link(self):
+        self.admin_login()
+        response = self.client.get("/admin/vendors")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"<h1>Vendors</h1>", response.data)
+        self.assertIn(b'href="/v/mindfix/admin/vendors/new"', response.data)
+        self.assertNotIn(b"Tenants", response.data)
+
+    def test_admin_can_create_vendor_from_domain_defaults(self):
+        self.admin_login()
+        response = self.client.post(
+            "/admin/vendors/new",
+            data={
+                "domain": "acmehealth.com",
+                "name": "",
+                "storage_root": "",
+                "www_root": "",
+            },
+            follow_redirects=True,
         )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Vendor created", response.data)
+
+        db = get_db(self.app.config)
+        vendor = db.execute("SELECT slug, name, primary_host, storage_root, www_root FROM vendors WHERE slug = ?", ("acmehealth",)).fetchone()
+        db.close()
+        self.assertIsNotNone(vendor)
+        self.assertEqual(vendor["name"], "Acmehealth")
+        self.assertEqual(vendor["primary_host"], "https://acmehealth.com")
+        self.assertEqual(vendor["storage_root"], "/home/ubuntu/mindfix-runtime/vendors/acmehealth")
+        self.assertEqual(vendor["www_root"], "/home/ubuntu/mindfix/consultant_dashboard/www/acmehealth")
 
     def test_consultant_login_rejects_bad_password(self):
         response = self.client.post(
@@ -85,6 +115,14 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertIn(b"Consultant Dashboard", response.data)
         self.assertIn(b"Signed in as Test Consultant", response.data)
         self.assertIn(b"Linked Clients", response.data)
+
+    def test_consultant_sessions_table_hides_summary_text(self):
+        self.ingest_session(session_id="sess_compact_001", urgent_escalation=False)
+        self.consultant_login()
+        response = self.client.get("/consultant/sessions")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"<th>Duration</th>", response.data)
+        self.assertNotIn(b"Generalized summary.", response.data)
 
     def test_tenant_prefixed_consultant_login_flow_preserves_prefix(self):
         response = self.client.post(
@@ -237,9 +275,10 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         response = self.client.post(
             "/consultant/clients/new",
             data={
-                "display_name": "Jamie Demo",
+                "first_name": "Jamie",
+                "last_name": "Demo",
                 "email": "jamie@example.com",
-                "initial_password": "jamiepass123",
+                "password": "jamiepass123",
                 "phone_country_code": "UK",
                 "phone_number": "07700900333",
                 "notes": "General check-in.",
@@ -276,35 +315,65 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         response = self.client.post(
             "/consultant/clients/new",
             data={
-                "display_name": "Jamie Demo",
+                "first_name": "Jamie",
+                "last_name": "Demo",
                 "email": "jamie@example.com",
-                "initial_password": "short",
+                "password": "short",
                 "phone_country_code": "UK",
                 "phone_number": "07700900333",
             },
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Initial password must be at least 8 characters.", response.data)
+        self.assertIn(b"Password must be at least 8 characters.", response.data)
 
         db = get_db(self.app.config)
         row = db.execute("SELECT id FROM clients WHERE email = ?", ("jamie@example.com",)).fetchone()
         db.close()
         self.assertIsNone(row)
 
+    def test_consultant_can_create_gmail_client_without_password(self):
+        self.consultant_login()
+        response = self.client.post(
+            "/consultant/clients/new",
+            data={
+                "first_name": "Jamie",
+                "last_name": "Gmail",
+                "email": "jamie@gmail.com",
+                "password": "ignoredpass123",
+                "phone_country_code": "UK",
+                "phone_number": "07700900333",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Jamie Gmail", response.data)
+
+        db = get_db(self.app.config)
+        row = db.execute(
+            "SELECT first_name, last_name, display_name, password_hash FROM clients WHERE email = ?",
+            ("jamie@gmail.com",),
+        ).fetchone()
+        db.close()
+        self.assertEqual(row["first_name"], "Jamie")
+        self.assertEqual(row["last_name"], "Gmail")
+        self.assertEqual(row["display_name"], "Jamie Gmail")
+        self.assertEqual(row["password_hash"], "")
+
     def test_consultant_can_update_client_access_fields(self):
         self.consultant_login()
         response = self.client.post(
             f"/consultant/clients/{self.client_id}",
             data={
-                "display_name": "Alex Demo Updated",
+                "first_name": "Alex",
+                "last_name": "Demo Updated",
                 "email": "alex.updated@example.com",
                 "phone_country_code": "US",
                 "phone_number": "4155551212",
                 "notification_email": "notify@example.com",
                 "escalation_phone_country_code": "UK",
                 "escalation_phone_number": "07700900444",
-                "reset_password": "clientreset123",
+                "password": "clientreset123",
                 "notes": "Updated generalized context.",
                 "direction": "Start with a check-in on sleep.",
             },
@@ -312,13 +381,13 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Client updated", response.data)
-        self.assertIn(b"Temporary client password updated", response.data)
+        self.assertIn(b"Client password updated", response.data)
         self.assertIn(b"Alex Demo Updated", response.data)
         self.assertIn(b"Start with a check-in on sleep.", response.data)
 
         db = get_db(self.app.config)
         row = db.execute(
-            "SELECT email, phone_number, escalation_phone_number, password_hash FROM clients WHERE id = ?",
+            "SELECT first_name, last_name, display_name, email, phone_number, escalation_phone_number, password_hash FROM clients WHERE id = ?",
             (self.client_id,),
         ).fetchone()
         identity = db.execute(
@@ -326,12 +395,42 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             (self.client_id,),
         ).fetchone()
         db.close()
+        self.assertEqual(row["first_name"], "Alex")
+        self.assertEqual(row["last_name"], "Demo Updated")
+        self.assertEqual(row["display_name"], "Alex Demo Updated")
         self.assertEqual(row["email"], "alex.updated@example.com")
         self.assertEqual(row["phone_number"], "+14155551212")
         self.assertEqual(row["escalation_phone_number"], "+447700900444")
         self.assertTrue(row["password_hash"])
         self.assertIsNotNone(identity["email_hash"])
         self.assertIsNotNone(identity["phone_hash"])
+
+    def test_consultant_update_to_gmail_client_clears_password(self):
+        self.consultant_login()
+        response = self.client.post(
+            f"/consultant/clients/{self.client_id}",
+            data={
+                "first_name": "Alex",
+                "last_name": "Demo",
+                "email": "alex@gmail.com",
+                "phone_country_code": "UK",
+                "phone_number": "07700900111",
+                "notification_email": "alex@gmail.com",
+                "escalation_phone_country_code": "UK",
+                "escalation_phone_number": "07700900111",
+                "password": "ignoredpass123",
+                "notes": "",
+                "direction": "",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+
+        db = get_db(self.app.config)
+        row = db.execute("SELECT email, password_hash FROM clients WHERE id = ?", (self.client_id,)).fetchone()
+        db.close()
+        self.assertEqual(row["email"], "alex@gmail.com")
+        self.assertEqual(row["password_hash"], "")
 
     def test_consultant_can_update_notes_and_direction_from_session_page(self):
         self.ingest_session(session_id="sess_notes_001", urgent_escalation=False)
@@ -1579,7 +1678,8 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         other_client_id = create_client(
             db,
             consultant_id=self.consultant_id,
-            display_name="Other Client",
+            first_name="Other",
+            last_name="Client",
             email="other@example.com",
             password_hash="",
             phone_number="+447700900222",
@@ -1615,7 +1715,8 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.consultant_login()
         response = self.client.get(f"/consultant/sessions?client_id={self.client_id}&q=sleep")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Sleep is improving", response.data)
+        self.assertIn(b"/consultant/sessions/sess_a", response.data)
+        self.assertNotIn(b"/consultant/sessions/sess_b", response.data)
         self.assertNotIn(b"Work stress remains high", response.data)
         self.assertIn(b"All clients", response.data)
 
@@ -1664,7 +1765,8 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         response = self.client.post(
             "/consultant/clients/new",
             data={
-                "display_name": "Jamie Demo",
+                "first_name": "Jamie",
+                "last_name": "Demo",
                 "email": "jamie@example.com",
                 "phone_country_code": "UK",
                 "phone_number": "12345",
@@ -1917,14 +2019,15 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         response = self.client.get("/admin/consultants")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"consultant@example.com", response.data)
-        self.assertIn(b"Notification Email", response.data)
-        self.assertIn(b"Escalation Phone Number", response.data)
+        self.assertIn(b"Add Consultant", response.data)
+        self.assertIn(b"Search name, vendor, email or phone", response.data)
 
     def test_admin_can_create_consultant_and_duplicate_is_handled(self):
         self.admin_login()
         response = self.client.post(
-            "/admin/consultants",
+            "/admin/consultants/new",
             data={
+                "vendor_id": self.vendor_id,
                 "name": "Second Consultant",
                 "email": "second@example.com",
                 "phone_country_code": "UK",
@@ -1937,8 +2040,9 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertIn(b"Second Consultant", response.data)
 
         response = self.client.post(
-            "/admin/consultants",
+            "/admin/consultants/new",
             data={
+                "vendor_id": self.vendor_id,
                 "name": "Second Consultant",
                 "email": "second@example.com",
                 "phone_country_code": "UK",

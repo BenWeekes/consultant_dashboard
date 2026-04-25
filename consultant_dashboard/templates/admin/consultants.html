@@ -1,92 +1,42 @@
 {% extends "shared/base.html" %}
 {% block body %}
   {% include "admin/_nav.html" %}
-  <div class="split">
-    <div class="card">
-      <div class="label">{{ brand }}</div>
-      <h1>Consultants</h1>
-      <p class="muted">Admins can create consultants here and edit them from the detail link.</p>
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Contact</th>
-            <th>Clients</th>
-            <th>Sessions</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for consultant in consultants %}
-            <tr>
-              <td>{{ consultant.name }}</td>
-              <td>{{ consultant.email }}<br>{{ consultant.phone_number }}</td>
-              <td>{{ consultant.client_count }}</td>
-              <td>{{ consultant.session_count }}</td>
-              <td><a href="{{ tenant_path('/admin/consultants/' ~ consultant.id) }}">Edit</a></td>
-            </tr>
-          {% else %}
-            <tr><td colspan="5" class="muted">No consultants yet.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
+  <div class="card">
+    <div class="panel-head">
+      <div>
+        <div class="label">{{ brand }}</div>
+        <h1>Consultants</h1>
+      </div>
+      <a href="{{ tenant_url_for('web.admin_consultant_new') }}" class="titlebar-link-button">Add Consultant</a>
     </div>
-    <div class="card">
-      <div class="label">New Consultant</div>
-      <h2>Add Consultant</h2>
-      <form method="post">
-        <label class="field-label">Vendor</label>
-        <select name="vendor_id" required>
-          {% for vendor in vendors %}
-            <option value="{{ vendor.id }}" {% if form_defaults.vendor_id == vendor.id %}selected{% endif %}>{{ vendor.name }} ({{ vendor.slug }})</option>
-          {% endfor %}
-        </select>
-
-        <label class="field-label">Name</label>
-        <input name="name" placeholder="Name" value="{{ form_defaults.name or '' }}" required>
-
-        <label class="field-label">Email</label>
-        <input name="email" type="email" placeholder="Email" value="{{ form_defaults.email or '' }}" required>
-
-        <label class="field-label">Phone Number</label>
-        <div class="phone-row">
-          <div>
-            <label class="field-label" for="phone_country_code">Country</label>
-            <select id="phone_country_code" name="phone_country_code">
-              {% for phone_country in phone_countries %}
-                <option value="{{ phone_country.code }}" {% if (form_defaults.phone_country_code or 'US') == phone_country.code %}selected{% endif %}>{{ phone_country.label }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div>
-            <label class="field-label" for="phone_number">Number</label>
-            <input id="phone_number" name="phone_number" placeholder="7700900000 or 07700900000" value="{{ form_defaults.phone_number or '' }}" required>
-          </div>
-        </div>
-
-        <label class="field-label">Notification Email <span class="tooltip" tabindex="0" data-tooltip="Receives consultant-facing notifications such as session-complete and urgent escalation emails. Defaults to the consultant email if left blank.">?</span></label>
-        <input name="notification_email" type="email" placeholder="Notification email" value="{{ form_defaults.notification_email or '' }}">
-
-        <label class="field-label">Escalation Phone Number <span class="tooltip" tabindex="0" data-tooltip="Used for urgent escalation handling if the system needs to reach a human quickly. Defaults to the consultant phone number if left blank.">?</span></label>
-        <div class="phone-row">
-          <div>
-            <label class="field-label" for="escalation_phone_country_code">Country</label>
-            <select id="escalation_phone_country_code" name="escalation_phone_country_code">
-              {% for phone_country in phone_countries %}
-                <option value="{{ phone_country.code }}" {% if (form_defaults.escalation_phone_country_code or form_defaults.phone_country_code or 'US') == phone_country.code %}selected{% endif %}>{{ phone_country.label }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div>
-            <label class="field-label" for="escalation_phone_number">Number</label>
-            <input id="escalation_phone_number" name="escalation_phone_number" placeholder="Optional escalation number" value="{{ form_defaults.escalation_phone_number or '' }}">
-          </div>
-        </div>
-
-        <label class="field-label">Temporary Password <span class="tooltip" tabindex="0" data-tooltip="Initial password for the consultant. They can change it later from their account page.">?</span></label>
-        <input name="password" type="password" placeholder="Temporary password" value="{{ form_defaults.password or '' }}" required>
-        <button type="submit">Create Consultant</button>
+    <div class="history-toolbar">
+      <form method="get" class="history-search">
+        <input type="search" name="q" value="{{ search or '' }}" placeholder="Search name, vendor, email or phone">
       </form>
     </div>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Vendor</th>
+          <th>Contact</th>
+          <th>Clients</th>
+          <th>Sessions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for consultant in consultants %}
+          <tr>
+            <td><a href="{{ tenant_path('/admin/consultants/' ~ consultant.id) }}">{{ consultant.name }}</a></td>
+            <td>{{ vendors_by_id[consultant.vendor_id].name if vendors_by_id[consultant.vendor_id] is defined else '—' }}</td>
+            <td>{{ consultant.email }}<br><span class="muted">{{ consultant.phone_number }}</span></td>
+            <td>{{ consultant.client_count }}</td>
+            <td>{{ consultant.session_count }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="muted">No consultants yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
 {% endblock %}

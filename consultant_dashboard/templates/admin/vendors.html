@@ -1,67 +1,40 @@
 {% extends "shared/base.html" %}
 {% block body %}
   {% include "admin/_nav.html" %}
-  <div class="split">
-    <div class="card">
-      <div class="label">{{ brand }}</div>
-      <h1>Vendors</h1>
-      <p class="muted">Platform admins can create vendors and update storage and public-site paths here.</p>
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Slug</th>
-            <th>Storage Root</th>
-            <th>WWW Root</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for vendor in vendors %}
-            <tr>
-              <td>
-                <form method="post" style="display:grid; gap:8px;">
-                  <input type="hidden" name="action" value="update">
-                  <input type="hidden" name="vendor_id" value="{{ vendor.id }}">
-                  <input name="name" value="{{ vendor.name }}">
-                  <input name="primary_host" value="{{ vendor.primary_host }}" placeholder="Primary host">
-                  <button type="submit">Save</button>
-                </form>
-              </td>
-              <td>{{ vendor.slug }}</td>
-              <td class="muted">{{ vendor.storage_root }}</td>
-              <td>
-                <form method="post" style="display:grid; gap:8px;">
-                  <input type="hidden" name="action" value="update">
-                  <input type="hidden" name="vendor_id" value="{{ vendor.id }}">
-                  <input name="storage_root" value="{{ vendor.storage_root }}">
-                  <input name="www_root" value="{{ vendor.www_root }}">
-                  <button type="submit">Update Paths</button>
-                </form>
-              </td>
-            </tr>
-          {% else %}
-            <tr><td colspan="4" class="muted">No vendors yet.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
+  <div class="card">
+    <div class="panel-head">
+      <div>
+        <div class="label">{{ brand }}</div>
+        <h1>Vendors</h1>
+      </div>
+      <a href="{{ tenant_url_for('web.admin_vendor_new') }}" class="titlebar-link-button">Add Vendor</a>
     </div>
-    <div class="card">
-      <div class="label">New Vendor</div>
-      <h2>Create Vendor</h2>
-      <form method="post">
-        <input type="hidden" name="action" value="create">
-        <label class="field-label">Name</label>
-        <input name="name" value="{{ form_defaults.name or '' }}" required>
-        <label class="field-label">Slug</label>
-        <input name="slug" value="{{ form_defaults.slug or '' }}" required>
-        <label class="field-label">Storage Root</label>
-        <input name="storage_root" value="{{ form_defaults.storage_root or '' }}" required>
-        <label class="field-label">WWW Root</label>
-        <input name="www_root" value="{{ form_defaults.www_root or '' }}" required>
-        <label class="field-label">Primary Host</label>
-        <input name="primary_host" value="{{ form_defaults.primary_host or '' }}">
-        <button type="submit">Create Vendor</button>
+    <div class="history-toolbar">
+      <form method="get" class="history-search">
+        <input type="search" name="q" value="{{ search or '' }}" placeholder="Search vendor, domain or path">
       </form>
     </div>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Domain</th>
+          <th>Consultants</th>
+          <th>Clients</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for vendor in vendors %}
+          <tr>
+            <td><a href="{{ tenant_path('/admin/vendors/' ~ vendor.id) }}">{{ vendor.name }}</a></td>
+            <td>{{ vendor.primary_host or '—' }}</td>
+            <td>{{ vendor.consultant_count }}</td>
+            <td>{{ vendor.client_count }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4" class="muted">No vendors yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
 {% endblock %}

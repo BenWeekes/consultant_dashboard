@@ -1,0 +1,69 @@
+{% extends "shared/base.html" %}
+{% block body %}
+  {% include "admin/_nav.html" %}
+  <div class="card" style="max-width: 820px; margin: 0 auto;">
+    <div class="panel-head">
+      <div class="panel-title">
+        <div class="panel-kicker">Consultant</div>
+        <h1>Add Consultant</h1>
+      </div>
+    </div>
+    <form method="post">
+      <label class="field-label">Vendor</label>
+      <select name="vendor_id" required>
+        {% for vendor in vendors %}
+          <option value="{{ vendor.id }}" {% if form_defaults.vendor_id == vendor.id %}selected{% endif %}>{{ vendor.name }} ({{ vendor.slug }})</option>
+        {% endfor %}
+      </select>
+
+      <label class="field-label">Name</label>
+      <input name="name" placeholder="Name" value="{{ form_defaults.name or '' }}" required>
+
+      <label class="field-label">Email</label>
+      <input name="email" type="email" placeholder="Email" value="{{ form_defaults.email or '' }}" required>
+
+      <label class="field-label">Phone Number</label>
+      <div class="phone-row">
+        <div>
+          <label class="field-label" for="phone_country_code">Country</label>
+          <select id="phone_country_code" name="phone_country_code">
+            {% for phone_country in phone_countries %}
+              <option value="{{ phone_country.code }}" {% if (form_defaults.phone_country_code or 'US') == phone_country.code %}selected{% endif %}>{{ phone_country.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="field-label" for="phone_number">Number</label>
+          <input id="phone_number" name="phone_number" placeholder="7700900000 or 07700900000" value="{{ form_defaults.phone_number or '' }}" required>
+        </div>
+      </div>
+
+      <label class="field-label">Notification Email <span class="tooltip" tabindex="0" data-tooltip="Receives consultant-facing notifications such as session-complete and urgent escalation emails. Defaults to the consultant email if left blank.">?</span></label>
+      <input name="notification_email" type="email" placeholder="Notification email" value="{{ form_defaults.notification_email or '' }}">
+
+      <label class="field-label">Escalation Phone Number <span class="tooltip" tabindex="0" data-tooltip="Used for urgent escalation handling if the system needs to reach a human quickly. Defaults to the consultant phone number if left blank.">?</span></label>
+      <div class="phone-row">
+        <div>
+          <label class="field-label" for="escalation_phone_country_code">Country</label>
+          <select id="escalation_phone_country_code" name="escalation_phone_country_code">
+            {% for phone_country in phone_countries %}
+              <option value="{{ phone_country.code }}" {% if (form_defaults.escalation_phone_country_code or form_defaults.phone_country_code or 'US') == phone_country.code %}selected{% endif %}>{{ phone_country.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="field-label" for="escalation_phone_number">Number</label>
+          <input id="escalation_phone_number" name="escalation_phone_number" placeholder="Optional escalation number" value="{{ form_defaults.escalation_phone_number or '' }}">
+        </div>
+      </div>
+
+      <label class="field-label">Password <span class="tooltip" tabindex="0" data-tooltip="Initial password for the consultant. They can change it later from their account page.">?</span></label>
+      <input name="password" type="password" placeholder="Password" value="{{ form_defaults.password or '' }}" required>
+
+      <div class="actions">
+        <button type="submit">Create Consultant</button>
+        <a href="{{ tenant_url_for('web.admin_consultants') }}" class="button-secondary button-link">Cancel</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}

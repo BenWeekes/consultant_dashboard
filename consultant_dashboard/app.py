@@ -182,7 +182,8 @@ def main() -> int:
         client_id = create_client(
             db,
             consultant_id=args.consultant_id,
-            display_name=args.name,
+            first_name=(args.name or "").strip().split(" ", 1)[0] if (args.name or "").strip() else "",
+            last_name=(args.name or "").strip().split(" ", 1)[1] if " " in (args.name or "").strip() else "",
             email=args.email,
             password_hash=generate_password_hash(args.password, method=PASSWORD_HASH_METHOD) if args.password else "",
             phone_number=args.phone,

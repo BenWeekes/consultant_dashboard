@@ -1,0 +1,80 @@
+{% extends "shared/base.html" %}
+{% block body %}
+  {% include "admin/_nav.html" %}
+  <div class="card" style="max-width: 820px; margin: 0 auto;">
+    <div class="panel-head">
+      <div class="panel-title">
+        <div class="panel-kicker">Vendor</div>
+        <h1>Create Vendor</h1>
+      </div>
+    </div>
+    <p class="muted">Enter the domain first. Name, storage root, and www root are suggested from it and can still be edited.</p>
+    <form method="post" class="section-stack" data-vendor-form>
+      <label class="field-label" for="domain">Domain</label>
+      <input id="domain" name="domain" value="{{ form_defaults.domain or '' }}" placeholder="acmehealth.com" required data-vendor-domain>
+
+      <div class="field-grid-two">
+        <div class="field-group-inline">
+          <label class="field-label" for="slug">Slug</label>
+          <input id="slug" name="slug" value="{{ form_defaults.slug or '' }}" placeholder="acmehealth" required data-vendor-slug>
+        </div>
+        <div class="field-group-inline">
+          <label class="field-label" for="name">Name</label>
+          <input id="name" name="name" value="{{ form_defaults.name or '' }}" placeholder="Acmehealth" data-vendor-name>
+        </div>
+      </div>
+
+      <div class="field-grid-two">
+        <div class="field-group-inline">
+          <label class="field-label" for="storage_root">Storage Root</label>
+          <input id="storage_root" name="storage_root" value="{{ form_defaults.storage_root or '' }}" placeholder="/home/ubuntu/mindfix-runtime/vendors/acmehealth" required data-vendor-storage-root>
+        </div>
+        <div class="field-group-inline">
+          <label class="field-label" for="www_root">WWW Root</label>
+          <input id="www_root" name="www_root" value="{{ form_defaults.www_root or '' }}" placeholder="/home/ubuntu/mindfix/consultant_dashboard/www/acmehealth" required data-vendor-www-root>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button type="submit">Create Vendor</button>
+        <a href="{{ tenant_url_for('web.admin_vendors') }}" class="button-secondary button-link">Cancel</a>
+      </div>
+    </form>
+  </div>
+  <script>
+    (() => {
+      const domainInput = document.querySelector('[data-vendor-domain]');
+      const slugInput = document.querySelector('[data-vendor-slug]');
+      const nameInput = document.querySelector('[data-vendor-name]');
+      const storageRootInput = document.querySelector('[data-vendor-storage-root]');
+      const wwwRootInput = document.querySelector('[data-vendor-www-root]');
+      const slugFromDomain = (value) => {
+        let host = (value || '').trim().toLowerCase();
+        host = host.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+        const labels = host.split('.').filter(Boolean);
+        let base = labels.length >= 2 ? labels[labels.length - 2] : (labels[0] || '');
+        return base.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      };
+      const displayName = (slug) => slug.split('-').filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+      const sync = () => {
+        const slug = slugFromDomain(domainInput?.value || '');
+        if (!slug) {
+          return;
+        }
+        if (slugInput && !slugInput.value.trim()) {
+          slugInput.value = slug;
+        }
+        if (nameInput && !nameInput.value.trim()) {
+          nameInput.value = displayName(slug);
+        }
+        if (storageRootInput && !storageRootInput.value.trim()) {
+          storageRootInput.value = `/home/ubuntu/mindfix-runtime/vendors/${slug}`;
+        }
+        if (wwwRootInput && !wwwRootInput.value.trim()) {
+          wwwRootInput.value = `/home/ubuntu/mindfix/consultant_dashboard/www/${slug}`;
+        }
+      };
+      domainInput?.addEventListener('input', sync);
+    })();
+  </script>
+{% endblock %}

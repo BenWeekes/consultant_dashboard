@@ -2,6 +2,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import sqlite3
 import time
 import urllib.parse
@@ -17,6 +18,7 @@ from .auth import require_admin, require_consultant
 from .db import (
     cancel_scheduled_meeting,
     complete_scheduled_meeting,
+    compose_client_display_name,
     create_client_access_link,
     create_client_message,
     create_client,
@@ -59,6 +61,7 @@ from .db import (
     update_meeting_response_status,
     mark_meeting_participant_left,
     mark_meeting_reminder_sent,
+    is_gmail_address,
     update_client,
     update_client_context,
     update_client_password,
@@ -102,6 +105,52 @@ CLIENT_AUTH_COOKIE_NAME = "mindfix_client_auth"
 
 def _brand_name() -> str:
     return current_branding().get("name") or current_app.config["BRAND_NAME"]
+
+
+def _normalize_vendor_domain(domain: str) -> str:
+    value = (domain or "").strip().lower()
+    if not value:
+        return ""
+    if "://" not in value:
+        value = f"https://{value}"
+    parsed = urllib.parse.urlparse(value)
+    host = (parsed.netloc or parsed.path or "").strip().lower()
+    host = host.split("/", 1)[0].strip(".")
+    if host.startswith("www."):
+        host = host[4:]
+    return host
+
+
+def _slug_from_vendor_domain(domain: str) -> str:
+    host = _normalize_vendor_domain(domain)
+    if not host:
+        return ""
+    base = host.split(":")[0]
+    if base in {"localhost", "127.0.0.1"}:
+        return "local"
+    labels = [label for label in base.split(".") if label]
+    if len(labels) >= 2:
+        base = labels[-2]
+    elif labels:
+        base = labels[0]
+    return re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-")
+
+
+def _display_name_from_slug(slug: str) -> str:
+    return " ".join(part.capitalize() for part in (slug or "").split("-") if part)
+
+
+def _vendor_suggestions(domain: str) -> dict:
+    host = _normalize_vendor_domain(domain)
+    slug = _slug_from_vendor_domain(host)
+    return {
+        "domain": host,
+        "slug": slug,
+        "name": _display_name_from_slug(slug),
+        "storage_root": f"/home/ubuntu/mindfix-runtime/vendors/{slug}" if slug else "",
+        "www_root": f"/home/ubuntu/mindfix/consultant_dashboard/www/{slug}" if slug else "",
+        "primary_host": f"https://{host}" if host else "",
+    }
 
 
 def _decode_client_auth_token(token: str) -> Optional[dict]:
@@ -1378,6 +1427,12 @@ def _render_consultant_client_new_form(*, form_defaults=None):
     )
 
 
+def _client_name_fields_from_form(req) -> tuple[str, str, str]:
+    first_name = req.form.get("first_name", "").strip()
+    last_name = req.form.get("last_name", "").strip()
+    return first_name, last_name, compose_client_display_name(first_name, last_name)
+
+
 @web_bp.route("/consultant/clients/new", methods=["GET", "POST"])
 @require_consultant
 def consultant_client_new():
@@ -1388,20 +1443,22 @@ def consultant_client_new():
         "escalation_phone_country_code": "US",
     }
     if request.method == "POST":
-        display_name = request.form.get("display_name", "").strip()
-        if not display_name:
-            flash("Client name is required", "error")
+        first_name, last_name, display_name = _client_name_fields_from_form(request)
+        if not first_name:
+            flash("First name is required", "error")
         else:
             email = request.form.get("email", "").strip()
+            gmail_email = is_gmail_address(email)
             phone_country_code = request.form.get("phone_country_code", "US").strip().upper()
             escalation_phone_country_code = request.form.get("escalation_phone_country_code", phone_country_code).strip().upper()
             raw_phone_number = request.form.get("phone_number", "").strip()
             raw_escalation_phone = request.form.get("escalation_phone_number", "").strip()
-            initial_password = request.form.get("initial_password", "").strip()
+            initial_password = "" if gmail_email else request.form.get("password", "").strip()
             form_defaults = {
-                "display_name": display_name,
+                "first_name": first_name,
+                "last_name": last_name,
                 "email": email,
-                "initial_password": initial_password,
+                "password": initial_password,
                 "phone_number": raw_phone_number,
                 "phone_country_code": phone_country_code,
                 "notification_email": request.form.get("notification_email", "").strip(),
@@ -1415,7 +1472,7 @@ def consultant_client_new():
                 db.close()
                 return _render_consultant_client_new_form(form_defaults=form_defaults)
             if initial_password and len(initial_password) < 8:
-                flash("Initial password must be at least 8 characters.", "error")
+                flash("Password must be at least 8 characters.", "error")
                 db.close()
                 return _render_consultant_client_new_form(form_defaults=form_defaults)
             try:
@@ -1435,7 +1492,8 @@ def consultant_client_new():
             client_id = create_client(
                 db,
                 consultant_id=consultant_id,
-                display_name=display_name,
+                first_name=first_name,
+                last_name=last_name,
                 email=email,
                 password_hash=generate_password_hash(initial_password, method="pbkdf2:sha256") if initial_password else "",
                 phone_number=phone_number,
@@ -1522,8 +1580,9 @@ def consultant_client_detail(client_id: str):
             flash("Notes and direction updated", "muted")
             client = get_client_detail(db, client_id, consultant_id=consultant_id)
         else:
-            display_name = request.form.get("display_name", "").strip()
+            first_name, last_name, display_name = _client_name_fields_from_form(request)
             email = request.form.get("email", "").strip()
+            gmail_email = is_gmail_address(email)
             phone_country_code = request.form.get("phone_country_code", "US").strip().upper()
             escalation_phone_country_code = request.form.get("escalation_phone_country_code", phone_country_code).strip().upper()
             raw_phone_number = request.form.get("phone_number", "").strip()
@@ -1531,10 +1590,10 @@ def consultant_client_detail(client_id: str):
             notification_email = request.form.get("notification_email", "").strip() or email
             notes = request.form.get("notes", "").strip()
             direction = request.form.get("direction", "").strip()
-            reset_password = request.form.get("reset_password", "").strip()
+            reset_password = "" if gmail_email else request.form.get("password", "").strip()
 
-            if not display_name:
-                flash("Client name is required", "error")
+            if not first_name:
+                flash("First name is required", "error")
             else:
                 try:
                     if reset_password and (not email or not raw_phone_number):
@@ -1548,7 +1607,8 @@ def consultant_client_detail(client_id: str):
                     update_client(
                         db,
                         client_id=client_id,
-                        display_name=display_name,
+                        first_name=first_name,
+                        last_name=last_name,
                         email=email,
                         phone_number=phone_number,
                         notification_email=notification_email,
@@ -1556,9 +1616,15 @@ def consultant_client_detail(client_id: str):
                         notes=notes,
                         direction=direction,
                     )
+                    if gmail_email:
+                        update_client_password(
+                            db,
+                            client_id=client_id,
+                            password_hash="",
+                        )
                     if reset_password:
                         if len(reset_password) < 8:
-                            raise ValueError("Temporary password must be at least 8 characters.")
+                            raise ValueError("Password must be at least 8 characters.")
                         update_client_password(
                             db,
                             client_id=client_id,
@@ -1596,7 +1662,7 @@ def consultant_client_detail(client_id: str):
                     db.commit()
                     flash("Client updated", "muted")
                     if reset_password:
-                        flash("Temporary client password updated", "muted")
+                        flash("Client password updated", "muted")
                 except ValueError as exc:
                     db.rollback()
                     flash(str(exc), "error")
@@ -2591,6 +2657,18 @@ def admin_dashboard():
         "sessions": db.execute("SELECT COUNT(*) AS c FROM sessions").fetchone()["c"],
     }
     vendors = list_vendors(db)
+    decorated_vendors = []
+    for vendor in vendors:
+        row = dict(vendor)
+        row["consultant_count"] = db.execute(
+            "SELECT COUNT(*) AS c FROM consultants WHERE vendor_id = ? AND is_active = 1",
+            (vendor["id"],),
+        ).fetchone()["c"]
+        row["client_count"] = db.execute(
+            "SELECT COUNT(*) AS c FROM clients WHERE vendor_id = ? AND is_active = 1",
+            (vendor["id"],),
+        ).fetchone()["c"]
+        decorated_vendors.append(row)
     consultants = list_consultants(db)[:5]
     db.close()
     return render_template(
@@ -2598,79 +2676,171 @@ def admin_dashboard():
         brand=_brand_name(),
         stats=stats,
         admin_email=session.get("admin_email"),
-        vendors=vendors,
+        vendors=decorated_vendors,
         consultants=consultants,
     )
 
 
-@web_bp.route("/admin/vendors", methods=["GET", "POST"])
+@web_bp.get("/admin/vendors")
 @require_admin
 def admin_vendors():
     db = get_db(current_app.config)
-    form_defaults = {}
-    if request.method == "POST":
-        action = request.form.get("action", "create").strip()
-        if action == "create":
-            slug = request.form.get("slug", "").strip().lower()
-            name = request.form.get("name", "").strip()
-            storage_root = request.form.get("storage_root", "").strip()
-            www_root = request.form.get("www_root", "").strip()
-            primary_host = request.form.get("primary_host", "").strip()
-            if not slug or not name or not storage_root or not www_root:
-                flash("Slug, name, storage root, and www root are required", "error")
-            else:
-                try:
-                    create_vendor(
-                        db,
-                        slug=slug,
-                        name=name,
-                        storage_root=storage_root,
-                        www_root=www_root,
-                        primary_host=primary_host,
-                    )
-                    db.commit()
-                    flash("Vendor created", "muted")
-                    return redirect(tenant_url_for("web.admin_vendors"))
-                except sqlite3.IntegrityError:
-                    db.rollback()
-                    flash("A vendor with that slug already exists", "error")
-            form_defaults = {
-                "slug": slug,
-                "name": name,
-                "storage_root": storage_root,
-                "www_root": www_root,
-                "primary_host": primary_host,
-            }
-        elif action == "update":
-            vendor_id = request.form.get("vendor_id", "").strip()
-            vendor = get_vendor_by_id(db, vendor_id)
-            if not vendor:
-                flash("Vendor not found", "error")
-            else:
-                update_vendor(
-                    db,
-                    vendor_id=vendor_id,
-                    name=request.form.get("name", "").strip() or vendor["name"],
-                    storage_root=request.form.get("storage_root", "").strip() or vendor["storage_root"],
-                    www_root=request.form.get("www_root", "").strip() or vendor["www_root"],
-                    primary_host=request.form.get("primary_host", "").strip(),
-                )
-                db.commit()
-                flash("Vendor updated", "muted")
-                return redirect(tenant_url_for("web.admin_vendors"))
-    vendors = list_vendors(db)
+    vendors = []
+    for vendor in list_vendors(db):
+        row = dict(vendor)
+        row["consultant_count"] = db.execute(
+            "SELECT COUNT(*) AS c FROM consultants WHERE vendor_id = ? AND is_active = 1",
+            (vendor["id"],),
+        ).fetchone()["c"]
+        row["client_count"] = db.execute(
+            "SELECT COUNT(*) AS c FROM clients WHERE vendor_id = ? AND is_active = 1",
+            (vendor["id"],),
+        ).fetchone()["c"]
+        vendors.append(row)
+    search = (request.args.get("q") or "").strip().lower()
+    if search:
+        filtered = []
+        for vendor in vendors:
+            haystack = " ".join(
+                str(vendor.get(key) or "")
+                for key in ("name", "slug", "primary_host", "storage_root", "www_root")
+            ).lower()
+            if search in haystack:
+                filtered.append(vendor)
+        vendors = filtered
     db.close()
     return render_template(
         "admin/vendors.html",
         brand=_brand_name(),
         vendors=vendors,
+        search=search,
+    )
+
+
+@web_bp.route("/admin/vendors/new", methods=["GET", "POST"])
+@require_admin
+def admin_vendor_new():
+    form_defaults = {}
+    if request.method == "POST":
+        domain = request.form.get("domain", "").strip()
+        suggestions = _vendor_suggestions(domain)
+        slug = (request.form.get("slug", "").strip().lower() or suggestions["slug"])
+        name = request.form.get("name", "").strip() or suggestions["name"]
+        storage_root = request.form.get("storage_root", "").strip() or suggestions["storage_root"]
+        www_root = request.form.get("www_root", "").strip() or suggestions["www_root"]
+        primary_host = suggestions["primary_host"]
+        form_defaults = {
+            "domain": suggestions["domain"] or domain,
+            "slug": slug,
+            "name": request.form.get("name", "").strip() or suggestions["name"],
+            "storage_root": request.form.get("storage_root", "").strip() or suggestions["storage_root"],
+            "www_root": request.form.get("www_root", "").strip() or suggestions["www_root"],
+        }
+        if not suggestions["domain"] or not slug or not name or not storage_root or not www_root:
+            flash("Domain, slug, name, storage root, and www root are required", "error")
+        else:
+            db = get_db(current_app.config)
+            try:
+                create_vendor(
+                    db,
+                    slug=slug,
+                    name=name,
+                    storage_root=storage_root,
+                    www_root=www_root,
+                    primary_host=primary_host,
+                )
+                db.commit()
+                flash("Vendor created", "muted")
+                return redirect(tenant_url_for("web.admin_vendors"))
+            except sqlite3.IntegrityError:
+                db.rollback()
+                flash("A vendor for that domain already exists", "error")
+            finally:
+                db.close()
+    return render_template(
+        "admin/vendor_new.html",
+        brand=_brand_name(),
         form_defaults=form_defaults,
     )
 
 
-@web_bp.route("/admin/consultants", methods=["GET", "POST"])
+@web_bp.route("/admin/vendors/<vendor_id>", methods=["GET", "POST"])
+@require_admin
+def admin_vendor_detail(vendor_id: str):
+    db = get_db(current_app.config)
+    vendor = get_vendor_by_id(db, vendor_id)
+    if not vendor:
+        db.close()
+        abort(404)
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        storage_root = request.form.get("storage_root", "").strip()
+        www_root = request.form.get("www_root", "").strip()
+        domain = request.form.get("domain", "").strip()
+        slug = (request.form.get("slug", "").strip().lower() or vendor["slug"])
+        suggestions = _vendor_suggestions(domain)
+        primary_host = suggestions["primary_host"]
+        if not name or not storage_root or not www_root or not suggestions["domain"] or not slug:
+            flash("Domain, slug, name, storage root, and www root are required", "error")
+        else:
+            try:
+                db.execute(
+                    "UPDATE vendors SET slug = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (slug, vendor_id),
+                )
+                update_vendor(
+                    db,
+                    vendor_id=vendor_id,
+                    name=name,
+                    storage_root=storage_root,
+                    www_root=www_root,
+                    primary_host=primary_host,
+                )
+                db.commit()
+                flash("Vendor updated", "muted")
+                vendor = get_vendor_by_id(db, vendor_id)
+            except sqlite3.IntegrityError:
+                db.rollback()
+                flash("A vendor with that slug already exists", "error")
+    db.close()
+    return render_template(
+        "admin/vendor_detail.html",
+        brand=_brand_name(),
+        vendor=vendor,
+        domain=_normalize_vendor_domain(vendor["primary_host"]),
+    )
+
+
+@web_bp.get("/admin/consultants")
 @require_admin
 def admin_consultants():
+    db = get_db(current_app.config)
+    vendors = list_vendors(db)
+    consultants = list_consultants(db)
+    search = (request.args.get("q") or "").strip().lower()
+    if search:
+        vendors_by_id = {vendor["id"]: vendor for vendor in vendors}
+        filtered = []
+        for consultant in consultants:
+            vendor_name = (vendors_by_id.get(consultant["vendor_id"], {}) or {}).get("name", "")
+            haystack = f"{consultant['name']} {consultant['email']} {consultant['phone_number']} {vendor_name}".lower()
+            if search in haystack:
+                filtered.append(consultant)
+        consultants = filtered
+    db.close()
+    return render_template(
+        "admin/consultants.html",
+        brand=_brand_name(),
+        consultants=consultants,
+        vendors=vendors,
+        vendors_by_id={vendor["id"]: vendor for vendor in vendors},
+        search=search,
+    )
+
+
+@web_bp.route("/admin/consultants/new", methods=["GET", "POST"])
+@require_admin
+def admin_consultant_new():
     db = get_db(current_app.config)
     vendors = list_vendors(db)
     default_vendor = vendors[0]["id"] if vendors else ""
@@ -2688,6 +2858,17 @@ def admin_consultants():
         raw_phone_number = request.form.get("phone_number", "").strip()
         raw_escalation_phone = request.form.get("escalation_phone_number", "").strip()
         password = request.form.get("password", "").strip()
+        form_defaults = {
+            "vendor_id": vendor_id,
+            "name": name,
+            "email": email,
+            "phone_number": raw_phone_number,
+            "phone_country_code": phone_country_code,
+            "notification_email": request.form.get("notification_email", "").strip(),
+            "escalation_phone_number": raw_escalation_phone,
+            "escalation_phone_country_code": escalation_phone_country_code,
+            "password": password,
+        }
         if not email or not name or not raw_phone_number or not password:
             flash("Email, name, phone number, and password are required", "error")
         else:
@@ -2698,30 +2879,6 @@ def admin_consultants():
                     if raw_escalation_phone
                     else phone_number
                 )
-            except ValueError as exc:
-                flash(str(exc), "error")
-                consultants = list_consultants(db)
-                form_defaults = {
-                    "vendor_id": vendor_id,
-                    "name": name,
-                    "email": email,
-                    "phone_number": raw_phone_number,
-                    "phone_country_code": phone_country_code,
-                    "notification_email": request.form.get("notification_email", "").strip(),
-                    "escalation_phone_number": raw_escalation_phone,
-                    "escalation_phone_country_code": escalation_phone_country_code,
-                    "password": password,
-                }
-                db.close()
-                return render_template(
-                    "admin/consultants.html",
-                    brand=_brand_name(),
-                    consultants=consultants,
-                    phone_countries=country_options(),
-                    form_defaults=form_defaults,
-                )
-
-            try:
                 create_consultant(
                     db,
                     vendor_id=vendor_id,
@@ -2744,16 +2901,18 @@ def admin_consultants():
                 )
                 db.commit()
                 flash("Consultant created", "muted")
+                db.close()
                 return redirect(tenant_url_for("web.admin_consultants"))
+            except ValueError as exc:
+                db.rollback()
+                flash(str(exc), "error")
             except sqlite3.IntegrityError:
                 db.rollback()
                 flash("A consultant with that email already exists", "error")
-    consultants = list_consultants(db)
     db.close()
     return render_template(
-        "admin/consultants.html",
+        "admin/consultant_new.html",
         brand=_brand_name(),
-        consultants=consultants,
         vendors=vendors,
         phone_countries=country_options(),
         form_defaults=form_defaults,

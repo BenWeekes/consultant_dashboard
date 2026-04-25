@@ -18,16 +18,16 @@
     <div class="row" style="justify-content: space-between;">
       <div>
         <div class="label">Active Vendors</div>
-        <h2>Tenants</h2>
+        <h2>Vendors</h2>
       </div>
-      <a href="{{ tenant_url_for('web.admin_vendors') }}" class="button-secondary button-link">Manage Vendors</a>
+      <a href="{{ tenant_url_for('web.admin_vendors') }}" class="button-secondary button-link">View Vendors</a>
     </div>
     <div class="list">
       {% for vendor in vendors %}
         <div class="item">
-          <strong>{{ vendor.name }}</strong>
-          <div class="muted">{{ vendor.slug }}</div>
-          <div class="muted">{{ vendor.storage_root }}</div>
+          <strong><a href="{{ tenant_path('/admin/vendors/' ~ vendor.id) }}">{{ vendor.name }}</a></strong>
+          <div class="muted">{{ vendor.primary_host or vendor.slug }}</div>
+          <div class="muted">{{ vendor.consultant_count }} consultants | {{ vendor.client_count }} clients</div>
         </div>
       {% else %}
         <div class="muted">No vendors yet.</div>
@@ -40,19 +40,18 @@
         <div class="label">Recent Consultants</div>
         <h2>Team</h2>
       </div>
-      <a href="{{ tenant_url_for('web.admin_consultants') }}" class="button-secondary button-link">Manage Consultants</a>
+      <a href="{{ tenant_url_for('web.admin_consultants') }}" class="button-secondary button-link">View Consultants</a>
     </div>
     <div class="list">
       {% for consultant in consultants %}
         <div class="item">
-          <strong>{{ consultant.name }}</strong>
+          <strong><a href="{{ tenant_path('/admin/consultants/' ~ consultant.id) }}">{{ consultant.name }}</a></strong>
           <div class="muted">{{ consultant.email }} · {{ consultant.phone_number }}</div>
-          <div class="muted">{{ consultant.client_count }} clients · {{ consultant.session_count }} sessions</div>
+          <div class="muted">{{ consultant.client_count }} clients | {{ consultant.session_count }} sessions</div>
         </div>
       {% else %}
         <div class="muted">No consultants yet.</div>
       {% endfor %}
     </div>
-    <form method="post" action="{{ tenant_url_for('auth.admin_logout') }}"><button type="submit">Logout</button></form>
   </div>
 {% endblock %}

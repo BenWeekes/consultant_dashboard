@@ -32,6 +32,8 @@ ON consultants(vendor_id, email);
 CREATE TABLE IF NOT EXISTS clients (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
     vendor_id TEXT NOT NULL,
+    first_name TEXT NOT NULL,
+    last_name TEXT NOT NULL DEFAULT '',
     display_name TEXT NOT NULL,
     email TEXT,
     password_hash TEXT,

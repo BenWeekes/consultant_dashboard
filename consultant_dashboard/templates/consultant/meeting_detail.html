@@ -60,14 +60,6 @@
         {% if can_end %}
           <div class="muted">Use the in-meeting end action to finish a live meeting for both sides.</div>
         {% endif %}
-        {% if meeting.linked_session_id %}
-          <div class="summary-card">
-            <h3>Linked session</h3>
-            <div class="actions" style="margin-top: 10px;">
-              <a href="{{ tenant_path('/consultant/sessions/' ~ meeting.linked_session_id) }}" class="button-secondary button-link">Open Session</a>
-            </div>
-          </div>
-        {% endif %}
         {% if linked_summary %}
           <div class="summary-card">
             <h3>Summary</h3>

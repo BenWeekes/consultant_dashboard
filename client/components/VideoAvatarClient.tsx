@@ -21,12 +21,12 @@ import { Response } from "@agora/agent-ui-kit";
 import { AvatarVideoDisplay, LocalVideoPreview } from "@agora/agent-ui-kit";
 import { VideoGrid, MobileTabs } from "@agora/agent-ui-kit";
 import { SettingsDialog, SessionPanel } from "@agora/agent-ui-kit";
-import { ShenPanel } from "@agora/agent-ui-kit";
-import { ThymiaPanel, useThymia } from "@agora/agent-ui-kit/thymia";
+import { useThymia } from "@agora/agent-ui-kit/thymia";
 import { useShenai } from "@/hooks/useShenai";
 import AgoraRTC from "agora-rtc-sdk-ng";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./ThemeToggle";
+import { CombinedBiomarkersPanel } from "./biomarkers/CombinedBiomarkersPanel";
 
 function getBackendOverride(params: URLSearchParams): string | null {
   return params.get("backend") || params.get("backend_url");
@@ -586,15 +586,13 @@ export function VideoAvatarClient() {
     safety: thymiaSafety,
   } = useThymia(
     rtmSource,
-    THYMIA_ENABLED &&
-      isConnected &&
-      (!meetingMode || meetingAudioBiomarkersEnabled),
+    THYMIA_ENABLED && isConnected && meetingAudioBiomarkersEnabled,
   );
 
   // Shen.AI camera vitals (opt-in via NEXT_PUBLIC_ENABLE_SHEN)
   // RTM publish function for Shen to push vitals to server
   const shenRtmPublish = useMemo(() => {
-    if (!SHEN_ENABLED || (meetingMode && !meetingVideoBiomarkersEnabled)) return null;
+    if (!SHEN_ENABLED || !meetingVideoBiomarkersEnabled) return null;
     const rtm = rtmClientRef.current;
     if (!rtm) return null;
     return async (message: string): Promise<boolean> => {
@@ -612,9 +610,7 @@ export function VideoAvatarClient() {
   }, [rtmClientRef.current]);
 
   const shenState = useShenai(
-    SHEN_ENABLED &&
-      isConnected &&
-      (!meetingMode || meetingVideoBiomarkersEnabled),
+    SHEN_ENABLED && isConnected && meetingVideoBiomarkersEnabled,
     SHEN_API_KEY,
     shenRtmPublish,
     "shen-canvas",
@@ -625,7 +621,7 @@ export function VideoAvatarClient() {
     if (
       !SHEN_ENABLED ||
       !isConnected ||
-      (meetingMode && !meetingVideoBiomarkersEnabled)
+      !meetingVideoBiomarkersEnabled
     ) return;
 
     // Create the canvas once
@@ -758,6 +754,9 @@ export function VideoAvatarClient() {
       }
 
       const data = await tokenResponse.json();
+      setMeetingTranscriptionEnabled(Boolean(data.transcription_enabled));
+      setMeetingAudioBiomarkersEnabled(Boolean(data.audio_biomarkers_enabled ?? true));
+      setMeetingVideoBiomarkersEnabled(Boolean(data.video_biomarkers_enabled ?? true));
 
       // Phase 2: Join channel first so RTM is ready for greeting
       channelRef.current = data.channel;
@@ -995,9 +994,11 @@ export function VideoAvatarClient() {
   };
 
   const showThymiaPanel =
-    THYMIA_ENABLED && (!meetingMode || meetingAudioBiomarkersEnabled);
+    THYMIA_ENABLED && meetingAudioBiomarkersEnabled;
   const showShenPanel =
-    SHEN_ENABLED && (!meetingMode || meetingVideoBiomarkersEnabled);
+    SHEN_ENABLED && meetingVideoBiomarkersEnabled;
+  const showBiomarkersPanel =
+    meetingAudioBiomarkersEnabled || meetingVideoBiomarkersEnabled;
 
   // Don't render UI until auth check completes
   if (!authChecked) {
@@ -1407,8 +1408,8 @@ export function VideoAvatarClient() {
               }
               avatar={
                 <div className="flex flex-col h-full">
-                  {/* Avatar Video + optional Thymia/Shen tabs */}
-                  {showThymiaPanel || showShenPanel ? (
+                  {/* Avatar Video + combined biomarkers tab */}
+                  {showBiomarkersPanel ? (
                     <MobileTabs
                       tabs={[
                         {
@@ -1429,38 +1430,23 @@ export function VideoAvatarClient() {
                             </div>
                           ),
                         },
-                        ...(showThymiaPanel
-                          ? [
-                              {
-                                id: "thymia",
-                                label: "Voice Biomarkers",
-                                content: (
-                                  <ThymiaPanel
-                                    biomarkers={biomarkers}
-                                    wellness={wellness}
-                                    clinical={clinical}
-                                    progress={thymiaProgress}
-                                    safety={thymiaSafety}
-                                    isConnected={isConnected}
-                                  />
-                                ),
-                              },
-                            ]
-                          : []),
-                        ...(showShenPanel
-                          ? [
-                              {
-                                id: "shen",
-                                label: "Video Biomarkers",
-                                content: (
-                                  <ShenPanel
-                                    shenState={shenState}
-                                    isConnected={isConnected}
-                                  />
-                                ),
-                              },
-                            ]
-                          : []),
+                        {
+                          id: "biomarkers",
+                          label: "Biomarkers",
+                          content: (
+                            <CombinedBiomarkersPanel
+                              biomarkers={biomarkers}
+                              wellness={wellness}
+                              clinical={clinical}
+                              progress={thymiaProgress}
+                              safety={thymiaSafety}
+                              shenState={shenState}
+                              isConnected={isConnected}
+                              voiceEnabled={meetingAudioBiomarkersEnabled}
+                              videoEnabled={meetingVideoBiomarkersEnabled}
+                            />
+                          ),
+                        },
                       ]}
                     />
                   ) : (
@@ -1700,34 +1686,22 @@ export function VideoAvatarClient() {
                       </div>
                     ),
                   },
-                  ...(showThymiaPanel
+                  ...(showBiomarkersPanel
                     ? [
                         {
-                          id: "thymia",
-                          label: "Voice Biomarkers",
+                          id: "biomarkers",
+                          label: "Biomarkers",
                           content: (
-                            <ThymiaPanel
+                            <CombinedBiomarkersPanel
                               biomarkers={biomarkers}
                               wellness={wellness}
                               clinical={clinical}
                               progress={thymiaProgress}
                               safety={thymiaSafety}
-                              isConnected={isConnected}
-                            />
-                          ),
-                        },
-                      ]
-                    : []),
-                  ...(showShenPanel
-                    ? [
-                        {
-                          id: "shen",
-                          label: "Video Biomarkers",
-                          content: (
-                            <ShenPanel
                               shenState={shenState}
-                              canvasId="shen-canvas"
                               isConnected={isConnected}
+                              voiceEnabled={meetingAudioBiomarkersEnabled}
+                              videoEnabled={meetingVideoBiomarkersEnabled}
                             />
                           ),
                         },
@@ -1806,3 +1780,5 @@ export function VideoAvatarClient() {
     </div>
   );
 }
+
+export default VideoAvatarClient;

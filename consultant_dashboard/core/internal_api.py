@@ -15,6 +15,7 @@ from .db import (
     get_client_context,
     get_meeting_by_response_access_link_id,
     get_db,
+    get_meeting_signal_flags,
     get_scheduled_meeting,
     get_vendor_by_slug,
     log_audit,
@@ -97,6 +98,8 @@ def resolve_client():
         "vendor_slug": request.args.get("vendor_slug", "").strip().lower(),
         "is_active": bool(row["is_active"]),
         "email": row["email"] or "",
+        "first_name": row["first_name"] or "",
+        "last_name": row["last_name"] or "",
         "display_name": row["display_name"] or "",
         "phone_number": row["phone_number"] or "",
     }
@@ -139,6 +142,28 @@ def client_context():
     }
 
 
+@internal_bp.get("/meeting-signals")
+def meeting_signals():
+    meeting_id = request.args.get("meeting_id", "").strip()
+    if not meeting_id:
+        return jsonify({"error": "meeting_id required"}), 400
+    db = get_db(current_app.config)
+    meeting = get_scheduled_meeting(db, meeting_id)
+    if not meeting:
+        db.close()
+        return jsonify({"error": "meeting not found"}), 404
+    signal_flags = get_meeting_signal_flags(db, meeting_id)
+    db.close()
+    return {
+        "ok": True,
+        "meeting_id": meeting_id,
+        "meeting_type": meeting["meeting_type"] or "",
+        "transcription_enabled": bool(signal_flags["transcription_enabled"]),
+        "audio_biomarkers_enabled": bool(signal_flags["audio_biomarkers_enabled"]),
+        "video_biomarkers_enabled": bool(signal_flags["video_biomarkers_enabled"]),
+    }
+
+
 @internal_bp.post("/verify-client-password")
 def verify_client_password():
     payload = request.get_json(force=True)
@@ -163,6 +188,8 @@ def verify_client_password():
         "client_id": client["id"],
         "consultant_id": client["consultant_id"],
         "vendor_slug": (payload.get("vendor_slug") or "").strip().lower(),
+        "first_name": client["first_name"] or "",
+        "last_name": client["last_name"] or "",
         "display_name": client["display_name"],
         "email": client["email"],
         "phone_number": client["phone_number"],

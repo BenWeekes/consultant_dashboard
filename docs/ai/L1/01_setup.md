@@ -218,6 +218,99 @@ Live smoke coverage includes:
 - `simple-backend` auth-check contract
 - `consultant-dashboard` health
 - `server-custom-llm` ping
+
+## Browser E2E Checks
+
+The React client now has Playwright-based browser checks in:
+
+- `client/tests/e2e/app-smoke.spec.ts`
+- `client/tests/e2e/ai-biomarkers.spec.ts`
+
+These are useful when a normal browser refresh is not enough to prove:
+
+- the app is serving current JS chunks
+- `/app` does not crash during hydration
+- an authenticated session can actually render the `Biomarkers` tab
+- the layout looks sane on desktop and mobile screenshots
+
+Install once on the server or dev machine:
+
+```bash
+cd client
+npm install
+npx playwright install chromium
+sudo npx playwright install-deps chromium
+```
+
+Run the unauthenticated smoke checks:
+
+```bash
+cd client
+npm run test:e2e
+```
+
+Current smoke coverage:
+
+- public home loads without broken JS/CSS
+- `/app` loads without stale chunk failures or page-level runtime errors before auth
+
+Run the authenticated biomarker checks:
+
+```bash
+cd client
+PLAYWRIGHT_CLIENT_AUTH_COOKIE='<mindfix_client_auth cookie>' \
+npx playwright test tests/e2e/ai-biomarkers.spec.ts
+```
+
+Authenticated biomarker coverage:
+
+- opens a real authenticated AI session
+- clicks the `Biomarkers` tab
+- verifies the tab content renders
+- saves screenshots for desktop and mobile layouts
+- lets you visually review the actual in-session layout instead of guessing from code alone
+
+Screenshot output:
+
+- `client/test-results/ai-biomarkers.png`
+- `client/test-results/ai-biomarkers-mobile.png`
+
+These screenshots are debugging artifacts, not product assets. Do not commit `client/test-results/`.
+
+### Getting An Auth Cookie
+
+Simplest path:
+
+1. log in through the real client auth flow in a browser
+2. copy the `mindfix_client_auth` cookie value
+3. export it as `PLAYWRIGHT_CLIENT_AUTH_COOKIE`
+
+For server-side debugging against the live stack, a valid cookie can also be minted from the backend JWT secret if you already know the target `client_id`. Example shape:
+
+```python
+import hashlib, time, jwt
+
+client_id = "..."
+user_id = hashlib.sha256(f"client|{client_id}".encode()).hexdigest()
+now = int(time.time())
+token = jwt.encode(
+    {
+        "user_id": user_id,
+        "client_id": client_id,
+        "email": "client@example.com",
+        "name": "Client Name",
+        "first_name": "Client",
+        "vendor_slug": "mindfix",
+        "iat": now,
+        "exp": now + 3600,
+    },
+    AUTH_JWT_SECRET,
+    algorithm="HS256",
+)
+print(token)
+```
+
+Use this only for controlled debugging on trusted infrastructure.
 - configurable `LIVE_TUNNEL_PING_URL` (defaults to `${LIVE_CUSTOM_LLM_URL}/ping`)
 
 ## Local Restart Discipline

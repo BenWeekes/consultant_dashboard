@@ -74,7 +74,8 @@ class ConsultantDashboardTestCase(unittest.TestCase):
         self.client_id = create_client(
             db,
             consultant_id=self.consultant_id,
-            display_name="Alex Demo",
+            first_name="Alex",
+            last_name="Demo",
             email="alex@example.com",
             password_hash=generate_password_hash("clientpass123", method=PASSWORD_HASH_METHOD),
             phone_number="+447700900111",

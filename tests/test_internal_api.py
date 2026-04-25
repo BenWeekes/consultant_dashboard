@@ -65,6 +65,8 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
         self.assertEqual(response.json["client_id"], self.client_id)
         self.assertEqual(response.json["consultant_id"], self.consultant_id)
         self.assertTrue(response.json["is_active"])
+        self.assertEqual(response.json["first_name"], "Alex")
+        self.assertEqual(response.json["last_name"], "Demo")
 
     def test_resolve_client_by_phone_hash_returns_mapping(self):
         query_string = f"phone_hash={self.sha256('+447700900111')}"
@@ -112,6 +114,54 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
         self.assertEqual(response.json["baseline"]["window_sessions"], 1)
         self.assertEqual(len(response.json["alerts"]), 2)
 
+    def test_meeting_signals_returns_configured_flags(self):
+        from consultant_dashboard.core.db import create_client_access_link, create_scheduled_meeting
+        from consultant_dashboard.core.meetings import build_join_window
+
+        db = get_db(self.app.config)
+        start_at = datetime(2026, 4, 24, 11, 0, tzinfo=timezone.utc)
+        end_at = start_at + timedelta(minutes=30)
+        join_start, join_end = build_join_window(start_at, end_at)
+        access_link_id = create_client_access_link(
+            db,
+            client_id=self.client_id,
+            created_by=self.consultant_id,
+            token_hash=self.sha256("meeting-signal-token"),
+            expires_at=iso_utc(end_at + timedelta(days=1)),
+        )
+        meeting_id = create_scheduled_meeting(
+            db,
+            client_id=self.client_id,
+            consultant_id=self.consultant_id,
+            title="AI Meeting Flags",
+            invite_message="",
+            timezone_name="Europe/London",
+            scheduled_start_at=iso_utc(start_at),
+            scheduled_end_at=iso_utc(end_at),
+            join_window_start_at=iso_utc(join_start),
+            join_window_end_at=iso_utc(join_end),
+            channel_name=get_pair_channel(self.consultant_id, self.client_id),
+            response_access_link_id=access_link_id,
+            meeting_type="ai",
+            transcription_enabled=True,
+            audio_biomarkers_enabled=True,
+            video_biomarkers_enabled=False,
+        )
+        db.commit()
+        db.close()
+
+        query_string = f"meeting_id={meeting_id}"
+        response = self.client.get(
+            f"/internal/meeting-signals?{query_string}",
+            headers=self.internal_headers("GET", "/internal/meeting-signals", query_string),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json["ok"])
+        self.assertEqual(response.json["meeting_type"], "ai")
+        self.assertTrue(response.json["transcription_enabled"])
+        self.assertTrue(response.json["audio_biomarkers_enabled"])
+        self.assertFalse(response.json["video_biomarkers_enabled"])
+
     def test_verify_client_password_returns_client_mapping(self):
         body = json.dumps({"email": "alex@example.com", "password": "clientpass123"}, separators=(",", ":"))
         response = self.client.post(
@@ -123,6 +173,8 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json["ok"])
         self.assertEqual(response.json["client_id"], self.client_id)
+        self.assertEqual(response.json["first_name"], "Alex")
+        self.assertEqual(response.json["last_name"], "Demo")
         self.assertEqual(response.json["phone_number"], "+447700900111")
 
     def test_verify_client_password_rejects_invalid_credentials(self):
