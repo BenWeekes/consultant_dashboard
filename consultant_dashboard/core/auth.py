@@ -216,8 +216,18 @@ def _clear_admin_session() -> None:
 def _require_consultant(fn):
     @wraps(fn)
     def wrapped(*args, **kwargs):
-        if not session.get("consultant_id"):
+        consultant_id = session.get("consultant_id")
+        if not consultant_id:
             return redirect(tenant_url_for("auth.consultant_login"))
+        vendor_slug = current_vendor_slug()
+        if vendor_slug:
+            db = get_db(current_app.config)
+            vendor = get_vendor_by_slug(db, vendor_slug)
+            consultant = get_consultant_by_id(db, consultant_id, vendor["id"] if vendor else "")
+            db.close()
+            if not consultant:
+                _clear_consultant_session()
+                return redirect(tenant_url_for("auth.consultant_login"))
         return fn(*args, **kwargs)
     return wrapped
 

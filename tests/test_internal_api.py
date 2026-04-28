@@ -787,6 +787,46 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
         self.assertAlmostEqual(response.json["baseline"]["averages"]["stress"], 0.62)
         self.assertAlmostEqual(response.json["baseline"]["averages"]["fatigue"], 0.31)
 
+    def test_session_complete_baseline_ignores_non_numeric_structured_biomarkers(self):
+        payload = {
+            "client_id": self.client_id,
+            "consultant_id": self.consultant_id,
+            "session_id": "sess_internal_structured_002",
+            "profile": "therapy",
+            "channel": "structured-channel-2",
+            "started_at": "2026-04-13T18:10:00Z",
+            "ended_at": "2026-04-13T18:15:00Z",
+            "duration_seconds": 300,
+            "status": "completed",
+            "summary": {"brief_overview": "Structured", "full_summary": "Structured summary."},
+            "biomarkers": {
+                "averages": {
+                    "stress": {"avg": 0.75, "min": 0.21, "max": 0.88, "count": 12},
+                    "fatigue": {"avg": "bad"},
+                    "burnout": None,
+                }
+            },
+            "alerts": [],
+        }
+        body = json.dumps(payload, separators=(",", ":"))
+        response = self.client.post(
+            "/internal/session-complete",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/session-complete", body),
+        )
+        self.assertEqual(response.status_code, 200)
+
+        query_string = f"client_id={self.client_id}"
+        response = self.client.get(
+            f"/internal/client-context?{query_string}",
+            headers=self.internal_headers("GET", "/internal/client-context", query_string),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertAlmostEqual(response.json["baseline"]["averages"]["stress"], 0.75)
+        self.assertNotIn("fatigue", response.json["baseline"]["averages"])
+        self.assertNotIn("burnout", response.json["baseline"]["averages"])
+
     def test_authorize_meeting_join_allows_host_before_client_accepts(self):
         self.consultant_login()
         with self.client.application.app_context():

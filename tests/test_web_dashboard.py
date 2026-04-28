@@ -41,6 +41,25 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn("/v/mindfix/consultant/login", response.location)
 
+    def test_consultant_session_cannot_cross_vendor_prefix(self):
+        self.admin_login()
+        response = self.client.post(
+            "/admin/vendors/new",
+            data={
+                "domain": "acmehealth.com",
+                "name": "",
+                "storage_root": "",
+                "www_root": "",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 302)
+
+        self.consultant_login()
+        response = self.client.get("/v/acmehealth/consultant/dashboard", follow_redirects=False)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/v/acmehealth/consultant/login", response.location)
+
     def test_admin_routes_require_login(self):
         response = self.client.get("/admin/dashboard", follow_redirects=False)
         self.assertEqual(response.status_code, 302)
