@@ -377,14 +377,13 @@ export function CombinedBiomarkersPanel({
           <SemiGauge label="Stress" value={stress} />
         ) : null}
 
-        {videoEnabled ? (
-          <SummaryCard
-            icon={<Heart className="h-5 w-5" />}
-            title="Heart Rate"
-            value={heartRate ? `${heartRate} bpm` : "--"}
-            pulse={!heartRate}
-          />
-        ) : null}
+        <SummaryCard
+          icon={<Heart className="h-5 w-5" />}
+          title="Heart Rate"
+          value={heartRate ? `${heartRate} bpm` : "--"}
+          detail={videoEnabled ? undefined : "Not enabled for this session"}
+          pulse={videoEnabled && !heartRate}
+        />
 
         {voiceEnabled ? (
           <SummaryCard
@@ -413,7 +412,7 @@ export function CombinedBiomarkersPanel({
       </div>
 
       {voiceEnabled ? (
-        <SectionCard title="Voice Biomarkers" eyebrow="Thymia">
+        <SectionCard title="Voice Biomarkers">
           <div className="space-y-2.5">
             <div className="flex flex-wrap gap-2">
               {progressEntries.length > 0 ? (
@@ -437,10 +436,10 @@ export function CombinedBiomarkersPanel({
             </div>
 
             <div className="grid grid-cols-2 gap-2 xl:grid-cols-3">
+              <MetricTile label="Stress" value={stress !== null ? `${stress}%` : null} pulse={stress === null} />
               <MetricTile label="Distress" value={distress !== null ? `${distress}%` : null} pulse={distress === null} />
               <MetricTile label="Burnout" value={burnout !== null ? `${burnout}%` : null} pulse={burnout === null} />
               <MetricTile label="Fatigue" value={fatigue !== null ? `${fatigue}%` : null} pulse={fatigue === null} />
-              <MetricTile label="Low Self-Esteem" value={lowSelfEsteem !== null ? `${lowSelfEsteem}%` : null} pulse={lowSelfEsteem === null} />
               <MetricTile label="Depression" value={depression !== null ? `${depression}%` : null} pulse={depression === null} />
               <MetricTile label="Anxiety" value={anxiety !== null ? `${anxiety}%` : null} pulse={anxiety === null} />
             </div>
@@ -487,6 +486,20 @@ export function CombinedBiomarkersPanel({
                   </div>
                 ) : null}
               </div>
+              <div className="mt-3">
+                <p className="text-[0.65rem] font-medium uppercase tracking-[0.16em] text-[#7f99ab]">
+                  Full Voice Breakdown
+                </p>
+                <div className="mt-2 grid grid-cols-2 gap-2 xl:grid-cols-3">
+                  <MetricTile label="Stress" value={stress !== null ? `${stress}%` : null} pulse={stress === null} />
+                  <MetricTile label="Distress" value={distress !== null ? `${distress}%` : null} pulse={distress === null} />
+                  <MetricTile label="Burnout" value={burnout !== null ? `${burnout}%` : null} pulse={burnout === null} />
+                  <MetricTile label="Fatigue" value={fatigue !== null ? `${fatigue}%` : null} pulse={fatigue === null} />
+                  <MetricTile label="Low Self-Esteem" value={lowSelfEsteem !== null ? `${lowSelfEsteem}%` : null} pulse={lowSelfEsteem === null} />
+                  <MetricTile label="Depression" value={depression !== null ? `${depression}%` : null} pulse={depression === null} />
+                  <MetricTile label="Anxiety" value={anxiety !== null ? `${anxiety}%` : null} pulse={anxiety === null} />
+                </div>
+              </div>
             </details>
           </div>
         </SectionCard>
@@ -498,7 +511,7 @@ export function CombinedBiomarkersPanel({
       )}
 
       {videoEnabled ? (
-        <SectionCard title="Video Biomarkers" eyebrow="Shen">
+        <SectionCard title="Video Biomarkers">
           <div className="grid grid-cols-2 gap-2 xl:grid-cols-3">
             <MetricTile label="HRV" value={hrv} unit="ms" pulse={!hrv} />
             <MetricTile label="Cardiac Stress" value={cardiacStress} pulse={!cardiacStress} />

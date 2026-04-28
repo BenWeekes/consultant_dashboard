@@ -331,7 +331,10 @@ def _resolve_meeting_access(db, token: str):
 
 def _build_ai_join_url(meeting_id: str = "") -> str:
     suffix = f"&scheduled_meeting_id={meeting_id}" if meeting_id else ""
-    return f"{_client_app_base_url()}/?profile={_client_profile_name()}&autoconnect=true{suffix}"
+    return (
+        f"{_client_app_base_url()}/?profile={_client_profile_name()}"
+        f"&autoconnect=true&appv=20260428b{suffix}"
+    )
 
 
 def _default_transcription_provider(meeting_type: str) -> str:
@@ -477,6 +480,7 @@ def _build_consultant_join_url(meeting_id: str, consultant_id: str, channel_name
     return (
         f"{_client_app_base_url()}/?meeting_mode=true"
         f"&profile={_client_profile_name()}"
+        f"&appv=20260428b"
         f"&join_bootstrap={bootstrap}"
         f"&returnurl={urllib.parse.quote(tenant_url_for('web.consultant_dashboard'), safe='')}"
     )
@@ -862,7 +866,7 @@ def _send_meeting_invite(db, meeting, access_token: str = "", *, reminder_kind: 
         if meeting_type == "ai":
             cta = "Join AI Meeting"
         else:
-            cta = "Enter Meeting Room" if immediate else "Review and respond"
+            cta = "Enter Meeting Room" if (immediate or reminder_kind == "1m") else "Review and respond"
             if immediate or reminder_kind == "1m":
                 cta_link = direct_join_link
         html_body = (
@@ -926,6 +930,125 @@ def _send_meeting_invite(db, meeting, access_token: str = "", *, reminder_kind: 
     return delivery_status, delivery_error, hosted_link
 
 
+def _find_next_weekly_occurrence(db, meeting):
+    return db.execute(
+        """
+        SELECT id
+        FROM scheduled_meetings
+        WHERE consultant_id = ?
+          AND client_id = ?
+          AND meeting_type = ?
+          AND repeat_weekly = 1
+          AND scheduled_start_at > ?
+        ORDER BY scheduled_start_at ASC
+        LIMIT 1
+        """,
+        (
+            meeting["consultant_id"],
+            meeting["client_id"],
+            (meeting["meeting_type"] or "human").strip().lower(),
+            meeting["scheduled_start_at"] or "",
+        ),
+    ).fetchone()
+
+
+def _next_weekly_occurrence_times(meeting):
+    start_at = _parse_iso_datetime(meeting["scheduled_start_at"])
+    end_at = _parse_iso_datetime(meeting["scheduled_end_at"])
+    if not start_at or not end_at:
+        return None
+    timezone_name = (meeting["timezone_name"] or "UTC").strip() or "UTC"
+    try:
+        tz = ZoneInfo(timezone_name)
+    except Exception:
+        tz = timezone.utc
+        timezone_name = "UTC"
+    local_start = start_at.astimezone(tz)
+    local_end = end_at.astimezone(tz)
+    next_local_start = local_start + timedelta(days=7)
+    next_local_end = local_end + timedelta(days=7)
+    next_start_utc = next_local_start.astimezone(timezone.utc)
+    next_end_utc = next_local_end.astimezone(timezone.utc)
+    join_start, join_end = build_join_window(next_start_utc, next_end_utc)
+    return {
+        "timezone_name": timezone_name,
+        "scheduled_start_at": iso_utc(next_start_utc),
+        "scheduled_end_at": iso_utc(next_end_utc),
+        "join_window_start_at": iso_utc(join_start),
+        "join_window_end_at": iso_utc(join_end),
+    }
+
+
+def _ensure_next_weekly_occurrence(
+    db,
+    *,
+    meeting_id: str,
+    actor_type: str = "system",
+    actor_id: str = "weekly-recurrence",
+):
+    meeting = get_scheduled_meeting(db, meeting_id)
+    if not meeting or not bool(_meeting_field(meeting, "repeat_weekly", 0)):
+        return None
+    if meeting["status"] not in {"completed", "cancelled", "declined"}:
+        return None
+    if _find_next_weekly_occurrence(db, meeting):
+        return None
+    next_times = _next_weekly_occurrence_times(meeting)
+    if not next_times:
+        current_app.logger.warning(
+            "weekly_recurrence_skipped_invalid_times meeting_id=%s",
+            meeting_id,
+        )
+        return None
+
+    access_token = new_access_token()
+    access_link_id = create_client_access_link(
+        db,
+        client_id=meeting["client_id"],
+        created_by=actor_id,
+        token_hash=hash_access_token(access_token),
+        expires_at=default_expiry(hours=24 * 30),
+    )
+    next_meeting_id = create_scheduled_meeting(
+        db,
+        client_id=meeting["client_id"],
+        consultant_id=meeting["consultant_id"],
+        meeting_type=meeting["meeting_type"] or "human",
+        repeat_weekly=True,
+        transcription_enabled=bool(meeting["transcription_enabled"]),
+        audio_biomarkers_enabled=bool(meeting["audio_biomarkers_enabled"]),
+        video_biomarkers_enabled=bool(meeting["video_biomarkers_enabled"]),
+        transcription_provider=meeting["transcription_provider"] or "",
+        transcription_language=meeting["transcription_language"] or "",
+        title=meeting["title"] or "Weekly meeting",
+        invite_message=meeting["invite_message"] or "",
+        timezone_name=next_times["timezone_name"],
+        scheduled_start_at=next_times["scheduled_start_at"],
+        scheduled_end_at=next_times["scheduled_end_at"],
+        join_window_start_at=next_times["join_window_start_at"],
+        join_window_end_at=next_times["join_window_end_at"],
+        channel_name=meeting["channel_name"],
+        response_access_link_id=access_link_id,
+    )
+    next_meeting = get_scheduled_meeting_detail(db, next_meeting_id, consultant_id=meeting["consultant_id"])
+    _send_meeting_invite(db, next_meeting, access_token)
+    record_meeting_event(
+        db,
+        meeting_id=next_meeting_id,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        event_type="recurrence_scheduled",
+        details={"source_meeting_id": meeting_id},
+    )
+    current_app.logger.info(
+        "weekly_recurrence_created source_meeting_id=%s next_meeting_id=%s start=%s",
+        meeting_id,
+        next_meeting_id,
+        next_times["scheduled_start_at"],
+    )
+    return next_meeting_id
+
+
 def run_due_meeting_reminders():
     db = get_db(current_app.config)
     now = datetime.now(timezone.utc)
@@ -944,7 +1067,12 @@ def run_due_meeting_reminders():
             continue
 
         reminder_kind = ""
-        if not meeting["reminder_24h_sent_at"] and now >= (start_at - timedelta(hours=24)) and now < start_at:
+        if (
+            not meeting["reminder_24h_sent_at"]
+            and created_at < (start_at - timedelta(hours=24))
+            and now >= (start_at - timedelta(hours=24))
+            and now < start_at
+        ):
             reminder_kind = "24h"
         elif not meeting["reminder_1m_sent_at"] and now >= (start_at - timedelta(minutes=1)) and now <= (start_at + timedelta(minutes=5)):
             reminder_kind = "1m"
@@ -1984,6 +2112,12 @@ def consultant_meeting_detail(meeting_id: str):
         action = request.form.get("action", "").strip()
         if action == "cancel":
             if cancel_scheduled_meeting(db, meeting_id=meeting_id):
+                _ensure_next_weekly_occurrence(
+                    db,
+                    meeting_id=meeting_id,
+                    actor_type="consultant",
+                    actor_id=consultant_id,
+                )
                 record_meeting_event(db, meeting_id=meeting_id, actor_type="consultant", actor_id=consultant_id, event_type="cancelled")
                 log_audit(
                     db,
@@ -2034,6 +2168,12 @@ def consultant_meeting_detail(meeting_id: str):
         elif action == "mark_no_show":
             outcome = request.form.get("attendance_outcome", "client_no_show").strip()
             if mark_meeting_no_show(db, meeting_id=meeting_id, attendance_outcome=outcome):
+                _ensure_next_weekly_occurrence(
+                    db,
+                    meeting_id=meeting_id,
+                    actor_type="consultant",
+                    actor_id=consultant_id,
+                )
                 record_meeting_event(
                     db,
                     meeting_id=meeting_id,
@@ -2136,6 +2276,7 @@ def meeting_response_join(token: str):
         join_url = (
             f"{_client_app_base_url()}/?meeting_mode=true"
             f"&profile={_client_profile_name()}"
+            f"&appv=20260428b"
             f"&join_bootstrap={_build_client_join_bootstrap(target_meeting['id'], target_meeting['response_access_link_id'])}"
         )
     return redirect(join_url)
@@ -2417,6 +2558,12 @@ def meeting_response_page(token: str):
                 flash("This meeting can no longer be accepted.", "error")
         elif action == "decline":
             if update_meeting_response_status(db, meeting_id=meeting["id"], status="declined"):
+                _ensure_next_weekly_occurrence(
+                    db,
+                    meeting_id=meeting["id"],
+                    actor_type="guest",
+                    actor_id=meeting["client_id"],
+                )
                 record_meeting_event(db, meeting_id=meeting["id"], actor_type="guest", actor_id=meeting["client_id"], event_type="declined")
                 db.commit()
                 flash("Meeting declined", "muted")

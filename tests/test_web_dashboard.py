@@ -1210,6 +1210,154 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertTrue(meeting["declined_at"])
 
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
+    def test_declining_weekly_meeting_creates_next_occurrence_and_invites_it(self, mocked_deliver_email):
+        self.consultant_login()
+        self.client.post(
+            "/consultant/meetings/new",
+            data={
+                "client_id": self.client_id,
+                "meeting_type": "human",
+                "repeat_weekly": "1",
+                "title": "Weekly Decline Test",
+                "scheduled_start_at": self._future_local_time(days=1),
+                "duration_minutes": "30",
+                "timezone_name": "Europe/London",
+                "invite_message": "Weekly invite.",
+            },
+            follow_redirects=True,
+        )
+        first_token = self._extract_meeting_response_token(mocked_deliver_email.call_args.kwargs["reply_link"])
+        self.authenticate_client_session()
+        response = self.client.post(
+            f"/meetings/respond/{first_token}",
+            data={"action": "decline"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Meeting declined", response.data)
+
+        db = get_db(self.app.config)
+        rows = db.execute(
+            """
+            SELECT id, status, repeat_weekly, scheduled_start_at, invite_delivery_status,
+                   reminder_24h_sent_at, reminder_1m_sent_at
+            FROM scheduled_meetings
+            WHERE client_id = ? AND consultant_id = ? AND title = ?
+            ORDER BY scheduled_start_at ASC
+            """,
+            (self.client_id, self.consultant_id, "Weekly Decline Test"),
+        ).fetchall()
+        db.close()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["status"], "declined")
+        self.assertEqual(rows[1]["status"], "scheduled")
+        self.assertEqual(rows[1]["repeat_weekly"], 1)
+        first_start = datetime.fromisoformat(rows[0]["scheduled_start_at"].replace("Z", "+00:00"))
+        next_start = datetime.fromisoformat(rows[1]["scheduled_start_at"].replace("Z", "+00:00"))
+        self.assertEqual(next_start - first_start, timedelta(days=7))
+        self.assertEqual(rows[1]["invite_delivery_status"], "sent")
+        self.assertIsNone(rows[1]["reminder_24h_sent_at"])
+        self.assertIsNone(rows[1]["reminder_1m_sent_at"])
+        self.assertEqual(mocked_deliver_email.call_count, 2)
+
+    @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
+    def test_cancelling_weekly_meeting_creates_next_occurrence(self, mocked_deliver_email):
+        self.consultant_login()
+        self.client.post(
+            "/consultant/meetings/new",
+            data={
+                "client_id": self.client_id,
+                "meeting_type": "human",
+                "repeat_weekly": "1",
+                "title": "Weekly Cancel Test",
+                "scheduled_start_at": self._future_local_time(days=1),
+                "duration_minutes": "30",
+                "timezone_name": "Europe/London",
+                "invite_message": "",
+            },
+            follow_redirects=True,
+        )
+        db = get_db(self.app.config)
+        meeting_id = db.execute(
+            "SELECT id FROM scheduled_meetings WHERE title = ? ORDER BY created_at DESC LIMIT 1",
+            ("Weekly Cancel Test",),
+        ).fetchone()["id"]
+        db.close()
+        response = self.client.post(
+            f"/consultant/meetings/{meeting_id}",
+            data={"action": "cancel"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Meeting cancelled", response.data)
+
+        db = get_db(self.app.config)
+        rows = db.execute(
+            """
+            SELECT status, repeat_weekly, invite_delivery_status
+            FROM scheduled_meetings
+            WHERE client_id = ? AND consultant_id = ? AND title = ?
+            ORDER BY scheduled_start_at ASC
+            """,
+            (self.client_id, self.consultant_id, "Weekly Cancel Test"),
+        ).fetchall()
+        db.close()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["status"], "cancelled")
+        self.assertEqual(rows[1]["status"], "scheduled")
+        self.assertEqual(rows[1]["repeat_weekly"], 1)
+        self.assertEqual(rows[1]["invite_delivery_status"], "sent")
+        self.assertEqual(mocked_deliver_email.call_count, 2)
+
+    @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
+    def test_marking_weekly_meeting_no_show_creates_next_occurrence(self, mocked_deliver_email):
+        self.consultant_login()
+        self.client.post(
+            "/consultant/meetings/new",
+            data={
+                "client_id": self.client_id,
+                "meeting_type": "human",
+                "repeat_weekly": "1",
+                "title": "Weekly No Show Test",
+                "scheduled_start_at": self._future_local_time(days=1),
+                "duration_minutes": "30",
+                "timezone_name": "Europe/London",
+                "invite_message": "",
+            },
+            follow_redirects=True,
+        )
+        db = get_db(self.app.config)
+        meeting_id = db.execute(
+            "SELECT id FROM scheduled_meetings WHERE title = ? ORDER BY created_at DESC LIMIT 1",
+            ("Weekly No Show Test",),
+        ).fetchone()["id"]
+        db.close()
+        response = self.client.post(
+            f"/consultant/meetings/{meeting_id}",
+            data={"action": "mark_no_show", "attendance_outcome": "client_no_show"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"No-show recorded", response.data)
+
+        db = get_db(self.app.config)
+        rows = db.execute(
+            """
+            SELECT status, attendance_outcome, repeat_weekly
+            FROM scheduled_meetings
+            WHERE client_id = ? AND consultant_id = ? AND title = ?
+            ORDER BY scheduled_start_at ASC
+            """,
+            (self.client_id, self.consultant_id, "Weekly No Show Test"),
+        ).fetchall()
+        db.close()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["status"], "completed")
+        self.assertEqual(rows[0]["attendance_outcome"], "client_no_show")
+        self.assertEqual(rows[1]["status"], "scheduled")
+        self.assertEqual(rows[1]["repeat_weekly"], 1)
+
+    @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_resend_invite_reopens_declined_meeting(self, mocked_deliver_email):
         self.consultant_login()
         self.client.post(

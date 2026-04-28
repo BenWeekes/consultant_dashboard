@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 from consultant_dashboard.core.db import get_db
-from consultant_dashboard.core.meetings import get_pair_channel, iso_utc
+from consultant_dashboard.core.meetings import build_join_window, generate_meeting_channel, get_pair_channel, iso_utc
 
 from tests.support import ConsultantDashboardTestCase
 
@@ -113,6 +113,154 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
         self.assertIsNotNone(response.json["baseline"])
         self.assertEqual(response.json["baseline"]["window_sessions"], 1)
         self.assertEqual(len(response.json["alerts"]), 2)
+
+    @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
+    def test_session_complete_for_weekly_meeting_creates_one_next_occurrence(self, mocked_deliver_email):
+        with self.client.application.app_context():
+            db = get_db(self.app.config)
+            from consultant_dashboard.core.db import create_client_access_link, create_scheduled_meeting
+            from consultant_dashboard.core.messaging import hash_access_token
+
+            start_at = datetime.now(timezone.utc) + timedelta(days=1)
+            end_at = start_at + timedelta(minutes=30)
+            join_start, join_end = build_join_window(start_at, end_at)
+            access_link_id = create_client_access_link(
+                db,
+                client_id=self.client_id,
+                created_by=self.consultant_id,
+                token_hash=hash_access_token("weekly-session-complete-token"),
+                expires_at=iso_utc(end_at + timedelta(days=30)),
+            )
+            meeting_id = create_scheduled_meeting(
+                db,
+                client_id=self.client_id,
+                consultant_id=self.consultant_id,
+                meeting_type="human",
+                repeat_weekly=True,
+                title="Weekly Session Complete Test",
+                invite_message="",
+                timezone_name="Europe/London",
+                scheduled_start_at=iso_utc(start_at),
+                scheduled_end_at=iso_utc(end_at),
+                join_window_start_at=iso_utc(join_start),
+                join_window_end_at=iso_utc(join_end),
+                channel_name=generate_meeting_channel(),
+                response_access_link_id=access_link_id,
+            )
+            db.commit()
+            db.close()
+
+        payload = {
+            "client_id": self.client_id,
+            "consultant_id": self.consultant_id,
+            "meeting_id": meeting_id,
+            "session_id": "sess_weekly_complete_001",
+            "profile": "therapy",
+            "channel": "weekly-recurrence-channel",
+            "started_at": "2026-04-13T18:00:00Z",
+            "ended_at": "2026-04-13T18:05:00Z",
+            "duration_seconds": 300,
+            "status": "completed",
+            "summary": {"overview": "Generalized summary."},
+            "biomarkers": {"averages": {"stress_index": 52.5}},
+            "alerts": [],
+        }
+        body = json.dumps(payload, separators=(",", ":"))
+        response = self.client.post(
+            "/internal/session-complete",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/session-complete", body),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json["ok"])
+
+        response_repeat = self.client.post(
+            "/internal/session-complete",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/session-complete", body),
+        )
+        self.assertEqual(response_repeat.status_code, 200)
+        self.assertTrue(response_repeat.json["ok"])
+
+        db = get_db(self.app.config)
+        rows = db.execute(
+            """
+            SELECT status, repeat_weekly, scheduled_start_at, invite_delivery_status
+            FROM scheduled_meetings
+            WHERE client_id = ? AND consultant_id = ? AND title = ?
+            ORDER BY scheduled_start_at ASC
+            """,
+            (self.client_id, self.consultant_id, "Weekly Session Complete Test"),
+        ).fetchall()
+        db.close()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["status"], "completed")
+        self.assertEqual(rows[1]["status"], "scheduled")
+        self.assertEqual(rows[1]["repeat_weekly"], 1)
+        self.assertEqual(rows[1]["invite_delivery_status"], "sent")
+        first_start = datetime.fromisoformat(rows[0]["scheduled_start_at"].replace("Z", "+00:00"))
+        next_start = datetime.fromisoformat(rows[1]["scheduled_start_at"].replace("Z", "+00:00"))
+        self.assertEqual(next_start - first_start, timedelta(days=7))
+        self.assertEqual(mocked_deliver_email.call_count, 1)
+
+    @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
+    def test_run_reminders_skips_24h_for_meeting_created_inside_24h_window(self, mocked_deliver_email):
+        with self.client.application.app_context():
+            db = get_db(self.app.config)
+            from consultant_dashboard.core.db import create_client_access_link, create_scheduled_meeting
+            from consultant_dashboard.core.messaging import hash_access_token
+
+            start_at = datetime.now(timezone.utc) + timedelta(minutes=13)
+            end_at = start_at + timedelta(minutes=30)
+            join_start, join_end = build_join_window(start_at, end_at)
+            access_link_id = create_client_access_link(
+                db,
+                client_id=self.client_id,
+                created_by=self.consultant_id,
+                token_hash=hash_access_token("meeting-created-inside-24h-token"),
+                expires_at=iso_utc(end_at + timedelta(days=7)),
+            )
+            create_scheduled_meeting(
+                db,
+                client_id=self.client_id,
+                consultant_id=self.consultant_id,
+                meeting_type="human",
+                repeat_weekly=False,
+                title="Inside 24h Reminder Test",
+                invite_message="",
+                timezone_name="Europe/London",
+                scheduled_start_at=iso_utc(start_at),
+                scheduled_end_at=iso_utc(end_at),
+                join_window_start_at=iso_utc(join_start),
+                join_window_end_at=iso_utc(join_end),
+                channel_name=get_pair_channel(self.consultant_id, self.client_id, "human"),
+                response_access_link_id=access_link_id,
+            )
+            db.commit()
+            db.close()
+
+        body = ""
+        response = self.client.post(
+            "/internal/run-reminders",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/run-reminders", body),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["sent_24h"], 0)
+        self.assertEqual(response.json["sent_1m"], 0)
+        mocked_deliver_email.assert_not_called()
+
+        conn = get_db(self.app.config)
+        row = conn.execute(
+            "SELECT reminder_24h_sent_at, reminder_1m_sent_at FROM scheduled_meetings WHERE title = ?",
+            ("Inside 24h Reminder Test",),
+        ).fetchone()
+        conn.close()
+        self.assertFalse(row["reminder_24h_sent_at"])
+        self.assertFalse(row["reminder_1m_sent_at"])
 
     def test_meeting_signals_returns_configured_flags(self):
         from consultant_dashboard.core.db import create_client_access_link, create_scheduled_meeting
@@ -437,9 +585,8 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
                 """
                 UPDATE scheduled_meetings
                 SET created_at = datetime('now', '-1 day'),
-                    updated_at = datetime('now', '-1 day'),
-                    reminder_24h_sent_at = datetime('now', '-2 hours')
-                WHERE title = 'Reminder 1m Meeting'
+                    updated_at = datetime('now', '-1 day')
+                WHERE title = 'Reminder Meeting'
                 """
             )
             db.commit()
@@ -464,6 +611,77 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
         conn.close()
         self.assertTrue(row["reminder_24h_sent_at"])
         self.assertFalse(row["reminder_1m_sent_at"])
+
+    @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
+    def test_run_reminders_sends_due_1m_reminder_with_enter_meeting_room_cta(self, mocked_deliver_email):
+        with self.client.application.app_context():
+            db = get_db(self.app.config)
+            from consultant_dashboard.core.db import create_client_access_link, create_scheduled_meeting
+            from consultant_dashboard.core.messaging import hash_access_token
+            from consultant_dashboard.core.meetings import build_join_window
+
+            start_at = datetime.now(timezone.utc) + timedelta(seconds=30)
+            end_at = start_at + timedelta(minutes=30)
+            join_start, join_end = build_join_window(start_at, end_at)
+            access_link_id = create_client_access_link(
+                db,
+                client_id=self.client_id,
+                created_by=self.consultant_id,
+                token_hash=hash_access_token("meeting-1m-reminder-token"),
+                expires_at=iso_utc(end_at + timedelta(days=7)),
+            )
+            create_scheduled_meeting(
+                db,
+                client_id=self.client_id,
+                consultant_id=self.consultant_id,
+                meeting_type="human",
+                repeat_weekly=False,
+                title="1m Reminder Meeting",
+                invite_message="",
+                timezone_name="Europe/London",
+                scheduled_start_at=iso_utc(start_at),
+                scheduled_end_at=iso_utc(end_at),
+                join_window_start_at=iso_utc(join_start),
+                join_window_end_at=iso_utc(join_end),
+                channel_name=get_pair_channel(self.consultant_id, self.client_id, "human"),
+                response_access_link_id=access_link_id,
+            )
+            db.execute(
+                """
+                UPDATE scheduled_meetings
+                SET created_at = datetime('now', '-2 days'),
+                    updated_at = datetime('now', '-2 days'),
+                    reminder_24h_sent_at = CURRENT_TIMESTAMP
+                WHERE title = '1m Reminder Meeting'
+                """
+            )
+            db.commit()
+            db.close()
+
+        body = ""
+        response = self.client.post(
+            "/internal/run-reminders",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/run-reminders", body),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["sent_1m"], 1)
+        mocked_deliver_email.assert_called_once()
+
+        _, kwargs = mocked_deliver_email.call_args
+        self.assertTrue(kwargs["reply_link"].endswith("/join"))
+        self.assertIn("Enter Meeting Room", kwargs["html_override"])
+        self.assertNotIn("Review and respond", kwargs["html_override"])
+
+        conn = get_db(self.app.config)
+        row = conn.execute(
+            "SELECT reminder_24h_sent_at, reminder_1m_sent_at FROM scheduled_meetings WHERE title = ?",
+            ("1m Reminder Meeting",),
+        ).fetchone()
+        conn.close()
+        self.assertTrue(row["reminder_24h_sent_at"])
+        self.assertTrue(row["reminder_1m_sent_at"])
 
     def test_authorize_meeting_join_returns_runtime_key_and_stable_channel(self):
         with self.client.application.app_context():

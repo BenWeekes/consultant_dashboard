@@ -29,7 +29,7 @@ from .meetings import utc_now
 from .messaging import hash_access_token
 from .storage import EncryptedStorage
 from .vendors import storage_root_for_client
-from .web import run_due_meeting_reminders
+from .web import _ensure_next_weekly_occurrence, run_due_meeting_reminders
 
 internal_bp = Blueprint("internal", __name__, url_prefix="/internal")
 
@@ -480,6 +480,12 @@ def meeting_ended():
             ended_by_id=ended_by_id or meeting["consultant_id"],
         )
         if completed:
+            _ensure_next_weekly_occurrence(
+                db,
+                meeting_id=meeting_id,
+                actor_type="system",
+                actor_id="meeting-ended",
+            )
             record_meeting_event(
                 db,
                 meeting_id=meeting_id,
@@ -655,6 +661,12 @@ def session_complete():
             ended_by_id=payload.get("ended_by_id", ""),
         )
         if completed:
+            _ensure_next_weekly_occurrence(
+                db,
+                meeting_id=meeting_id,
+                actor_type="system",
+                actor_id="session-complete",
+            )
             record_meeting_event(
                 db,
                 meeting_id=meeting_id,

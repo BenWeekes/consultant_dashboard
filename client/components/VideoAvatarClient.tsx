@@ -21,8 +21,8 @@ import { Response } from "@agora/agent-ui-kit";
 import { AvatarVideoDisplay, LocalVideoPreview } from "@agora/agent-ui-kit";
 import { VideoGrid, MobileTabs } from "@agora/agent-ui-kit";
 import { SettingsDialog, SessionPanel } from "@agora/agent-ui-kit";
-import { useThymia } from "@agora/agent-ui-kit/thymia";
 import { useShenai } from "@/hooks/useShenai";
+import { useMindfixThymia } from "@/hooks/useMindfixThymia";
 import AgoraRTC from "agora-rtc-sdk-ng";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./ThemeToggle";
@@ -53,8 +53,6 @@ function resolveDefaultBackendUrl() {
 
 const DEFAULT_BACKEND_URL = resolveDefaultBackendUrl();
 const DEFAULT_PROFILE = process.env.NEXT_PUBLIC_DEFAULT_PROFILE || "VIDEO";
-const THYMIA_ENABLED = process.env.NEXT_PUBLIC_ENABLE_THYMIA === "true";
-const SHEN_ENABLED = process.env.NEXT_PUBLIC_ENABLE_SHEN === "true";
 const SHEN_API_KEY = process.env.NEXT_PUBLIC_SHEN_API_KEY || "";
 const DEVICE_COOKIE_MAX_AGE = 60 * 60 * 24 * 180;
 const MEETING_BOOTSTRAP_STORAGE_KEY = "mindfix_meeting_join_bootstrap";
@@ -192,10 +190,18 @@ export function VideoAvatarClient() {
   const previewAudioContextRef = useRef<AudioContext | null>(null);
   const previewAnalyserRef = useRef<AnalyserNode | null>(null);
   const previewAnimationFrameRef = useRef<number | null>(null);
+  const lastBiomarkerLogRef = useRef(0);
   // Legacy bearer fallback held in memory only. Normal auth now rides on the
   // 1-hour backend cookie so hosted meeting/invite flows do not leak auth state
   // through URLs.
   const authTokenRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    console.log(
+      "[MindFixClient][build]",
+      "2026-04-28-biomarker-rtm-debug-2",
+    );
+  }, []);
 
   // Helper — sends backend cookies and, for legacy compatibility, an
   // Authorization header if a transient in-memory token exists.
@@ -584,15 +590,67 @@ export function VideoAvatarClient() {
     clinical,
     progress: thymiaProgress,
     safety: thymiaSafety,
-  } = useThymia(
+  } = useMindfixThymia(
     rtmSource,
-    THYMIA_ENABLED && isConnected && meetingAudioBiomarkersEnabled,
+    isConnected && meetingAudioBiomarkersEnabled,
   );
+
+  useEffect(() => {
+    if (!isConnected || !meetingAudioBiomarkersEnabled) return;
+    const now = Date.now();
+    if (now - lastBiomarkerLogRef.current < 3000) return;
+
+    const biomarkerEntries = Object.entries(biomarkers).filter(
+      ([, value]) => typeof value === "number",
+    );
+    const progressEntries = Object.entries(thymiaProgress);
+    const safetyLevel =
+      typeof thymiaSafety.level === "number"
+        ? thymiaSafety.level
+        : typeof thymiaSafety.highest_level === "number"
+          ? thymiaSafety.highest_level
+          : null;
+
+    if (
+      biomarkerEntries.length === 0 &&
+      progressEntries.length === 0 &&
+      safetyLevel === null
+    ) {
+      return;
+    }
+
+    lastBiomarkerLogRef.current = now;
+    const topScores = biomarkerEntries
+      .sort((a, b) => (Number(b[1]) || 0) - (Number(a[1]) || 0))
+      .slice(0, 4)
+      .map(([key, value]) => `${key}=${Number(value).toFixed(2)}`);
+    const progressSummary = progressEntries
+      .map(
+        ([key, value]) =>
+          `${key}:${value.speech_seconds.toFixed(1)}/${value.trigger_seconds}s${value.processing ? "*" : ""}`,
+      )
+      .join(" ");
+
+    console.log(
+      "[Biomarkers][Client]",
+      JSON.stringify({
+        topScores,
+        progress: progressSummary,
+        safetyLevel,
+      }),
+    );
+  }, [
+    biomarkers,
+    isConnected,
+    meetingAudioBiomarkersEnabled,
+    thymiaProgress,
+    thymiaSafety,
+  ]);
 
   // Shen.AI camera vitals (opt-in via NEXT_PUBLIC_ENABLE_SHEN)
   // RTM publish function for Shen to push vitals to server
   const shenRtmPublish = useMemo(() => {
-    if (!SHEN_ENABLED || !meetingVideoBiomarkersEnabled) return null;
+    if (!SHEN_API_KEY || !meetingVideoBiomarkersEnabled) return null;
     const rtm = rtmClientRef.current;
     if (!rtm) return null;
     return async (message: string): Promise<boolean> => {
@@ -610,7 +668,7 @@ export function VideoAvatarClient() {
   }, [rtmClientRef.current]);
 
   const shenState = useShenai(
-    SHEN_ENABLED && isConnected && meetingVideoBiomarkersEnabled,
+    Boolean(SHEN_API_KEY) && isConnected && meetingVideoBiomarkersEnabled,
     SHEN_API_KEY,
     shenRtmPublish,
     "shen-canvas",
@@ -619,7 +677,7 @@ export function VideoAvatarClient() {
   // Move the shen canvas between desktop/mobile containers based on screen size
   useEffect(() => {
     if (
-      !SHEN_ENABLED ||
+      !SHEN_API_KEY ||
       !isConnected ||
       !meetingVideoBiomarkersEnabled
     ) return;
@@ -993,10 +1051,9 @@ export function VideoAvatarClient() {
     return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
   };
 
-  const showThymiaPanel =
-    THYMIA_ENABLED && meetingAudioBiomarkersEnabled;
+  const showThymiaPanel = meetingAudioBiomarkersEnabled;
   const showShenPanel =
-    SHEN_ENABLED && meetingVideoBiomarkersEnabled;
+    Boolean(SHEN_API_KEY) && meetingVideoBiomarkersEnabled;
   const showBiomarkersPanel =
     meetingAudioBiomarkersEnabled || meetingVideoBiomarkersEnabled;
 
@@ -1414,7 +1471,7 @@ export function VideoAvatarClient() {
                       tabs={[
                         {
                           id: "avatar",
-                          label: "Avatar",
+                          label: meetingMode ? "Remote Video" : "Avatar",
                           content: (
                             <div className="flex-1 flex items-center justify-center bg-muted/20 p-2 h-full">
                               <AvatarVideoDisplay

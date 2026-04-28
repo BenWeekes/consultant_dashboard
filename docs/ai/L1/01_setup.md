@@ -219,6 +219,36 @@ Live smoke coverage includes:
 - `consultant-dashboard` health
 - `server-custom-llm` ping
 
+## Playwright
+
+Run the browser e2e checks:
+
+```bash
+cd /home/ubuntu/mindfix/consultant_dashboard/client
+npm run test:e2e
+```
+
+Consultant upcoming meetings on the live site can be checked without a real password or OTP by minting a normal Flask session cookie locally on the server:
+
+```bash
+cd /home/ubuntu/mindfix/consultant_dashboard/client
+PLAYWRIGHT_CONSULTANT_SESSION_COOKIE="$(
+  ../venv/bin/python ../scripts/mint_consultant_session_cookie.py \
+    --email benweekes73@gmail.com \
+    --vendor-slug mindfix
+)" npm run test:e2e -- tests/e2e/consultant-upcoming.spec.ts
+```
+
+If you want the Playwright check to assert a specific upcoming row, set:
+
+```bash
+PLAYWRIGHT_CONSULTANT_UPCOMING_EXPECTED="MindFix session"
+```
+
+Screenshots are written under:
+
+- `client/test-results/`
+
 ## Browser E2E Checks
 
 The React client now has Playwright-based browser checks in:

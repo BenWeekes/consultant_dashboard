@@ -77,6 +77,13 @@ export function useAgoraVideoClient() {
   const meetingTranscriptLinesRef = useRef<MeetingTranscriptLine[]>([]);
   const seenTranscriptLineKeysRef = useRef<Set<string>>(new Set());
 
+  const resolveMeetingRole = useCallback((uid: string): "host" | "guest" => {
+    if (uid === currentParticipantUidRef.current) {
+      return currentParticipantRoleRef.current;
+    }
+    return currentParticipantRoleRef.current === "host" ? "guest" : "host";
+  }, []);
+
   // Simple fan-out for RTM messages — one Agora addEventListener, many subscribers.
   // Agora RTM may not support multiple addEventListener calls for the same event,
   // so we use a single listener and dispatch to all registered handlers ourselves.
@@ -86,7 +93,6 @@ export function useAgoraVideoClient() {
     on: (event: string, handler: RTMHandler) => void;
     off: (event: string, handler: RTMHandler) => void;
   } | null>(null);
-
   // The web RTM SDK can log a presence-collection error even when we subscribe
   // with `withPresence: false` and plain channel messaging is working.
   // This app does not use client-side presence, so drop just that noisy warning.
@@ -309,7 +315,6 @@ export function useAgoraVideoClient() {
         await rtmClient.subscribe(config.channel, { withMessage: true, withPresence: false });
 
         // Single RTM message listener — fans out to all registered handlers.
-        // Also logs incoming messages for debugging.
         rtmClient.addEventListener("message", (event: any) => {
           try {
             let raw: string;
@@ -317,6 +322,8 @@ export function useAgoraVideoClient() {
               raw = event.message;
             } else if (event.message instanceof Uint8Array) {
               raw = new TextDecoder().decode(event.message);
+            } else if (event.message instanceof ArrayBuffer) {
+              raw = new TextDecoder().decode(new Uint8Array(event.message));
             } else {
               return;
             }
@@ -336,16 +343,6 @@ export function useAgoraVideoClient() {
               const senderRole =
                 parsed.sender_role === "host" ? "host" : "guest";
               if (isTranscript) {
-                console.log(
-                  "[MeetingTranscript][RTM]",
-                  JSON.stringify({
-                    messageId,
-                    senderUid,
-                    senderRole,
-                    isFinal,
-                    text: String(parsed.text || ""),
-                  }),
-                );
                 const transcriptItem = {
                   turn_id: timestamp,
                   uid: senderUid,
@@ -386,7 +383,6 @@ export function useAgoraVideoClient() {
               ]);
               return;
             }
-            console.log("[RTM]", parsed.object, "len:", raw.length);
           } catch {
             // skip
           }
@@ -416,17 +412,43 @@ export function useAgoraVideoClient() {
             (_uid: number, data: Uint8Array | ArrayBuffer) => {
               const line = extractTranscriptLine(data);
               if (!line) return;
-              console.log(
-                "[MeetingTranscript][RTC]",
-                JSON.stringify({
+              const transcriptMessageId = `rtc:${line.uid}:${line.time}`;
+              const transcriptRole = resolveMeetingRole(line.uid);
+              if (line.is_final) {
+                setCurrentInProgressMessage((prev) =>
+                  prev?.messageId === transcriptMessageId ? null : prev,
+                );
+                setMessageList((prev) => {
+                  const withoutExisting = prev.filter(
+                    (item) => item.messageId !== transcriptMessageId,
+                  );
+                  return [
+                    ...withoutExisting,
+                    {
+                      turn_id: Date.parse(line.time) || Date.now(),
+                      uid: line.uid,
+                      role: transcriptRole,
+                      text: line.text,
+                      status: TurnStatus.FINAL,
+                      timestamp: Date.parse(line.time) || Date.now(),
+                      messageId: transcriptMessageId,
+                      isFinal: true,
+                      transcriptSource: true,
+                    },
+                  ];
+                });
+              } else {
+                setCurrentInProgressMessage({
+                  turn_id: Date.parse(line.time) || Date.now(),
                   uid: line.uid,
-                  time: line.time,
-                  isFinal: line.is_final,
+                  role: transcriptRole,
                   text: line.text,
-                }),
-              );
-              if (!line.is_final) {
-                return;
+                  status: TurnStatus.IN_PROGRESS,
+                  timestamp: Date.parse(line.time) || Date.now(),
+                  messageId: transcriptMessageId,
+                  isFinal: false,
+                  transcriptSource: true,
+                });
               }
               const transcriptKey = `${line.uid}:${line.time}:${line.text}`;
               if (seenTranscriptLineKeysRef.current.has(transcriptKey)) {
@@ -472,7 +494,7 @@ export function useAgoraVideoClient() {
         throw error;
       }
     },
-    [isConnected, leaveChannel],
+    [isConnected, leaveChannel, resolveMeetingRole],
   );
 
   const toggleMute = useCallback(async () => {
