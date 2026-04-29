@@ -1,6 +1,6 @@
 # 08 Security
 
-Purpose: explain trust boundaries, secret handling, and how sensitive therapy/consultation data is protected.
+> Explain trust boundaries, secret handling, and how sensitive therapy and consultation data is protected.
 
 ## Trust Boundaries
 
@@ -164,8 +164,6 @@ When changing any of these, update this file:
 - encryption/storage format
 - audit payload shape
 
-## See Also
+## Related Deep Dives
 
-- [02 Architecture](02_architecture.md)
-- [06 Interfaces](06_interfaces.md)
-- [07 Gotchas](07_gotchas.md)
+- None

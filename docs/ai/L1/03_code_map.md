@@ -1,6 +1,6 @@
 # 03 Code Map
 
-Purpose: quickly answer “where does this behavior live?”
+> Quickly answer "where does this behavior live?"
 
 ## Top-Level Layout
 
@@ -182,7 +182,6 @@ Best first stops:
   - `core/storage.py`
   - callers in `core/internal_api.py` and `core/web.py`
 
-## See Also
+## Related Deep Dives
 
-- [04 Conventions](04_conventions.md)
-- [05 Workflows](05_workflows.md)
+- [Therapy Stack Setup](L2/therapy_stack_setup.md) — cross-repo file ownership when debugging the live stack

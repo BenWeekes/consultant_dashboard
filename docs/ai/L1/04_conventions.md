@@ -1,6 +1,6 @@
 # 04 Conventions
 
-Purpose: capture repo-specific implementation patterns that new changes should match.
+> Capture repo-specific implementation patterns that new changes should match.
 
 ## App Structure
 
@@ -68,8 +68,6 @@ Purpose: capture repo-specific implementation patterns that new changes should m
   - `06_interfaces.md` for contract changes
   - `07_gotchas.md` when a new trap is discovered
 
-## See Also
+## Related Deep Dives
 
-- [03 Code Map](03_code_map.md)
-- [08 Security](08_security.md)
-
+- None

@@ -10,7 +10,7 @@
 | Language | `Python 3 + Flask + SQLite` |
 | Deploy Target | Separate service process; local dev uses Flask on port `8090` |
 | Owner | `Ben Weekes / consultant-dashboard` |
-| Last Reviewed | `2026-04-13` |
+| Last Reviewed | `2026-04-28` |
 
 ## L1 — Summaries
 
@@ -29,4 +29,4 @@ The Audience column helps agents prioritise: **Use** = consuming the repo's func
 
 ## L2 — Deep Dives
 
-- [Deep Dive Index](L1/deep_dives/_index.md)
+- [Deep Dive Index](L1/L2/_index.md)

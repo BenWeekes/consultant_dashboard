@@ -1,6 +1,6 @@
 # 07 Gotchas
 
-Purpose: preserve the practical traps that are easy to rediscover the hard way.
+> Preserve the practical traps that are easy to rediscover the hard way.
 
 ## Current Gotchas
 
@@ -77,8 +77,6 @@ Update this file when:
 - an environment limitation changes required implementation style
 - a new integration dependency adds setup or signing traps
 
-## See Also
+## Related Deep Dives
 
-- [01 Setup](01_setup.md)
-- [05 Workflows](05_workflows.md)
-- [08 Security](08_security.md)
+- [Therapy Stack Setup](L2/therapy_stack_setup.md) — stale-process, tunnel, and multi-service troubleshooting

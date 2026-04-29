@@ -6,8 +6,8 @@ This repository uses progressive disclosure documentation. Docs live under
 ## How to Load
 
 1. Read [docs/ai/L0_repo_card.md](docs/ai/L0_repo_card.md) to identify the repo.
-2. Load ALL 8 files in `docs/ai/L1/`. They are small and meant to be loaded together.
-3. Follow L2 deep-dive links only when L1 is not detailed enough.
+2. Load ALL 8 files in `docs/ai/L1/`. They are small — load all upfront.
+3. Follow L2 deep-dive links only when L1 isn't detailed enough.
 
 ## Git Conventions
 
@@ -17,6 +17,7 @@ This repository uses progressive disclosure documentation. Docs live under
 - Types: `feat:`, `fix:`, `chore:`, `test:`, `docs:`
 - Lowercase after prefix
 - Present tense
+- PR number appended
 - No AI tool names
 - No `Co-Authored-By` trailers
 - Do not use `--no-verify`
@@ -37,4 +38,3 @@ This repository uses progressive disclosure documentation. Docs live under
 | `test docs` | verify docs still match repo behavior |
 
 This repo follows the Agora `ai-devkit` progressive disclosure standard.
-

@@ -1,6 +1,6 @@
 # 05 Workflows
 
-Purpose: provide fast paths for common maintenance and feature work.
+> Provide fast paths for common maintenance and feature work.
 
 ## Add a New Internal Endpoint
 
@@ -149,8 +149,6 @@ python -m unittest tests.test_web_dashboard -v
 python -m unittest tests.test_smoke -v
 ```
 
-## See Also
+## Related Deep Dives
 
-- [01 Setup](01_setup.md)
-- [06 Interfaces](06_interfaces.md)
-- [07 Gotchas](07_gotchas.md)
+- [Therapy Stack Setup](L2/therapy_stack_setup.md) — full local bring-up and troubleshooting flow

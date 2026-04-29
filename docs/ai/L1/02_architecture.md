@@ -1,6 +1,6 @@
 # 02 Architecture
 
-Purpose: explain what this service owns, what it does not own, and how data flows through it.
+> Explain what this service owns, what it does not own, and how data flows through it.
 
 ## Role in the System
 
@@ -182,8 +182,6 @@ Current implementation assumes:
 
 The plan anticipates later migration of artifacts to S3 or a storage abstraction, but current code is filesystem-backed only.
 
-## See Also
+## Related Deep Dives
 
-- [03 Code Map](03_code_map.md)
-- [06 Interfaces](06_interfaces.md)
-- [08 Security](08_security.md)
+- [Therapy Stack Setup](L2/therapy_stack_setup.md) — operational view of the full local stack
