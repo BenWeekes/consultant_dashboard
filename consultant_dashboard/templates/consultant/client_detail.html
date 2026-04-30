@@ -1,8 +1,5 @@
 {% extends "shared/base.html" %}
 {% block body %}
-  {% set latest_session_row = sessions[0] if sessions else None %}
-  {% set preferred_biomarker_keys = ['stress_index', 'hrv', 'heart_rate', 'breathing_rate', 'stress', 'burnout'] %}
-  {% set latest_biomarker_values = latest_biomarkers.averages if latest_biomarkers and latest_biomarkers.averages else {} %}
   {% include "consultant/_nav.html" %}
 
   <div class="card client-header">
@@ -15,97 +12,79 @@
       </div>
     </div>
     <div class="actions">
-      <a href="{{ tenant_path('/consultant/clients/' ~ client.id ~ '/meetings/new') }}" class="button-secondary button-link">New Meeting</a>
+      <a href="{{ tenant_path('/consultant/clients/' ~ client.id ~ '/meetings/new') }}" class="titlebar-link-button">New Meeting</a>
       <button type="button" class="titlebar-link-button" data-open-contact-editor>Edit Client</button>
     </div>
   </div>
 
-  <div class="client-top-grid">
+  <div class="client-top-grid two-column">
     <div class="card panel-equal">
       <div class="panel-head">
         <div class="panel-title">
-          <div class="panel-kicker">Last Session</div>
+          <div class="panel-kicker">Client Overview</div>
         </div>
       </div>
       <div class="section-stack">
-        {% if latest_session_row %}
-          <div class="meta-block">
-            <div class="meta-primary">{{ (latest_session_row.ended_at or latest_session_row.started_at or latest_session_row.created_at)|display_dt }}</div>
-            {% if latest_session_row.urgent_escalation %}
-              <div class="meta-secondary">Urgent escalation</div>
-            {% endif %}
+        <div class="summary-card">
+          <h3>Client overview</h3>
+          <div class="compact-metric-grid">
+            <div class="compact-metric-item">
+              <span class="compact-metric-label">Year of birth</span>
+              <strong>{{ client.year_of_birth or '—' }}</strong>
+            </div>
+            <div class="compact-metric-item">
+              <span class="compact-metric-label">Sex</span>
+              <strong>{{ (client.sex or '—')|capitalize }}</strong>
+            </div>
+            <div class="compact-metric-item">
+              <span class="compact-metric-label">AI sessions</span>
+              <strong>{{ client.ai_session_count or 0 }}</strong>
+            </div>
+            <div class="compact-metric-item">
+              <span class="compact-metric-label">Human sessions</span>
+              <strong>{{ client.human_session_count or 0 }}</strong>
+            </div>
+            <div class="compact-metric-item">
+              <span class="compact-metric-label">Total sessions</span>
+              <strong>{{ (client.ai_session_count or 0) + (client.human_session_count or 0) }}</strong>
+            </div>
           </div>
-          {% if latest_summary %}
-            <div class="summary-card">
-              <h3>Brief summary</h3>
-              <div class="summary-copy">{{ latest_summary.brief_overview or latest_summary.overview or "No brief summary stored." }}</div>
-            </div>
-            {% if latest_summary.full_summary %}
-              <div class="summary-card">
-                <h3>Full summary</h3>
-                <div class="summary-copy summary-scroll">{{ latest_summary.full_summary }}</div>
-              </div>
+        </div>
+        {% include "consultant/_biomarker_section.html" %}
+        <div class="summary-card">
+          <h3>Client personal summary · AI</h3>
+          {% if ai_personal_summary %}
+            <div class="meta-secondary">{{ ai_personal_summary.session_count or client.ai_session_count or 0 }} AI sessions</div>
+            <div class="summary-copy">{{ ai_personal_summary.brief_overview or ai_personal_summary.overview or "No AI summary stored yet." }}</div>
+            {% if ai_personal_summary.full_summary %}
+              <div class="summary-copy summary-scroll" style="margin-top: 10px;">{{ ai_personal_summary.full_summary }}</div>
             {% endif %}
-          {% endif %}
-          {% if latest_biomarker_highlights %}
-            <div class="summary-card">
-              <h3>Latest biomarkers</h3>
-              <div class="compact-metric-grid">
-                {% for item in latest_biomarker_highlights %}
-                  <div class="compact-metric-item">
-                    <span class="compact-metric-label">{{ item.label }}</span>
-                    <strong>{{ item.value }}</strong>
-                  </div>
-                {% endfor %}
-              </div>
-            </div>
-            {% if latest_biomarkers %}
-              <details class="biomarker-section">
-                <summary class="details-summary">
-                  <strong>More detail</strong>
-                  <span class="muted">Expand</span>
-                </summary>
-                <div class="biomarker-section-body">
-                  {% for section in latest_biomarker_sections %}
-                    <div class="summary-card">
-                      <h3>{{ section.title }}</h3>
-                      <div class="biomarker-grid" style="margin-top: 10px;">
-                        {% for row in section.rows %}
-                          <div class="biomarker-row">
-                            <strong>{{ row.label }}</strong>
-                            <div>{{ row.triplet }}</div>
-                          </div>
-                        {% endfor %}
-                      </div>
-                    </div>
-                  {% endfor %}
-                </div>
-              </details>
-            {% endif %}
-          {% endif %}
-          {% if latest_summary and latest_summary.risk_overview %}
-            <div class="summary-card">
-              <h3>Risk</h3>
-              <div class="summary-copy">{{ latest_summary.risk_overview }}</div>
-            </div>
           {% else %}
-            {% if not latest_summary %}
-              <div class="muted">No summary stored yet.</div>
-            {% endif %}
+            <div class="muted">No AI personal summary stored yet.</div>
           {% endif %}
-        {% else %}
-          <div class="muted">No sessions yet.</div>
-        {% endif %}
+        </div>
+        <div class="summary-card">
+          <h3>Client personal summary · Human</h3>
+          {% if human_personal_summary %}
+            <div class="meta-secondary">{{ human_personal_summary.session_count or client.human_session_count or 0 }} human sessions</div>
+            <div class="summary-copy">{{ human_personal_summary.brief_overview or human_personal_summary.overview or "No human summary stored yet." }}</div>
+            {% if human_personal_summary.full_summary %}
+              <div class="summary-copy summary-scroll" style="margin-top: 10px;">{{ human_personal_summary.full_summary }}</div>
+            {% endif %}
+          {% else %}
+            <div class="muted">No human personal summary stored yet.</div>
+          {% endif %}
+        </div>
       </div>
     </div>
 
-    <div class="card panel-equal">
+    <div class="card panel-equal" id="client-thread">
       <div class="panel-head tight">
         <div class="panel-title">
           <div class="panel-kicker">Notes And Direction</div>
         </div>
       </div>
-      <div class="section-stack">
+      <div class="section-stack" id="notes">
         <form method="post">
           <input type="hidden" name="form_name" value="save_context">
           <label class="field-label">Notes <span class="tooltip" tabindex="0" data-tooltip="Background context for the AI. Keep this general rather than overly specific.">?</span></label>
@@ -114,32 +93,7 @@
           <textarea name="direction" class="compact-context">{{ client.direction_current or '' }}</textarea>
           <button type="submit">Save notes and direction</button>
         </form>
-        <div class="summary-card">
-          <h3>Biomarker baseline</h3>
-          {% if baseline %}
-            <div class="meta-secondary">Window: {{ baseline.window_sessions or 0 }} sessions</div>
-            {% if baseline.averages %}
-              <div class="compact-metric-grid">
-                {% for key in preferred_biomarker_keys %}
-                  {% if baseline.averages[key] is defined %}
-                    <div class="compact-metric-item">
-                      <span class="compact-metric-label">{{ key.replace('_', ' ') }}</span>
-                      <strong>{{ baseline.averages[key] }}</strong>
-                    </div>
-                  {% endif %}
-                {% endfor %}
-              </div>
-            {% else %}
-              <div class="muted">No baseline averages stored yet.</div>
-            {% endif %}
-          {% else %}
-            <div class="muted">No biomarker baseline stored yet.</div>
-          {% endif %}
-        </div>
       </div>
-    </div>
-
-    <div class="card chat-panel panel-equal" id="client-thread">
       <div class="panel-head tight">
         <div class="panel-title">
           <div class="panel-kicker">Messages</div>
@@ -264,6 +218,21 @@
           <div class="field-group-inline">
             <label class="field-label" for="edit_last_name">Last Name</label>
             <input id="edit_last_name" name="last_name" value="{{ client.last_name or '' }}">
+          </div>
+        </div>
+
+        <div class="field-grid-two">
+          <div class="field-group-inline">
+            <label class="field-label" for="edit_year_of_birth">Year of Birth</label>
+            <input id="edit_year_of_birth" name="year_of_birth" type="number" min="1900" max="2100" value="{{ client.year_of_birth or '' }}">
+          </div>
+          <div class="field-group-inline">
+            <label class="field-label" for="edit_sex">Sex</label>
+            <select id="edit_sex" name="sex">
+              <option value="" {% if not client.sex %}selected{% endif %}>Select</option>
+              <option value="male" {% if client.sex == 'male' %}selected{% endif %}>Male</option>
+              <option value="female" {% if client.sex == 'female' %}selected{% endif %}>Female</option>
+            </select>
           </div>
         </div>
 

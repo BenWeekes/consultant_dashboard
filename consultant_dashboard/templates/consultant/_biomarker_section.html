@@ -1,0 +1,108 @@
+<div class="biomarker-section-root" data-biomarker-section-root="1">
+  {% if biomarker_headlines %}
+    <div class="summary-card">
+      <h3 class="biomarker-section-header">Biomarkers</h3>
+      <div class="biomarker-headline-grid">
+        {% for item in biomarker_headlines %}
+          <div class="biomarker-headline-item">
+            <span class="compact-metric-label">{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
+            {% if item.detail %}
+              <div class="biomarker-meta">{{ item.detail }}</div>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
+  {% if biomarker_groups %}
+    {% for group in biomarker_groups %}
+      <div class="summary-card">
+        <h3 class="biomarker-section-header">{{ group.title }}</h3>
+        <div class="biomarker-grid">
+          {% for row in group.rows %}
+            <div class="biomarker-row">
+              <strong>{{ row.label }}</strong>
+              <div class="biomarker-stat-line">
+                <span>Average</span>
+                <span>
+                  {% if row.average %}
+                    {{ row.average }}{% if row.unit and row.label != 'Blood Pressure' %} {{ row.unit }}{% endif %}
+                  {% else %}
+                    —
+                  {% endif %}
+                </span>
+              </div>
+              <div class="biomarker-stat-line">
+                <span>Max</span>
+                <span>
+                  {% if row.max %}
+                    {{ row.max }}{% if row.unit and row.label != 'Blood Pressure' %} {{ row.unit }}{% endif %}
+                  {% else %}
+                    —
+                  {% endif %}
+                </span>
+              </div>
+              {% if row.window_sessions %}
+                <div class="biomarker-meta">{{ row.window_sessions }} sessions</div>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endfor %}
+  {% endif %}
+
+  {% if biomarker_safety %}
+    <details class="biomarker-section">
+      <summary class="details-summary">
+        <strong>Safety Details</strong>
+        <span class="muted">Expand</span>
+      </summary>
+      <div class="biomarker-section-body">
+        <div class="summary-card">
+          <div class="biomarker-grid">
+            {% if biomarker_safety.level is not none %}
+              <div class="biomarker-row">
+                <strong>Highest Level</strong>
+                <div>{{ biomarker_safety.level }}</div>
+              </div>
+            {% endif %}
+            {% if biomarker_safety.alert %}
+              <div class="biomarker-row">
+                <strong>Alert</strong>
+                <div>{{ biomarker_safety.alert }}</div>
+              </div>
+            {% endif %}
+            {% if biomarker_safety.policy %}
+              <div class="biomarker-row">
+                <strong>Active Policy</strong>
+                <div>{{ biomarker_safety.policy }}</div>
+              </div>
+            {% endif %}
+            {% if biomarker_safety.concerns %}
+              <div class="biomarker-row">
+                <strong>Concerns</strong>
+                <div>{{ biomarker_safety.concerns|join(', ') }}</div>
+              </div>
+            {% endif %}
+            {% if biomarker_safety.actions %}
+              <div class="biomarker-row">
+                <strong>Guidance</strong>
+                <div>{{ biomarker_safety.actions|join('; ') }}</div>
+              </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </details>
+  {% endif %}
+
+  {% if biomarker_empty_message %}
+    <div class="summary-card">
+      <h3 class="biomarker-section-header">Biomarkers</h3>
+      <div class="summary-copy">{{ biomarker_empty_message }}</div>
+    </div>
+  {% endif %}
+</div>

@@ -171,7 +171,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
 
         response = self.client.get("/v/mindfix/index.html")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"MindFix \xe2\x80\x94 AI-Powered Mental Wellness", response.data)
+        self.assertIn(b"MindFix \xe2\x80\x94 AI Mental Wellness Guided by Therapists", response.data)
         self.assertIn(b'/v/mindfix/consultant/login', response.data)
         self.assertIn(b'/v/mindfix/admin/login', response.data)
         self.assertIn(b'/v/mindfix/app', response.data)
@@ -296,6 +296,8 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             data={
                 "first_name": "Jamie",
                 "last_name": "Demo",
+                "year_of_birth": "1985",
+                "sex": "female",
                 "email": "jamie@example.com",
                 "password": "jamiepass123",
                 "phone_country_code": "UK",
@@ -312,9 +314,11 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertIn(b"Messages", response.data)
 
         db = get_db(self.app.config)
-        row = db.execute("SELECT password_hash FROM clients WHERE email = ?", ("jamie@example.com",)).fetchone()
+        row = db.execute("SELECT password_hash, year_of_birth, sex FROM clients WHERE email = ?", ("jamie@example.com",)).fetchone()
         db.close()
         self.assertTrue(row["password_hash"])
+        self.assertEqual(row["year_of_birth"], 1985)
+        self.assertEqual(row["sex"], "female")
 
     def test_clients_table_uses_text_link_for_new_meeting_action(self):
         self.consultant_login()
@@ -386,6 +390,8 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             data={
                 "first_name": "Alex",
                 "last_name": "Demo Updated",
+                "year_of_birth": "1980",
+                "sex": "female",
                 "email": "alex.updated@example.com",
                 "phone_country_code": "US",
                 "phone_number": "4155551212",
@@ -406,7 +412,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
 
         db = get_db(self.app.config)
         row = db.execute(
-            "SELECT first_name, last_name, display_name, email, phone_number, escalation_phone_number, password_hash FROM clients WHERE id = ?",
+            "SELECT first_name, last_name, display_name, email, phone_number, escalation_phone_number, year_of_birth, sex, password_hash FROM clients WHERE id = ?",
             (self.client_id,),
         ).fetchone()
         identity = db.execute(
@@ -420,6 +426,8 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertEqual(row["email"], "alex.updated@example.com")
         self.assertEqual(row["phone_number"], "+14155551212")
         self.assertEqual(row["escalation_phone_number"], "+447700900444")
+        self.assertEqual(row["year_of_birth"], 1980)
+        self.assertEqual(row["sex"], "female")
         self.assertTrue(row["password_hash"])
         self.assertIsNotNone(identity["email_hash"])
         self.assertIsNotNone(identity["phone_hash"])
@@ -451,12 +459,13 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertEqual(row["email"], "alex@gmail.com")
         self.assertEqual(row["password_hash"], "")
 
-    def test_consultant_can_update_notes_and_direction_from_session_page(self):
+    def test_consultant_can_update_notes_and_direction_from_client_page(self):
         self.ingest_session(session_id="sess_notes_001", urgent_escalation=False)
         self.consultant_login()
         response = self.client.post(
-            "/consultant/sessions/sess_notes_001",
+            f"/consultant/clients/{self.client_id}",
             data={
+                "form_name": "save_context",
                 "notes": "Updated notes from session page.",
                 "direction": "Focus next session on sleep and stress.",
             },
@@ -1852,6 +1861,8 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             phone_number="+447700900222",
             notification_email="other@example.com",
             escalation_phone_number="+447700900222",
+            year_of_birth=None,
+            sex="",
             notes="",
             direction="",
         )
@@ -1956,9 +1967,15 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         response = self.client.get(f"/consultant/clients/{self.client_id}")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"urgent escalation", response.data)
-        self.assertIn(b"Last Session", response.data)
+        self.assertNotIn(b"Last Session", response.data)
         self.assertIn(b"Messages", response.data)
         self.assertIn(b"Edit Contact Details", response.data)
+        self.assertIn(b"Notes And Direction", response.data)
+        self.assertIn(b"Client personal summary", response.data)
+        self.assertIn(b"Average", response.data)
+        self.assertIn(b"Max", response.data)
+        self.assertRegex(response.data, rb"\d+%")
+        self.assertEqual(response.data.count(b'data-biomarker-section-root="1"'), 1)
         self.assertNotIn(b"Client Sign-In Match", response.data)
 
         response = self.client.get("/consultant/sessions")
@@ -1968,8 +1985,15 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         response = self.client.get("/consultant/sessions/sess_web_001")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Elevated stress", response.data)
-        self.assertIn(f'action="/v/mindfix/consultant/clients/{self.client_id}/messages/send"'.encode(), response.data)
-        self.assertIn(f'data-thread-endpoint="/v/mindfix/consultant/clients/{self.client_id}/messages/thread"'.encode(), response.data)
+        self.assertIn(f'href="/v/mindfix/consultant/clients/{self.client_id}#notes"'.encode(), response.data)
+        self.assertIn(b"Average", response.data)
+        self.assertIn(b"Max", response.data)
+        self.assertRegex(response.data, rb"\d+%")
+        self.assertEqual(response.data.count(b'data-biomarker-section-root="1"'), 1)
+        self.assertNotIn(b"Notes And Direction", response.data)
+        self.assertNotIn(b"Biomarker summary", response.data)
+        self.assertNotIn(f'action="/v/mindfix/consultant/clients/{self.client_id}/messages/send"'.encode(), response.data)
+        self.assertNotIn(f'data-thread-endpoint="/v/mindfix/consultant/clients/{self.client_id}/messages/thread"'.encode(), response.data)
 
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_consultant_can_send_email_message(self, mocked_deliver_email):

@@ -37,12 +37,16 @@ Core contracts:
 - `POST /internal/verify-client-password`
 - `POST /internal/run-reminders`
 - `POST /internal/session-complete`
+- `POST /internal/crisis-escalate-init`
+- `POST /internal/crisis-escalate-status`
 
 Contract expectations:
 
 - all non-health internal routes use HMAC request signing
 - dashboard responses are authoritative for client identity and meeting join rights
 - browser-supplied meeting ids, participant ids, and UIDs must not override dashboard authorization results
+- `crisis-escalate-status` rejects unknown phases with `400`
+- `crisis-escalate-status` returns `404` if the `escalation_event_id` does not exist
 
 ## Realtime Interfaces
 
@@ -62,6 +66,7 @@ Most important payload families:
 - meeting join authorization
 - reminder sweep results
 - session-complete ingestion payloads from `server-custom-llm`
+- AI-human crisis escalation init/status payloads
 
 If an integration change affects one of those payloads, update tests in both this repo and the calling service.
 

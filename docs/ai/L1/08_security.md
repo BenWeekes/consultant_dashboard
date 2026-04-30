@@ -37,6 +37,7 @@ Current state:
 - admin flow is password-only today
 - clients can also reach hosted secure pages through hashed `client_access_links`
 - client-authenticated browser access is carried by a shared 1-hour auth cookie after successful backend login + OTP
+- AI-human crisis escalation events are internal-service initiated only; no browser route can start them directly
 
 ## Internal Service Auth
 
@@ -50,6 +51,7 @@ Protections:
 - request signing with shared secret
 - 5-minute timestamp freshness window
 - exact path + method + payload binding in the signature
+- crisis init/status uses the same signed internal contract
 
 Meeting-specific trust rule:
 
@@ -91,6 +93,7 @@ SQLite stores:
 - IDs
 - assignments
 - audit rows
+- escalation event rows and call-state metadata
 - storage key references
 
 Encrypted artifacts store:
@@ -112,6 +115,8 @@ Secrets must not be committed:
 - `.env`
 - `config/admin_auth.conf`
 - runtime data under `data/`
+- SIP-CM auth tokens
+- Agora app certificates
 
 Tracked files expose only examples:
 

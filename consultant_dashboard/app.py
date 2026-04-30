@@ -189,6 +189,8 @@ def main() -> int:
             phone_number=args.phone,
             notification_email=args.notification_email or args.email,
             escalation_phone_number=args.escalation_phone_number or args.phone,
+            year_of_birth=None,
+            sex="",
             notes=args.notes,
             direction=args.direction,
         )

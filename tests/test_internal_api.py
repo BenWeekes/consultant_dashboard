@@ -96,6 +96,36 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
 
     def test_client_context_returns_summary_baseline_and_alerts(self):
         self.ingest_session(session_id="sess_internal_001", urgent_escalation=True)
+        human_payload = {
+            "client_id": self.client_id,
+            "consultant_id": self.consultant_id,
+            "session_id": "sess_internal_human_001",
+            "session_kind": "consultant_live_session",
+            "profile": "therapy",
+            "channel": "human-channel",
+            "started_at": "2026-04-13T19:00:00Z",
+            "ended_at": "2026-04-13T19:30:00Z",
+            "duration_seconds": 1800,
+            "status": "completed",
+            "summary": {
+                "brief_overview": "Human session follow-up.",
+                "full_summary": "Human therapist follow-up focused on routines and coping.",
+                "biomarker_summary": "",
+                "risk_overview": "",
+                "follow_up": "Continue reviewing routines with the therapist.",
+                "source": "custom-llm",
+            },
+            "biomarkers": {"averages": {}},
+            "alerts": [],
+        }
+        human_body = json.dumps(human_payload, separators=(",", ":"))
+        human_response = self.client.post(
+            "/internal/session-complete",
+            data=human_body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/session-complete", human_body),
+        )
+        self.assertEqual(human_response.status_code, 200)
         query_string = f"client_id={self.client_id}"
         response = self.client.get(
             f"/internal/client-context?{query_string}",
@@ -103,16 +133,170 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["display_name"], "Alex Demo")
+        self.assertEqual(response.json["year_of_birth"], 1974)
+        self.assertEqual(response.json["sex"], "male")
         self.assertEqual(response.json["consultant_id"], self.consultant_id)
         self.assertEqual(response.json["consultant_name"], "Test Consultant")
         self.assertEqual(response.json["notes"], "Generalized notes only.")
         self.assertEqual(response.json["direction"], "Check stress and routines.")
         self.assertIsNotNone(response.json["latest_summary"])
-        self.assertEqual(response.json["latest_summary"]["full_summary"], "Generalized summary.")
-        self.assertEqual(len(response.json["recent_summaries"]), 1)
+        self.assertEqual(
+            response.json["latest_summary"]["full_summary"],
+            "Human therapist follow-up focused on routines and coping.",
+        )
+        self.assertEqual(response.json["ai_session_count"], 1)
+        self.assertEqual(response.json["human_session_count"], 1)
+        self.assertIsNotNone(response.json["ai_personal_summary"])
+        self.assertIsNotNone(response.json["human_personal_summary"])
+        self.assertIn("ai sessions", response.json["ai_personal_summary"]["full_summary"].lower())
+        self.assertIn("human sessions", response.json["human_personal_summary"]["full_summary"].lower())
+        self.assertEqual(len(response.json["recent_summaries"]), 2)
         self.assertIsNotNone(response.json["baseline"])
-        self.assertEqual(response.json["baseline"]["window_sessions"], 1)
+        self.assertEqual(response.json["baseline"]["window_sessions"], 2)
+        self.assertEqual(response.json["baseline"]["maxes"]["stress_index"], 64.2)
         self.assertEqual(len(response.json["alerts"]), 2)
+
+    def test_crisis_escalate_init_returns_bundle_for_ai_session_without_scheduled_meeting(self):
+        payload = {
+            "client_id": self.client_id,
+            "session_id": "sess_crisis_001",
+            "channel_name": "ai-room-001",
+            "level": 3,
+            "alert": "urgent",
+            "source": "thymia",
+        }
+        body = json.dumps(payload, separators=(",", ":"))
+        response = self.client.post(
+            "/internal/crisis-escalate-init",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/crisis-escalate-init", body),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json["ok"])
+        self.assertTrue(response.json["escalate"])
+        self.assertEqual(response.json["channel_name"], "ai-room-001")
+        self.assertEqual(response.json["escalation_phone_number"], "+447700900000")
+        self.assertEqual(response.json["pstn_uid"], "43455")
+        self.assertTrue(response.json["rtc_token"])
+
+    def test_crisis_escalate_init_returns_skipped_when_phone_missing(self):
+        db = get_db(self.app.config)
+        db.execute("UPDATE clients SET escalation_phone_number = '' WHERE id = ?", (self.client_id,))
+        db.commit()
+        db.close()
+        payload = {
+            "client_id": self.client_id,
+            "session_id": "sess_crisis_002",
+            "channel_name": "ai-room-002",
+            "level": 3,
+            "alert": "urgent",
+            "source": "thymia",
+        }
+        body = json.dumps(payload, separators=(",", ":"))
+        response = self.client.post(
+            "/internal/crisis-escalate-init",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/crisis-escalate-init", body),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json["ok"])
+        self.assertFalse(response.json["escalate"])
+        self.assertEqual(response.json["reason"], "missing_phone")
+
+    def test_crisis_escalate_init_requires_numeric_level(self):
+        payload = {
+            "client_id": self.client_id,
+            "session_id": "sess_crisis_bad_level",
+            "channel_name": "ai-room-bad-level",
+            "alert": "urgent",
+            "source": "thymia",
+        }
+        body = json.dumps(payload, separators=(",", ":"))
+        response = self.client.post(
+            "/internal/crisis-escalate-init",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/crisis-escalate-init", body),
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("numeric level required", response.json["error"])
+
+    def test_crisis_escalate_status_persists_generated_texts(self):
+        meeting_id = self.create_meeting(meeting_type="ai")
+        init_payload = {
+            "meeting_id": meeting_id,
+            "client_id": self.client_id,
+            "session_id": "sess_crisis_003",
+            "level": 3,
+            "alert": "urgent",
+            "source": "thymia",
+        }
+        init_body = json.dumps(init_payload, separators=(",", ":"))
+        init_response = self.client.post(
+            "/internal/crisis-escalate-init",
+            data=init_body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/crisis-escalate-init", init_body),
+        )
+        event_id = init_response.json["escalation_event_id"]
+        payload = {
+            "escalation_event_id": event_id,
+            "phase": "answered",
+            "client_announcement_text": "I am calling your trusted contact now.",
+            "recipient_summary_text": "This is the MindFix escalation assistant.",
+            "provider_result": "OK",
+            "session_id": "sess_crisis_003",
+        }
+        body = json.dumps(payload, separators=(",", ":"))
+        response = self.client.post(
+            "/internal/crisis-escalate-status",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/crisis-escalate-status", body),
+        )
+        self.assertEqual(response.status_code, 200)
+        db = get_db(self.app.config)
+        row = db.execute(
+            "SELECT status, provider_result, client_announcement_text, recipient_summary_text FROM escalation_events WHERE id = ?",
+            (event_id,),
+        ).fetchone()
+        db.close()
+        self.assertEqual(row["status"], "answered")
+        self.assertEqual(row["provider_result"], "OK")
+        self.assertEqual(row["client_announcement_text"], "I am calling your trusted contact now.")
+        self.assertEqual(row["recipient_summary_text"], "This is the MindFix escalation assistant.")
+
+    def test_crisis_escalate_status_rejects_invalid_phase(self):
+        payload = {
+            "escalation_event_id": "evt-doesnt-matter",
+            "phase": "bogus_phase",
+        }
+        body = json.dumps(payload, separators=(",", ":"))
+        response = self.client.post(
+            "/internal/crisis-escalate-status",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/crisis-escalate-status", body),
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("invalid phase", response.json["error"])
+
+    def test_crisis_escalate_status_returns_404_when_event_missing(self):
+        payload = {
+            "escalation_event_id": "evt-missing",
+            "phase": "answered",
+        }
+        body = json.dumps(payload, separators=(",", ":"))
+        response = self.client.post(
+            "/internal/crisis-escalate-status",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/crisis-escalate-status", body),
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json["error"], "escalation event not found")
 
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_session_complete_for_weekly_meeting_creates_one_next_occurrence(self, mocked_deliver_email):

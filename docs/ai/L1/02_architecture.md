@@ -20,6 +20,7 @@ It owns:
   - start-of-session context fetch
   - meeting join authorization
   - end-of-call ingestion
+  - AI-human crisis escalation init/status
 
 It does not own:
 
@@ -37,6 +38,8 @@ simple-backend ----signed GET----> consultant-dashboard /internal/resolve-client
 simple-backend ----signed GET----> consultant-dashboard /internal/client-context
 simple-backend ----signed POST---> consultant-dashboard /internal/authorize-meeting-join
 server-custom-llm -signed POST---> consultant-dashboard /internal/session-complete
+server-custom-llm -signed POST---> consultant-dashboard /internal/crisis-escalate-init
+server-custom-llm -signed POST---> consultant-dashboard /internal/crisis-escalate-status
 
 consultant/admin browser ---> consultant-dashboard web routes
 client secure reply link -> consultant-dashboard /client/messages/<token>
@@ -103,6 +106,7 @@ Ownership rule:
 3. Service upserts the `sessions` row.
 4. Service recomputes the rolling biomarker baseline from the latest five stored biomarker snapshots.
 5. Service stores session alerts and writes an audit log row.
+6. If crisis escalation occurred, the linked `escalation_events` row shares the same `session_id`.
 
 The dashboard summary is intended to stay consultant-facing and generalized. Richer runtime continuity memory remains the responsibility of `server-custom-llm` and should not be treated as the same artifact.
 
@@ -110,6 +114,14 @@ Current end-of-call split:
 
 - continuity memory: private AI follow-up summary stored by `server-custom-llm`
 - consultant summary: generalized dashboard summary with overview, biomarker summary, risk overview, and follow-up guidance
+
+### AI-human crisis escalation
+
+1. `server-custom-llm` receives a Thymia safety result at or above the crisis threshold.
+2. It calls signed `POST /internal/crisis-escalate-init`.
+3. This service validates `client_id` + `session_id`, optionally validates `meeting_id`, and creates or reuses an `escalation_events` row.
+4. `server-custom-llm` dials the PSTN leg into the same Agora channel.
+5. It posts signed `POST /internal/crisis-escalate-status` transitions (`dialing`, `answered`, `failed`, `completed`).
 
 ### Consultant messaging
 
@@ -179,6 +191,7 @@ Current implementation assumes:
 - one service-local SQLite database
 - local/shared filesystem storage
 - HMAC-signed internal HTTP between trusted services
+- AI-human escalation can exist without a scheduled meeting row
 
 The plan anticipates later migration of artifacts to S3 or a storage abstraction, but current code is filesystem-backed only.
 

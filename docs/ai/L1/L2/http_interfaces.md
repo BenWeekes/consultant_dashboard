@@ -185,3 +185,68 @@ Current accepted payload fields:
 - `duration_seconds`
 - `status`
 - `summary`
+
+### `POST /internal/crisis-escalate-init`
+
+Signature required.
+
+Required JSON body:
+
+- `client_id`
+- `session_id`
+- `level` (numeric)
+
+Optional / conditional JSON body:
+
+- `meeting_id`
+- `channel_name` required when `meeting_id` is absent
+- `alert`
+- `source`
+
+Returns:
+
+- `ok`
+- `escalate`
+- `escalation_event_id`
+- if `escalate=true`:
+  - `meeting_id`
+  - `channel_name`
+  - `client_id`
+  - `client_display_name`
+  - `escalation_phone_number`
+  - `from_phone`
+  - `sip_gateway`
+  - `region`
+  - `pstn_uid`
+  - `rtc_token`
+- if `escalate=false`:
+  - `reason` (currently `missing_phone`)
+
+### `POST /internal/crisis-escalate-status`
+
+Signature required.
+
+Required JSON body:
+
+- `escalation_event_id`
+- `phase`
+
+Optional JSON body:
+
+- `reason`
+- `provider_result`
+- `client_announcement_text`
+- `recipient_summary_text`
+- `session_id`
+
+Allowed `phase` values:
+
+- `dialing`
+- `answered`
+- `failed`
+- `completed`
+
+Validation notes:
+
+- invalid `phase` returns `400`
+- missing `escalation_event_id` returns `404`

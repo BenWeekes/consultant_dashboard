@@ -9,12 +9,15 @@ from werkzeug.security import check_password_hash
 
 from .db import (
     complete_scheduled_meeting,
+    create_escalation_event,
     create_session_alert,
+    get_client_detail,
     get_client_by_email,
     get_client_access_link_by_hash,
     get_client_context,
     get_meeting_by_response_access_link_id,
     get_db,
+    get_latest_escalation_event,
     get_meeting_signal_flags,
     get_scheduled_meeting,
     get_vendor_by_slug,
@@ -23,13 +26,15 @@ from .db import (
     mark_meeting_joined,
     resolve_client_identity,
     record_meeting_event,
+    update_escalation_event,
     upsert_session,
 )
+from .agora_tokens import build_rtc_token
 from .meetings import utc_now
 from .messaging import hash_access_token
 from .storage import EncryptedStorage
 from .vendors import storage_root_for_client
-from .web import _ensure_next_weekly_occurrence, run_due_meeting_reminders
+from .web import _ensure_next_weekly_occurrence, _refresh_client_derived_state, run_due_meeting_reminders
 
 internal_bp = Blueprint("internal", __name__, url_prefix="/internal")
 
@@ -117,8 +122,16 @@ def client_context():
         return jsonify({"error": "client not found"}), 404
     client, alerts = result
     storage = EncryptedStorage(storage_root_for_client(client_id), current_app.config["MASTER_KEY"])
+    if not client["ai_summary_storage_key"] or not client["human_summary_storage_key"]:
+        _refresh_client_derived_state(db, storage, client_id)
+        db.commit()
+        refreshed = get_client_context(db, client_id)
+        if refreshed:
+            client, alerts = refreshed
     latest_summary = None
     baseline = None
+    ai_personal_summary = None
+    human_personal_summary = None
     recent_summaries = []
     if client["latest_summary_storage_key"]:
         latest_summary = _normalize_summary_payload(
@@ -126,16 +139,28 @@ def client_context():
         )
     if client["baseline_storage_key"]:
         baseline = storage.get_json(client["baseline_storage_key"], client_id)
+    if client["ai_summary_storage_key"]:
+        ai_personal_summary = storage.get_json(client["ai_summary_storage_key"], client_id)
+    if client["human_summary_storage_key"]:
+        human_personal_summary = storage.get_json(client["human_summary_storage_key"], client_id)
     recent_summaries = _load_recent_summaries(storage, db, client_id)
     db.close()
     return {
         "client_id": client["id"],
         "display_name": client["display_name"],
+        "first_name": client["first_name"] or "",
+        "last_name": client["last_name"] or "",
+        "year_of_birth": client["year_of_birth"],
+        "sex": client["sex"] or "",
         "consultant_id": client["consultant_id"],
         "consultant_name": client["consultant_name"],
         "notes": client["notes_current"],
         "direction": client["direction_current"],
         "latest_summary": latest_summary,
+        "ai_personal_summary": ai_personal_summary,
+        "human_personal_summary": human_personal_summary,
+        "ai_session_count": int(client["ai_session_count"] or 0),
+        "human_session_count": int(client["human_session_count"] or 0),
         "recent_summaries": recent_summaries,
         "baseline": baseline,
         "alerts": [dict(a) for a in alerts],
@@ -195,6 +220,182 @@ def verify_client_password():
         "phone_number": client["phone_number"],
         "is_active": bool(client["is_active"]),
     }
+
+
+@internal_bp.post("/crisis-escalate-init")
+def crisis_escalate_init():
+    payload = request.get_json(force=True)
+    meeting_id = (payload.get("meeting_id") or "").strip()
+    client_id = (payload.get("client_id") or "").strip()
+    session_id = (payload.get("session_id") or "").strip()
+    channel_name = (payload.get("channel_name") or "").strip()
+    source = (payload.get("source") or "thymia").strip()
+    if not client_id or not session_id:
+        return jsonify({"error": "client_id and session_id required"}), 400
+    try:
+        level = int(payload["level"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"error": "numeric level required"}), 400
+
+    db = get_db(current_app.config)
+    meeting = get_scheduled_meeting(db, meeting_id) if meeting_id else None
+    client = get_client_detail(db, client_id)
+    if not client:
+        db.close()
+        return jsonify({"error": "client not found"}), 404
+    if meeting and meeting["client_id"] != client_id:
+        db.close()
+        return jsonify({"error": "meeting/client mismatch"}), 409
+    if not meeting and not channel_name:
+        db.close()
+        return jsonify({"error": "channel_name required when meeting_id is missing"}), 400
+
+    existing = get_latest_escalation_event(db, meeting_id=meeting_id, session_id="" if meeting_id else session_id)
+    if existing and existing["status"] in {"initialised", "dialing", "answered"}:
+        response = {
+            "ok": True,
+            "escalate": True,
+            "escalation_event_id": existing["id"],
+            "meeting_id": meeting_id,
+            "channel_name": meeting["channel_name"] if meeting else channel_name,
+            "client_id": client_id,
+            "client_display_name": meeting["client_name"] if meeting else client["display_name"],
+            "escalation_phone_number": existing["escalation_phone_number"] or "",
+            "from_phone": current_app.config.get("CRISIS_CALL_FROM_NUMBER", ""),
+            "sip_gateway": current_app.config.get("CRISIS_CALL_SIP_GATEWAY", ""),
+            "region": current_app.config.get("CRISIS_CALL_REGION", "AREA_CODE_NA"),
+            "pstn_uid": current_app.config.get("CRISIS_CALL_PSTN_UID", "43455"),
+            "rtc_token": build_rtc_token(
+                current_app.config.get("APP_ID", ""),
+                current_app.config.get("APP_CERTIFICATE", ""),
+                meeting["channel_name"] if meeting else channel_name,
+                current_app.config.get("CRISIS_CALL_PSTN_UID", "43455"),
+            ),
+            "reason": existing["reason"] or "",
+        }
+        db.close()
+        return response
+
+    escalation_phone = ((meeting["client_escalation_phone_number"] if meeting else client["escalation_phone_number"]) or "").strip()
+    alert = (payload.get("alert") or "").strip()
+    if not escalation_phone:
+        event_id = create_escalation_event(
+            db,
+            meeting_id=meeting_id,
+            session_id=session_id,
+            client_id=client_id,
+            source=source,
+            safety_level=level,
+            alert=alert,
+            status="skipped",
+            reason="missing_phone",
+            escalation_phone_number="",
+        )
+        log_audit(
+            db,
+            actor_type="system",
+            actor_id="server-custom-llm",
+            action="crisis_escalation_skipped",
+            target_type="meeting",
+            target_id=meeting_id,
+            session_id=session_id,
+            details={"client_id": client_id, "reason": "missing_phone"},
+        )
+        db.commit()
+        db.close()
+        return {
+            "ok": True,
+            "escalate": False,
+            "reason": "missing_phone",
+            "escalation_event_id": event_id,
+        }
+
+    event_id = create_escalation_event(
+        db,
+        meeting_id=meeting_id,
+        session_id=session_id,
+        client_id=client_id,
+        source=source,
+        safety_level=level,
+        alert=alert,
+        status="initialised",
+        escalation_phone_number=escalation_phone,
+    )
+    log_audit(
+        db,
+        actor_type="system",
+        actor_id="server-custom-llm",
+        action="crisis_escalation_initialised",
+        target_type="escalation_event",
+        target_id=event_id,
+        session_id=session_id,
+        details={"client_id": client_id, "meeting_id": meeting_id, "channel_name": meeting["channel_name"] if meeting else channel_name},
+    )
+    db.commit()
+    db.close()
+    return {
+        "ok": True,
+        "escalate": True,
+        "escalation_event_id": event_id,
+        "meeting_id": meeting_id,
+        "channel_name": meeting["channel_name"] if meeting else channel_name,
+        "client_id": client_id,
+        "client_display_name": meeting["client_name"] if meeting else client["display_name"],
+        "escalation_phone_number": escalation_phone,
+        "from_phone": current_app.config.get("CRISIS_CALL_FROM_NUMBER", ""),
+        "sip_gateway": current_app.config.get("CRISIS_CALL_SIP_GATEWAY", ""),
+        "region": current_app.config.get("CRISIS_CALL_REGION", "AREA_CODE_NA"),
+        "pstn_uid": current_app.config.get("CRISIS_CALL_PSTN_UID", "43455"),
+        "rtc_token": build_rtc_token(
+            current_app.config.get("APP_ID", ""),
+            current_app.config.get("APP_CERTIFICATE", ""),
+            meeting["channel_name"] if meeting else channel_name,
+            current_app.config.get("CRISIS_CALL_PSTN_UID", "43455"),
+        ),
+    }
+
+
+CRISIS_ESCALATE_STATUS_ALLOWED_PHASES = frozenset(
+    {"dialing", "answered", "failed", "completed"}
+)
+
+
+@internal_bp.post("/crisis-escalate-status")
+def crisis_escalate_status():
+    payload = request.get_json(force=True)
+    escalation_event_id = (payload.get("escalation_event_id") or "").strip()
+    phase = (payload.get("phase") or "").strip()
+    if not escalation_event_id or not phase:
+        return jsonify({"error": "escalation_event_id and phase required"}), 400
+    if phase not in CRISIS_ESCALATE_STATUS_ALLOWED_PHASES:
+        return jsonify({"error": f"invalid phase: {phase}"}), 400
+
+    db = get_db(current_app.config)
+    updated = update_escalation_event(
+        db,
+        escalation_event_id=escalation_event_id,
+        status=phase,
+        reason=(payload.get("reason") or "").strip(),
+        provider_result=(payload.get("provider_result") or "").strip(),
+        client_announcement_text=payload.get("client_announcement_text"),
+        recipient_summary_text=payload.get("recipient_summary_text"),
+    )
+    if not updated:
+        db.close()
+        return jsonify({"error": "escalation event not found"}), 404
+    log_audit(
+        db,
+        actor_type="system",
+        actor_id="server-custom-llm",
+        action=f"crisis_escalation_{phase}",
+        target_type="escalation_event",
+        target_id=escalation_event_id,
+        session_id=(payload.get("session_id") or "").strip(),
+        details={"reason": (payload.get("reason") or "").strip()},
+    )
+    db.commit()
+    db.close()
+    return {"ok": True, "escalation_event_id": escalation_event_id, "phase": phase}
 
 
 def _parse_dt(value: str):
@@ -675,20 +876,11 @@ def session_complete():
                 event_type="meeting_completed",
                 details={"linked_session_id": session_id},
             )
-    baseline_key = None
-    if biomarker_key:
-        baseline = _compute_baseline(storage, db, client_id)
-        baseline_key = f"clients/{client_id}/baseline.json.enc"
-        storage.put_json(baseline_key, client_id, baseline)
-        db.execute(
-            "UPDATE clients SET baseline_storage_key = ?, latest_summary_storage_key = COALESCE(?, latest_summary_storage_key), updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (baseline_key, summary_key, client_id),
-        )
-    elif summary_key:
-        db.execute(
-            "UPDATE clients SET latest_summary_storage_key = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (summary_key, client_id),
-        )
+    _refresh_client_derived_state(db, storage, client_id)
+    baseline_key = db.execute(
+        "SELECT baseline_storage_key FROM clients WHERE id = ?",
+        (client_id,),
+    ).fetchone()["baseline_storage_key"]
     if payload.get("urgent_escalation"):
         details_key = f"clients/{client_id}/sessions/{session_id}/alerts/urgent.json.enc"
         storage.put_json(

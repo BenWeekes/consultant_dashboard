@@ -183,6 +183,8 @@
       .client-contact-line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; color: var(--text-muted); font-size: 14px; }
       .client-sep { color: #9bb0a1; }
       .client-top-grid { display: grid; gap: 16px; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; margin-bottom: 56px; }
+      .client-top-grid.two-column { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .client-top-grid.single-column { grid-template-columns: 1fr; }
       .client-top-grid > .card { overflow: hidden; }
       .client-bottom-grid { display: grid; gap: 16px; grid-template-columns: 1.1fr 0.9fr; margin-top: 16px; align-items: start; }
       .client-bottom-grid.single-column { grid-template-columns: 1fr; }
@@ -298,6 +300,10 @@
       .biomarker-row { padding: 12px; border-radius: 12px; background: white; border: 1px solid #e3ece4; display: grid; gap: 4px; }
       .biomarker-row strong { font-size: 14px; }
       .biomarker-meta { font-size: 12px; color: var(--text-muted); }
+      .biomarker-stat-line { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+      .biomarker-stat-line span:first-child { color: var(--text-muted); }
+      .biomarker-section-root { display: grid; gap: 12px; }
+      .biomarker-section-header { margin-bottom: 6px; }
       .chat-status-note { font-size: 12px; color: var(--text-muted); line-height: 1.45; }
       .status-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--accent-soft-solid); color: var(--text-muted); font-size: 12px; font-weight: 700; }
       .status-chip.live { background: #e7f7eb; color: #14743c; }

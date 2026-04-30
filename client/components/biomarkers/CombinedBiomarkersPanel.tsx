@@ -85,6 +85,15 @@ function safetyTone(level: number | null): string {
   return "text-[#ef6b64]";
 }
 
+function formatPolicyName(policyName: unknown): string | null {
+  if (typeof policyName !== "string" || !policyName.trim()) return null;
+  if (policyName === "mindfix_safety_v1") return "Custom policy";
+  if (policyName === "agora_safety_analysis" || policyName === "safety_analysis") {
+    return "Default policy";
+  }
+  return policyName.replace(/_/g, " ");
+}
+
 function formatProgressName(name: string): string {
   return name
     .replace(/^symptom_/, "")
@@ -331,6 +340,10 @@ export function CombinedBiomarkersPanel({
       : typeof safety.highest_level === "number"
         ? safety.highest_level
         : null;
+  const activePolicy = formatPolicyName(safety.active_policy);
+  const alertDetail =
+    typeof safety.alert === "string" ? safety.alert.replace(/_/g, " ") : null;
+  const safetyDetail = [alertDetail, activePolicy].filter(Boolean).join(" · ") || "Details below";
   const recommendedActions =
     safety.recommended_actions && typeof safety.recommended_actions === "object"
       ? (safety.recommended_actions as Record<string, unknown>)
@@ -400,11 +413,7 @@ export function CombinedBiomarkersPanel({
             icon={<Shield className="h-5 w-5" />}
             title="Safety"
             value={safetyLevel === null ? "--" : `Level ${safetyLevel}`}
-            detail={
-              typeof safety.alert === "string"
-                ? safety.alert.replace(/_/g, " ")
-                : "Details below"
-            }
+            detail={safetyDetail}
             pulse={safetyLevel === null}
             valueClassName={safetyTone(safetyLevel)}
           />
@@ -459,13 +468,18 @@ export function CombinedBiomarkersPanel({
               <div className="mt-2.5 grid grid-cols-2 gap-2 text-sm text-[#c8d6df]">
                 <MetricTile
                   label="Current Alert"
-                  value={typeof safety.alert === "string" ? safety.alert.replace(/_/g, " ") : null}
-                  pulse={typeof safety.alert !== "string"}
+                  value={alertDetail}
+                  pulse={!alertDetail}
                 />
                 <MetricTile
                   label="Highest Level"
                   value={typeof safety.highest_level === "number" ? `Level ${safety.highest_level}` : null}
                   pulse={typeof safety.highest_level !== "number"}
+                />
+                <MetricTile
+                  label="Active Policy"
+                  value={activePolicy}
+                  pulse={!activePolicy}
                 />
               </div>
               <div className="mt-2.5 space-y-2 text-sm text-[#b5c7d4]">

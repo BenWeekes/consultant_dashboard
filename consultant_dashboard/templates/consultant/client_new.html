@@ -23,6 +23,21 @@
 
       <div class="field-grid-two">
         <div class="field-group-inline">
+          <label class="field-label" for="year_of_birth">Year of Birth</label>
+          <input id="year_of_birth" name="year_of_birth" type="number" min="1900" max="2100" placeholder="e.g. 1974" value="{{ form_defaults.year_of_birth or '' }}">
+        </div>
+        <div class="field-group-inline">
+          <label class="field-label" for="sex">Sex</label>
+          <select id="sex" name="sex">
+            <option value="" {% if not form_defaults.sex %}selected{% endif %}>Select</option>
+            <option value="male" {% if form_defaults.sex == 'male' %}selected{% endif %}>Male</option>
+            <option value="female" {% if form_defaults.sex == 'female' %}selected{% endif %}>Female</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field-grid-two">
+        <div class="field-group-inline">
           <label class="field-label" for="email">Email</label>
           <input id="email" name="email" type="email" placeholder="Email" value="{{ form_defaults.email or '' }}" data-client-email>
           <div class="field-help field-help-reserved">Should match the email address the client will use to sign in.</div>

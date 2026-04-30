@@ -90,10 +90,22 @@ def _ensure_migrations(db: sqlite3.Connection, config: Optional[dict] = None) ->
         db.execute("UPDATE clients SET vendor_id = ? WHERE vendor_id IS NULL OR vendor_id = ''", (default_vendor_id,))
     if "password_hash" not in client_columns:
         db.execute("ALTER TABLE clients ADD COLUMN password_hash TEXT")
+    if "ai_summary_storage_key" not in client_columns:
+        db.execute("ALTER TABLE clients ADD COLUMN ai_summary_storage_key TEXT")
+    if "human_summary_storage_key" not in client_columns:
+        db.execute("ALTER TABLE clients ADD COLUMN human_summary_storage_key TEXT")
+    if "ai_session_count" not in client_columns:
+        db.execute("ALTER TABLE clients ADD COLUMN ai_session_count INTEGER NOT NULL DEFAULT 0")
+    if "human_session_count" not in client_columns:
+        db.execute("ALTER TABLE clients ADD COLUMN human_session_count INTEGER NOT NULL DEFAULT 0")
     if "first_name" not in client_columns:
         db.execute("ALTER TABLE clients ADD COLUMN first_name TEXT NOT NULL DEFAULT ''")
     if "last_name" not in client_columns:
         db.execute("ALTER TABLE clients ADD COLUMN last_name TEXT NOT NULL DEFAULT ''")
+    if "year_of_birth" not in client_columns:
+        db.execute("ALTER TABLE clients ADD COLUMN year_of_birth INTEGER")
+    if "sex" not in client_columns:
+        db.execute("ALTER TABLE clients ADD COLUMN sex TEXT")
     _backfill_client_name_fields(db)
     message_columns = {row["name"] for row in db.execute("PRAGMA table_info(client_messages)").fetchall()}
     consultant_client_columns = {row["name"] for row in db.execute("PRAGMA table_info(consultant_clients)").fetchall()}
@@ -262,6 +274,87 @@ def _ensure_migrations(db: sqlite3.Connection, config: Optional[dict] = None) ->
         )
         """
     )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS escalation_events (
+            id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+            vendor_id TEXT NOT NULL,
+            meeting_id TEXT,
+            session_id TEXT,
+            client_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            safety_level INTEGER NOT NULL,
+            alert TEXT NOT NULL,
+            status TEXT NOT NULL,
+            reason TEXT NOT NULL DEFAULT '',
+            escalation_phone_number TEXT,
+            provider_result TEXT NOT NULL DEFAULT '',
+            client_announcement_text TEXT NOT NULL DEFAULT '',
+            recipient_summary_text TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (vendor_id) REFERENCES vendors(id),
+            FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_escalation_events_meeting_id
+        ON escalation_events(meeting_id)
+        """
+    )
+    escalation_event_columns = db.execute("PRAGMA table_info(escalation_events)").fetchall()
+    meeting_id_column = next((row for row in escalation_event_columns if row["name"] == "meeting_id"), None)
+    if meeting_id_column and int(meeting_id_column["notnull"] or 0) == 1:
+        db.execute(
+            """
+            CREATE TABLE escalation_events_new (
+                id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+                vendor_id TEXT NOT NULL,
+                meeting_id TEXT,
+                session_id TEXT,
+                client_id TEXT NOT NULL,
+                source TEXT NOT NULL,
+                safety_level INTEGER NOT NULL,
+                alert TEXT NOT NULL,
+                status TEXT NOT NULL,
+                reason TEXT NOT NULL DEFAULT '',
+                escalation_phone_number TEXT,
+                provider_result TEXT NOT NULL DEFAULT '',
+                client_announcement_text TEXT NOT NULL DEFAULT '',
+                recipient_summary_text TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (vendor_id) REFERENCES vendors(id),
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+            )
+            """
+        )
+        db.execute(
+            """
+            INSERT INTO escalation_events_new (
+                id, vendor_id, meeting_id, session_id, client_id, source,
+                safety_level, alert, status, reason, escalation_phone_number,
+                provider_result, client_announcement_text, recipient_summary_text,
+                created_at, updated_at
+            )
+            SELECT
+                id, vendor_id, meeting_id, session_id, client_id, source,
+                safety_level, alert, status, reason, escalation_phone_number,
+                provider_result, client_announcement_text, recipient_summary_text,
+                created_at, updated_at
+            FROM escalation_events
+            """
+        )
+        db.execute("DROP TABLE escalation_events")
+        db.execute("ALTER TABLE escalation_events_new RENAME TO escalation_events")
+        db.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_escalation_events_meeting_id
+            ON escalation_events(meeting_id)
+            """
+        )
     meeting_event_columns = {row["name"] for row in db.execute("PRAGMA table_info(meeting_events)").fetchall()}
     if "vendor_id" not in meeting_event_columns:
         db.execute("ALTER TABLE meeting_events ADD COLUMN vendor_id TEXT")
@@ -775,6 +868,8 @@ def update_client(
     phone_number: str,
     notification_email: str,
     escalation_phone_number: str,
+    year_of_birth: Optional[int],
+    sex: str,
     notes: str,
     direction: str,
 ) -> None:
@@ -788,6 +883,8 @@ def update_client(
             phone_number = ?,
             notification_email = ?,
             escalation_phone_number = ?,
+            year_of_birth = ?,
+            sex = ?,
             notes_current = ?,
             direction_current = ?,
             updated_at = CURRENT_TIMESTAMP
@@ -801,6 +898,8 @@ def update_client(
             phone_number.strip(),
             notification_email.strip(),
             escalation_phone_number.strip(),
+            year_of_birth,
+            sex.strip().lower(),
             notes.strip(),
             direction.strip(),
             client_id,
@@ -927,6 +1026,8 @@ def create_client(
     phone_number: str,
     notification_email: str,
     escalation_phone_number: str,
+    year_of_birth: Optional[int],
+    sex: str,
     notes: str,
     direction: str,
 ) -> str:
@@ -934,9 +1035,9 @@ def create_client(
         """
         INSERT INTO clients (
             vendor_id, first_name, last_name, display_name, email, password_hash, phone_number, notification_email,
-            escalation_phone_number, notes_current, direction_current,
+            escalation_phone_number, year_of_birth, sex, notes_current, direction_current,
             created_by_consultant_id, is_active
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
         """,
         (
             vendor_id or _vendor_id_for_consultant(db, consultant_id),
@@ -948,6 +1049,8 @@ def create_client(
             phone_number.strip(),
             notification_email.strip(),
             escalation_phone_number.strip(),
+            year_of_birth,
+            sex.strip().lower(),
             notes.strip(),
             direction.strip(),
             consultant_id,
@@ -1260,6 +1363,7 @@ def get_scheduled_meeting(db: sqlite3.Connection, meeting_id: str):
         """
         SELECT sm.*, c.display_name AS client_name, c.email AS client_email,
                c.phone_number AS client_phone_number, c.notification_email AS client_notification_email,
+               c.escalation_phone_number AS client_escalation_phone_number,
                co.name AS consultant_name, co.email AS consultant_email, co.notification_email AS consultant_notification_email
         FROM scheduled_meetings sm
         JOIN clients c ON c.id = sm.client_id
@@ -2176,3 +2280,106 @@ def create_session_alert(
             details_storage_key or None,
         ),
     )
+
+
+def get_latest_escalation_event(
+    db: sqlite3.Connection,
+    *,
+    meeting_id: str = "",
+    session_id: str = "",
+):
+    if meeting_id:
+        return db.execute(
+            """
+            SELECT *
+            FROM escalation_events
+            WHERE meeting_id = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (meeting_id,),
+        ).fetchone()
+    if session_id:
+        return db.execute(
+            """
+            SELECT *
+            FROM escalation_events
+            WHERE session_id = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (session_id,),
+        ).fetchone()
+    return None
+
+
+def create_escalation_event(
+    db: sqlite3.Connection,
+    *,
+    meeting_id: str,
+    session_id: str,
+    client_id: str,
+    source: str,
+    safety_level: int,
+    alert: str,
+    status: str,
+    reason: str = "",
+    escalation_phone_number: str = "",
+) -> str:
+    db.execute(
+        """
+        INSERT INTO escalation_events (
+            vendor_id, meeting_id, session_id, client_id, source,
+            safety_level, alert, status, reason, escalation_phone_number
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            _vendor_id_for_client(db, client_id),
+            meeting_id,
+            session_id or None,
+            client_id,
+            source,
+            int(safety_level),
+            alert.strip(),
+            status.strip(),
+            reason.strip(),
+            escalation_phone_number.strip() or None,
+        ),
+    )
+    return db.execute("SELECT id FROM escalation_events WHERE rowid = last_insert_rowid()").fetchone()["id"]
+
+
+def update_escalation_event(
+    db: sqlite3.Connection,
+    *,
+    escalation_event_id: str,
+    status: str,
+    reason: str = "",
+    provider_result: str = "",
+    client_announcement_text: Optional[str] = None,
+    recipient_summary_text: Optional[str] = None,
+) -> bool:
+    row = db.execute("SELECT * FROM escalation_events WHERE id = ? LIMIT 1", (escalation_event_id,)).fetchone()
+    if not row:
+        return False
+    db.execute(
+        """
+        UPDATE escalation_events
+        SET status = ?,
+            reason = ?,
+            provider_result = ?,
+            client_announcement_text = ?,
+            recipient_summary_text = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (
+            status.strip(),
+            reason.strip(),
+            provider_result.strip(),
+            row["client_announcement_text"] if client_announcement_text is None else client_announcement_text,
+            row["recipient_summary_text"] if recipient_summary_text is None else recipient_summary_text,
+            escalation_event_id,
+        ),
+    )
+    return True

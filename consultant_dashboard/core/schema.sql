@@ -40,11 +40,17 @@ CREATE TABLE IF NOT EXISTS clients (
     phone_number TEXT,
     notification_email TEXT,
     escalation_phone_number TEXT,
+    year_of_birth INTEGER,
+    sex TEXT,
     notes_current TEXT,
     direction_current TEXT,
     created_by_consultant_id TEXT,
     latest_summary_storage_key TEXT,
     baseline_storage_key TEXT,
+    ai_summary_storage_key TEXT,
+    human_summary_storage_key TEXT,
+    ai_session_count INTEGER NOT NULL DEFAULT 0,
+    human_session_count INTEGER NOT NULL DEFAULT 0,
     is_active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -91,6 +97,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     client_id TEXT NOT NULL,
     consultant_id TEXT,
     session_kind TEXT NOT NULL DEFAULT 'avatar_ai_session',
+    avatar_id TEXT NOT NULL DEFAULT '',
     meeting_id TEXT,
     transcription_enabled INTEGER NOT NULL DEFAULT 0,
     audio_biomarkers_enabled INTEGER NOT NULL DEFAULT 1,
@@ -111,6 +118,18 @@ CREATE TABLE IF NOT EXISTS sessions (
     FOREIGN KEY (vendor_id) REFERENCES vendors(id),
     FOREIGN KEY (client_id) REFERENCES clients(id),
     FOREIGN KEY (consultant_id) REFERENCES consultants(id)
+);
+
+CREATE TABLE IF NOT EXISTS session_feedback (
+    session_id TEXT PRIMARY KEY,
+    vendor_id TEXT NOT NULL,
+    client_id TEXT NOT NULL,
+    avatar_id TEXT NOT NULL DEFAULT '',
+    rating INTEGER NOT NULL,
+    comment TEXT NOT NULL DEFAULT '',
+    submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS scheduled_meetings (
@@ -195,6 +214,30 @@ CREATE TABLE IF NOT EXISTS session_alerts (
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
     FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS escalation_events (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    vendor_id TEXT NOT NULL,
+    meeting_id TEXT,
+    session_id TEXT,
+    client_id TEXT NOT NULL,
+    source TEXT NOT NULL,
+    safety_level INTEGER NOT NULL,
+    alert TEXT NOT NULL,
+    status TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    escalation_phone_number TEXT,
+    provider_result TEXT NOT NULL DEFAULT '',
+    client_announcement_text TEXT NOT NULL DEFAULT '',
+    recipient_summary_text TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (vendor_id) REFERENCES vendors(id),
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_escalation_events_meeting_id
+ON escalation_events(meeting_id);
 
 CREATE TABLE IF NOT EXISTS client_note_revisions (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),

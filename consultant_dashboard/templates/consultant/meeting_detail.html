@@ -66,16 +66,7 @@
             <div class="summary-copy">{{ linked_summary.brief_overview or linked_summary.overview or '' }}</div>
           </div>
         {% endif %}
-        {% if biomarker_headlines %}
-          <div class="compact-metric-grid">
-            {% for item in biomarker_headlines %}
-              <div class="compact-metric-item">
-                <span class="compact-metric-label">{{ item.label }}</span>
-                <strong>{{ item.value }}</strong>
-              </div>
-            {% endfor %}
-          </div>
-        {% endif %}
+        {% include "consultant/_biomarker_section.html" %}
       </div>
     </div>
 
@@ -108,26 +99,4 @@
     </div>
   </div>
 
-  {% if biomarker_sections %}
-    <div class="card history-card">
-      <div class="history-toolbar">
-        <div class="panel-title"><div class="panel-kicker">Biomarkers</div></div>
-      </div>
-      <div class="section-stack">
-        {% for section in biomarker_sections %}
-          <div class="summary-card">
-            <h3>{{ section.title }}</h3>
-            <div class="biomarker-grid" style="margin-top: 10px;">
-              {% for row in section.rows %}
-                <div class="biomarker-row">
-                  <strong>{{ row.label }}</strong>
-                  <div>{{ row.triplet }}</div>
-                </div>
-              {% endfor %}
-            </div>
-          </div>
-        {% endfor %}
-      </div>
-    </div>
-  {% endif %}
 {% endblock %}

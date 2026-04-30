@@ -53,6 +53,7 @@ function resolveDefaultBackendUrl() {
 
 const DEFAULT_BACKEND_URL = resolveDefaultBackendUrl();
 const DEFAULT_PROFILE = process.env.NEXT_PUBLIC_DEFAULT_PROFILE || "VIDEO";
+const SHEN_ENABLED = process.env.NEXT_PUBLIC_ENABLE_SHEN === "true";
 const SHEN_API_KEY = process.env.NEXT_PUBLIC_SHEN_API_KEY || "";
 const DEVICE_COOKIE_MAX_AGE = 60 * 60 * 24 * 180;
 const MEETING_BOOTSTRAP_STORAGE_KEY = "mindfix_meeting_join_bootstrap";
@@ -148,6 +149,8 @@ export function VideoAvatarClient() {
   const [enableAivad, setEnableAivad] = useState(true);
   const [language, setLanguage] = useState("en-US");
   const [profile, setProfile] = useState("");
+  const [selectedAvatarId, setSelectedAvatarId] = useState("");
+  const [selectedVoiceId, setSelectedVoiceId] = useState("");
   const [prompt, setPrompt] = useState("");
   const [greeting, setGreeting] = useState("");
   const [activeTab, setActiveTab] = useState("video");
@@ -226,6 +229,14 @@ export function VideoAvatarClient() {
       }
       if (urlProfile) {
         setProfile(urlProfile);
+      }
+      const urlAvatarId = params.get("avatar_id");
+      const urlVoiceId = params.get("voice_id");
+      if (urlAvatarId) {
+        setSelectedAvatarId(urlAvatarId);
+      }
+      if (urlVoiceId) {
+        setSelectedVoiceId(urlVoiceId);
       }
       if (params.get("autoconnect") === "true") {
         setAutoConnect(true);
@@ -356,6 +367,7 @@ export function VideoAvatarClient() {
     rtmSource,
     getMeetingTranscriptArtifact,
   } = useAgoraVideoClient();
+  const showDevicePrejoin = authChecked && !authError && !isConnected;
 
   const stopMeetingPreview = useCallback(() => {
     if (previewAnimationFrameRef.current !== null) {
@@ -411,7 +423,7 @@ export function VideoAvatarClient() {
   useEffect(() => {
     if (
       typeof navigator === "undefined" ||
-      !meetingMode ||
+      !showDevicePrejoin ||
       isConnected ||
       !navigator.mediaDevices?.enumerateDevices
     ) {
@@ -519,9 +531,9 @@ export function VideoAvatarClient() {
   }, [
     enableLocalVideo,
     isConnected,
-    meetingMode,
     selectedCamera,
     selectedMic,
+    showDevicePrejoin,
     stopMeetingPreview,
   ]);
 
@@ -650,7 +662,9 @@ export function VideoAvatarClient() {
   // Shen.AI camera vitals (opt-in via NEXT_PUBLIC_ENABLE_SHEN)
   // RTM publish function for Shen to push vitals to server
   const shenRtmPublish = useMemo(() => {
-    if (!SHEN_API_KEY || !meetingVideoBiomarkersEnabled) return null;
+    if (!SHEN_ENABLED || (meetingMode && !meetingVideoBiomarkersEnabled)) {
+      return null;
+    }
     const rtm = rtmClientRef.current;
     if (!rtm) return null;
     return async (message: string): Promise<boolean> => {
@@ -668,7 +682,9 @@ export function VideoAvatarClient() {
   }, [rtmClientRef.current]);
 
   const shenState = useShenai(
-    Boolean(SHEN_API_KEY) && isConnected && meetingVideoBiomarkersEnabled,
+    SHEN_ENABLED &&
+      isConnected &&
+      (!meetingMode || meetingVideoBiomarkersEnabled),
     SHEN_API_KEY,
     shenRtmPublish,
     "shen-canvas",
@@ -677,9 +693,9 @@ export function VideoAvatarClient() {
   // Move the shen canvas between desktop/mobile containers based on screen size
   useEffect(() => {
     if (
-      !SHEN_API_KEY ||
+      !SHEN_ENABLED ||
       !isConnected ||
-      !meetingVideoBiomarkersEnabled
+      (meetingMode && !meetingVideoBiomarkersEnabled)
     ) return;
 
     // Create the canvas once
@@ -688,7 +704,7 @@ export function VideoAvatarClient() {
       canvas = document.createElement("canvas");
       canvas.id = "shen-canvas";
       canvas.className = "absolute top-1/2 left-1/2 h-full";
-      canvas.style.transform = "translate(-50%, -50%) scale(1.8)";
+      canvas.style.transform = "translate(-50%, -50%) scale(1.2)";
     }
 
     const moveCanvas = () => {
@@ -801,6 +817,12 @@ export function VideoAvatarClient() {
       if (greeting.trim()) {
         params.append("greeting", greeting.trim());
       }
+      if (selectedAvatarId.trim()) {
+        params.append("avatar_id", selectedAvatarId.trim());
+      }
+      if (selectedVoiceId.trim()) {
+        params.append("voice_id", selectedVoiceId.trim());
+      }
 
       // Phase 1: Get tokens only (don't start agent yet)
       params.append("connect", "false");
@@ -835,6 +857,7 @@ export function VideoAvatarClient() {
       if (enableLocalVideo && rtcClientRef.current) {
         const videoTrack = await AgoraRTC.createCameraVideoTrack({
           encoderConfig: "720p_2",
+          ...(selectedCamera ? { cameraId: selectedCamera } : {}),
         });
         await rtcClientRef.current.publish(videoTrack);
         setLocalVideoTrack(videoTrack);
@@ -887,11 +910,12 @@ export function VideoAvatarClient() {
     }
   };
 
-  // Auto-connect after state is committed AND auth check is complete
+  // AI-human sessions now always stop on a prejoin device-check screen.
+  // Meeting mode already has its own prejoin experience, so we just clear
+  // the legacy autoConnect flag once auth finishes.
   useEffect(() => {
     if (autoConnect && authChecked && !authError) {
       setAutoConnect(false);
-      handleStart();
     }
   }, [autoConnect, authChecked, authError]);
 
@@ -1053,7 +1077,7 @@ export function VideoAvatarClient() {
 
   const showThymiaPanel = meetingAudioBiomarkersEnabled;
   const showShenPanel =
-    Boolean(SHEN_API_KEY) && meetingVideoBiomarkersEnabled;
+    SHEN_ENABLED && (!meetingMode || meetingVideoBiomarkersEnabled);
   const showBiomarkersPanel =
     meetingAudioBiomarkersEnabled || meetingVideoBiomarkersEnabled;
 
@@ -1081,16 +1105,14 @@ export function VideoAvatarClient() {
                   MindFix
                 </p>
                 <h1 className="truncate font-[family-name:var(--font-geist-sans)] text-lg font-semibold tracking-[-0.03em] text-white md:text-2xl">
-                  {meetingMode ? "Secure Meeting Room" : "MindFix Session"}
+                  {meetingMode ? "Secure Meeting Room" : "Secure Session"}
                 </h1>
               </div>
             </div>
             <p className="mt-2 max-w-2xl text-xs text-[#b5c7d4] md:pl-14 md:text-sm">
-              AI mental wellness, guided by a human therapist.
               {meetingMode
-                ? ` ${meetingTranscriptionEnabled ? "Transcription on." : "Transcription off."}`
-                : " Private, browser-based support with live biomarker insight."}
-              {authUser && <span className="ml-2 text-[#d7e6ee]">Signed in as {authUser}.</span>}
+                ? `AI mental wellness, guided by a human therapist. ${meetingTranscriptionEnabled ? "Transcription on." : "Transcription off."}`
+                : "Private, browser-based support with live biomarker insight."}
             </p>
             {authError && (
               <p className="mt-1 text-xs text-red-300 md:pl-14 md:text-sm">
@@ -1116,7 +1138,11 @@ export function VideoAvatarClient() {
         {!isConnected ? (
           /* Connection Form / Meeting Prejoin */
           <div className="flex flex-1 items-center justify-center">
-            {autoConnect || isLoading ? (
+            {!authChecked && !authError ? (
+              <p className="text-lg text-muted-foreground animate-pulse">
+                Checking access...
+              </p>
+            ) : isLoading ? (
               <p className="text-lg text-muted-foreground animate-pulse">
                 Connecting...
               </p>
@@ -1263,84 +1289,153 @@ export function VideoAvatarClient() {
                   </section>
                 </div>
               ) : (
-                <div className="w-full max-w-md rounded-[1.75rem] border border-white/10 bg-[rgba(20,34,47,0.82)] p-6 shadow-[0_24px_80px_rgba(0,0,0,0.28)] backdrop-blur">
-                  <p className="mb-2 text-[0.7rem] font-semibold uppercase tracking-[0.24em] text-[#8fb2c9]">
-                    MindFix
-                  </p>
-                  <h2 className="mb-4 font-[family-name:var(--font-geist-sans)] text-xl font-semibold tracking-[-0.03em] text-white">
-                    Start your session
-                  </h2>
-                  <div className="space-y-4">
-                    <div>
-                      <label
-                        htmlFor="backend"
-                        className="mb-2 block text-sm font-medium text-slate-100"
-                      >
-                        Backend URL
-                      </label>
-                      <input
-                        id="backend"
-                        type="text"
-                        value={backendUrl}
-                        onChange={(e) => setBackendUrl(e.target.value)}
-                        placeholder={DEFAULT_BACKEND_URL}
-                        className="w-full rounded-xl border border-white/12 bg-white/6 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-ring"
-                      />
-                    </div>
-
-                    <div>
-                      <label
-                        htmlFor="profile"
-                        className="mb-2 block text-sm font-medium text-slate-100"
-                      >
-                        Server Profile
-                      </label>
-                      <input
-                        id="profile"
-                        type="text"
-                        value={profile}
-                        onChange={(e) => setProfile(e.target.value)}
-                        placeholder={DEFAULT_PROFILE}
-                        className="w-full rounded-xl border border-white/12 bg-white/6 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-ring"
-                      />
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Leave empty for default &ldquo;{DEFAULT_PROFILE}&rdquo;
-                        profile
+                <div className="grid w-full max-w-5xl gap-6 lg:grid-cols-[1.15fr_0.85fr]">
+                  <section className="overflow-hidden rounded-[1.75rem] border border-white/10 bg-[rgba(20,34,47,0.82)] shadow-[0_24px_80px_rgba(0,0,0,0.28)] backdrop-blur">
+                    <div className="border-b border-white/8 px-6 py-5">
+                      <p className="text-[0.7rem] font-semibold uppercase tracking-[0.24em] text-[#8fb2c9]">
+                        MindFix
+                      </p>
+                      <h2 className="mt-2 font-[family-name:var(--font-geist-sans)] text-2xl font-semibold tracking-[-0.03em] text-white">
+                        Start your session
+                      </h2>
+                      <p className="mt-2 text-sm text-[#b5c7d4]">
+                        Check your camera and microphone before you join.
                       </p>
                     </div>
-
-                    <div className="space-y-2">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={enableLocalVideo}
-                          onChange={(e) => setEnableLocalVideo(e.target.checked)}
-                          className="h-4 w-4 rounded border-gray-300"
-                        />
-                        <span className="text-sm font-medium">
-                          Enable Local Video
-                        </span>
-                      </label>
-
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={enableAvatar}
-                          onChange={(e) => setEnableAvatar(e.target.checked)}
-                          className="h-4 w-4 rounded border-gray-300"
-                        />
-                        <span className="text-sm font-medium">Enable Avatar</span>
-                      </label>
+                    <div className="p-6">
+                      <div className="relative overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#08131d]">
+                        {enableLocalVideo ? (
+                          <video
+                            ref={previewVideoRef}
+                            autoPlay
+                            muted
+                            playsInline
+                            className="aspect-video w-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex aspect-video items-center justify-center text-sm text-[#8fb2c9]">
+                            Camera preview is off
+                          </div>
+                        )}
+                      </div>
                     </div>
+                  </section>
 
-                    <button
-                      onClick={handleStart}
-                      disabled={isLoading}
-                      className="cursor-pointer w-full rounded-lg bg-primary px-4 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                    >
-                      {isLoading ? "Connecting..." : "Start Call"}
-                    </button>
-                  </div>
+                  <section className="rounded-[1.75rem] border border-white/10 bg-[rgba(20,34,47,0.82)] p-6 shadow-[0_24px_80px_rgba(0,0,0,0.28)] backdrop-blur">
+                    <div className="space-y-5">
+                      <div>
+                        <label
+                          htmlFor="session-camera"
+                          className="mb-2 block text-sm font-medium text-slate-100"
+                        >
+                          Camera
+                        </label>
+                        <select
+                          id="session-camera"
+                          value={selectedCamera}
+                          onChange={(e) => void handleCameraChange(e.target.value)}
+                          disabled={!enableLocalVideo || availableCameras.length === 0}
+                          className="w-full rounded-xl border border-white/12 bg-white/6 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
+                        >
+                          {availableCameras.length === 0 ? (
+                            <option value="">No camera detected</option>
+                          ) : (
+                            availableCameras.map((device, index) => (
+                              <option key={device.deviceId || index} value={device.deviceId}>
+                                {device.label || `Camera ${index + 1}`}
+                              </option>
+                            ))
+                          )}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="session-mic"
+                          className="mb-2 block text-sm font-medium text-slate-100"
+                        >
+                          Microphone
+                        </label>
+                        <select
+                          id="session-mic"
+                          value={selectedMic}
+                          onChange={(e) => void handleMicChange(e.target.value)}
+                          disabled={availableMics.length === 0}
+                          className="w-full rounded-xl border border-white/12 bg-white/6 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
+                        >
+                          {availableMics.length === 0 ? (
+                            <option value="">No microphone detected</option>
+                          ) : (
+                            availableMics.map((device, index) => (
+                              <option key={device.deviceId || index} value={device.deviceId}>
+                                {device.label || `Microphone ${index + 1}`}
+                              </option>
+                            ))
+                          )}
+                        </select>
+                      </div>
+
+                      <div>
+                        <p className="mb-2 block text-sm font-medium text-slate-100">
+                          Microphone level
+                        </p>
+                        <div className="rounded-2xl border border-white/8 bg-white/4 px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <Mic className="h-4 w-4 text-[#8fb2c9]" />
+                            <div className="flex flex-1 gap-1">
+                              {Array.from({ length: 12 }).map((_, index) => {
+                                const threshold = (index + 1) / 12;
+                                const active = meetingMicLevel >= threshold;
+                                return (
+                                  <span
+                                    key={index}
+                                    className={cn(
+                                      "h-7 flex-1 rounded-full transition-colors",
+                                      active ? "bg-[#2bb58e]" : "bg-white/10",
+                                    )}
+                                  />
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 rounded-2xl border border-white/8 bg-white/4 px-4 py-4">
+                        <label className="flex items-center gap-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={enableLocalVideo}
+                            onChange={(e) => setEnableLocalVideo(e.target.checked)}
+                            className="h-4 w-4 rounded border-gray-300"
+                          />
+                          <span className="text-sm font-medium text-white">
+                            Start with camera on
+                          </span>
+                        </label>
+
+                        <label className="flex items-center gap-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={enableAvatar}
+                            onChange={(e) => setEnableAvatar(e.target.checked)}
+                            className="h-4 w-4 rounded border-gray-300"
+                          />
+                          <span className="text-sm font-medium text-white">
+                            Enable avatar
+                          </span>
+                        </label>
+                      </div>
+
+                      <button
+                        onClick={handleStart}
+                        disabled={isLoading}
+                        className="cursor-pointer w-full rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                      >
+                        {isLoading ? "Connecting..." : "Join Session"}
+                      </button>
+                    </div>
+                  </section>
                 </div>
               )
             )}

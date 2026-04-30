@@ -11,6 +11,26 @@
 5. Add or extend tests in `tests/test_internal_api.py`, and keep `tests/test_smoke.py` passing.
 6. Update `06_interfaces.md`.
 
+## Extend AI-human Crisis Escalation
+
+1. Keep dashboard-owned escalation logic in:
+   - `core/internal_api.py`
+   - `core/db.py`
+   - `core/agora_tokens.py`
+2. Treat `meeting_id` as optional; AI-human escalation must still work with only:
+   - `client_id`
+   - `session_id`
+   - `channel_name`
+3. Keep `session_id` stable so `escalation_events` and final `sessions` rows can be correlated.
+4. Add or extend tests in `tests/test_internal_api.py` for:
+   - missing phone => `skipped`
+   - non-numeric level => `400`
+   - invalid phase => `400`
+   - missing event => `404`
+5. Update `06_interfaces.md` and `02_architecture.md`.
+6. Re-run the targeted crisis slice:
+   - `./venv/bin/python -m unittest tests.test_internal_api.CrisisEscalationInternalApiTest -v`
+
 ## Add a New Dashboard Page
 
 1. Add the route in `core/web.py`.

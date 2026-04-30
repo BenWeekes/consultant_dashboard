@@ -64,4 +64,10 @@ def load_config() -> dict:
         "DISPLAY_TIMEZONE": os.environ.get("CONSULTANT_DISPLAY_TIMEZONE", "Europe/London"),
         "CLIENT_APP_URL": os.environ.get("THERAPY_CLIENT_APP_URL", "http://localhost:8084"),
         "CLIENT_PROFILE": os.environ.get("THERAPY_CLIENT_PROFILE", "therapy"),
+        "APP_ID": os.environ.get("AGORA_APP_ID", ""),
+        "APP_CERTIFICATE": os.environ.get("AGORA_APP_CERTIFICATE", ""),
+        "CRISIS_CALL_FROM_NUMBER": os.environ.get("CRISIS_CALL_FROM_NUMBER", ""),
+        "CRISIS_CALL_SIP_GATEWAY": os.environ.get("CRISIS_CALL_SIP_GATEWAY", ""),
+        "CRISIS_CALL_REGION": os.environ.get("CRISIS_CALL_REGION", "AREA_CODE_NA"),
+        "CRISIS_CALL_PSTN_UID": os.environ.get("CRISIS_CALL_PSTN_UID", "43455"),
     }

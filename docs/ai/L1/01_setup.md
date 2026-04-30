@@ -7,7 +7,7 @@ This repo owns the product and admin layer: consultants, clients, meetings, remi
 ## Quick Start
 
 ```bash
-cd consultant-dashboard
+cd consultant_dashboard
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -51,6 +51,16 @@ Common optional config:
 - `CONSULTANT_TWILIO_ACCOUNT_SID`
 - `CONSULTANT_TWILIO_AUTH_TOKEN`
 - `THERAPY_CLIENT_APP_URL`
+- `AGORA_APP_ID`
+- `AGORA_APP_CERTIFICATE`
+- `CRISIS_CALL_FROM_NUMBER`
+- `CRISIS_CALL_SIP_GATEWAY`
+- `CRISIS_CALL_REGION`
+- `CRISIS_CALL_PSTN_UID`
+
+In this deployment, the live Flask/PM2 process reads the repo-root `.env`:
+
+- `consultant_dashboard/.env`
 
 ## Admin Auth File
 
@@ -98,6 +108,11 @@ source venv/bin/activate
 python -m unittest discover -s tests -v
 ```
 
+Current PM2 service:
+
+- `pm2 restart consultant-dashboard --update-env`
+- `pm2 logs consultant-dashboard --lines 200`
+
 ## What This Repo Does In The Meeting Flow
 
 - consultants schedule meetings and send secure links
@@ -105,6 +120,7 @@ python -m unittest discover -s tests -v
 - `simple-backend` calls signed dashboard APIs to authorize meeting joins
 - `server-custom-llm` posts completed session artifacts back here
 - reminder delivery is driven through the internal reminder sweep
+- AI-human crisis escalation init/status is owned here even when no scheduled meeting row exists
 
 ## When To Use L2
 

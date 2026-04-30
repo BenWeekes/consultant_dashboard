@@ -13,11 +13,16 @@ from werkzeug.security import generate_password_hash
 from consultant_dashboard.app import PASSWORD_HASH_METHOD, create_app
 from consultant_dashboard.core.db import (
     create_client,
+    create_client_access_link,
     create_consultant,
+    create_scheduled_meeting,
     get_db,
     init_db,
     upsert_client_auth_identity,
 )
+from consultant_dashboard.core.meetings import build_join_window, generate_meeting_channel, iso_utc
+from consultant_dashboard.core.messaging import hash_access_token
+from datetime import datetime, timedelta, timezone
 
 
 class ConsultantDashboardTestCase(unittest.TestCase):
@@ -50,6 +55,12 @@ class ConsultantDashboardTestCase(unittest.TestCase):
         os.environ["THERAPY_DASHBOARD_BRAND_NAME"] = "mindfix.me"
         os.environ["THERAPY_AUTH_JWT_SECRET"] = "test-jwt-secret"
         os.environ["CONSULTANT_CLIENT_AUTH_JWT_SECRET"] = "test-jwt-secret"
+        os.environ["AGORA_APP_ID"] = "20b7c51ff4c644ab80cf5a4e646b0537"
+        os.environ["AGORA_APP_CERTIFICATE"] = "11111111111111111111111111111111"
+        os.environ["CRISIS_CALL_FROM_NUMBER"] = "441473943851"
+        os.environ["CRISIS_CALL_SIP_GATEWAY"] = "agora-us-east.pstn.ashburn.twilio.com"
+        os.environ["CRISIS_CALL_REGION"] = "AREA_CODE_NA"
+        os.environ["CRISIS_CALL_PSTN_UID"] = "43455"
 
         self.app = create_app()
         self.app.testing = True
@@ -81,6 +92,8 @@ class ConsultantDashboardTestCase(unittest.TestCase):
             phone_number="+447700900111",
             notification_email="consultant@example.com",
             escalation_phone_number="+447700900000",
+            year_of_birth=1974,
+            sex="male",
             notes="Generalized notes only.",
             direction="Check stress and routines.",
         )
@@ -192,7 +205,21 @@ class ConsultantDashboardTestCase(unittest.TestCase):
             "duration_seconds": 300,
             "status": "completed",
             "summary": {"overview": "Generalized summary."},
-            "biomarkers": {"averages": {"stress_index": 52.5, "hrv": 31.0}},
+            "biomarkers": {
+                "averages": {"stress_index": 52.5, "hrv": 31.0, "stress": 0.42, "burnout": 0.31},
+                "voice": {
+                    "stress": {"avg": 0.42, "max": 0.67, "count": 4, "min": 0.21},
+                    "burnout": {"avg": 0.31, "max": 0.49, "count": 4, "min": 0.14},
+                    "happy": {"avg": 0.11, "max": 0.18, "count": 4, "min": 0.03},
+                    "sad": {"avg": 0.27, "max": 0.43, "count": 4, "min": 0.09},
+                },
+                "vitals": {
+                    "stress_index": {"avg": 52.5, "max": 64.2, "count": 4, "min": 44.8},
+                    "hrv": {"avg": 31.0, "max": 38.0, "count": 4, "min": 24.0},
+                    "heart_rate_bpm": {"avg": 72.0, "max": 81.0, "count": 4, "min": 66.0},
+                },
+                "safety": {"highest_level": 1, "highest_alert": "monitor", "highest_concerns": ["stress"]},
+            },
             "alerts": [],
         }
         if transcript is not None:
@@ -219,3 +246,35 @@ class ConsultantDashboardTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         return response
+
+    def create_meeting(self, meeting_type: str = "human", title: str = "Crisis Test Meeting") -> str:
+        db = get_db(self.app.config)
+        start_at = datetime.now(timezone.utc) + timedelta(minutes=30)
+        end_at = start_at + timedelta(minutes=30)
+        join_start, join_end = build_join_window(start_at, end_at)
+        access_link_id = create_client_access_link(
+            db,
+            client_id=self.client_id,
+            created_by=self.consultant_id,
+            token_hash=hash_access_token(f"meeting-token-{meeting_type}-{int(time.time())}"),
+            expires_at=iso_utc(end_at + timedelta(days=7)),
+        )
+        meeting_id = create_scheduled_meeting(
+            db,
+            client_id=self.client_id,
+            consultant_id=self.consultant_id,
+            meeting_type=meeting_type,
+            repeat_weekly=False,
+            title=title,
+            invite_message="",
+            timezone_name="Europe/London",
+            scheduled_start_at=iso_utc(start_at),
+            scheduled_end_at=iso_utc(end_at),
+            join_window_start_at=iso_utc(join_start),
+            join_window_end_at=iso_utc(join_end),
+            channel_name=generate_meeting_channel(),
+            response_access_link_id=access_link_id,
+        )
+        db.commit()
+        db.close()
+        return meeting_id

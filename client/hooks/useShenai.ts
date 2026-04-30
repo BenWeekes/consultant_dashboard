@@ -21,6 +21,21 @@ const EMPTY_STATE: ShenState = {
   results: null,
 };
 
+function resolveShenSdkUrl() {
+  if (typeof window === "undefined") {
+    return "/app/shenai-sdk/index.mjs";
+  }
+  const path = window.location.pathname;
+  const tenantAppMatch = path.match(/^\/v\/[^/]+\/app(?:\/|$)/);
+  if (tenantAppMatch) {
+    return `${tenantAppMatch[0].replace(/\/$/, "")}/shenai-sdk/index.mjs`;
+  }
+  if (path === "/app" || path.startsWith("/app/")) {
+    return "/app/shenai-sdk/index.mjs";
+  }
+  return "/app/shenai-sdk/index.mjs";
+}
+
 /**
  * Hook for Shen.AI camera-based vitals measurement.
  *
@@ -137,12 +152,12 @@ export function useShenai(
     (async () => {
       try {
         const t0 = performance.now();
-        console.log("[Shen] Loading SDK module from /shenai-sdk/index.mjs...");
-        // Load from root /shenai-sdk/ (served by nginx alias with correct
-        // MIME types and COOP/COEP headers). Using the basePath proxy breaks
-        // Emscripten pthread workers.
+        const sdkUrl = resolveShenSdkUrl();
+        console.log(`[Shen] Loading SDK module from ${sdkUrl}...`);
+        // Load through the already-proxied /app path so production nginx does
+        // not need a separate root-level /shenai-sdk alias.
         const sdkModule = await import(
-          /* webpackIgnore: true */ "/shenai-sdk/index.mjs"
+          /* webpackIgnore: true */ sdkUrl
         );
         console.log(`[Shen] SDK module imported (${Math.round(performance.now() - t0)}ms)`);
         const LoadSDK = sdkModule.default;
@@ -193,7 +208,8 @@ export function useShenai(
         measurementPreset: sdk.MeasurementPreset.THIRTY_SECONDS_ALL_METRICS,
         cameraMode: sdk.CameraMode.FACING_USER,
         cameraAspectRatio: 16 / 9,
-        onboardingMode: sdk.OnboardingMode.SKIP,
+        onboardingMode:
+          sdk.OnboardingMode?.HIDDEN ?? sdk.OnboardingMode?.SKIP,
         showUserInterface: false,
         showFacePositioningOverlay: true,
         showVisualWarnings: false,

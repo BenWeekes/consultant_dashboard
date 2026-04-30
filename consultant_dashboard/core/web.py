@@ -1159,151 +1159,314 @@ def _display_metric_label(key: str) -> str:
     return labels.get(key, key.replace("_", " ").title())
 
 
-def _format_metric_triplet(metric, *, percent: bool = False):
-    if not isinstance(metric, dict):
-        return None
-    avg = metric.get("avg")
-    if not isinstance(avg, (int, float)):
-        return None
-    min_value = metric.get("min")
-    max_value = metric.get("max")
-    if percent:
-        fmt = lambda v: f"{round(float(v) * 100)}%"
-    else:
-        fmt = lambda v: str(round(float(v)))
-    if isinstance(min_value, (int, float)) and isinstance(max_value, (int, float)):
-        return f"{fmt(min_value)} / {fmt(max_value)} / {fmt(avg)}"
-    return f"{fmt(avg)} avg"
+VOICE_TILE_KEYS = [
+    ("stress", "Stress"),
+    ("distress", "Distress"),
+    ("burnout", "Burnout"),
+    ("fatigue", "Fatigue"),
+    ("depression_probability", "Depression"),
+    ("anxiety_probability", "Anxiety"),
+]
+
+VIDEO_TILE_KEYS = [
+    ("hrv_sdnn_ms", "HRV"),
+    ("stress_index", "Cardiac Stress"),
+    ("breathing_rate_bpm", "Breathing Rate"),
+    ("blood_pressure", "Blood Pressure"),
+    ("cardiac_workload", "Cardiac Workload"),
+]
+
+EMOTION_KEYS = ["angry", "disgusted", "fearful", "happy", "neutral", "other", "sad", "surprised"]
 
 
-def _format_bpm_triplet(metric):
-    if not isinstance(metric, dict):
-        return None
-    avg = metric.get("avg")
-    min_value = metric.get("min")
-    max_value = metric.get("max")
-    if avg is None:
-        return None
-    avg_int = round(float(avg))
-    if min_value is None or max_value is None:
-        return f"{avg_int} avg"
-    return f"{round(float(min_value))} / {round(float(max_value))} / {avg_int}"
+def _is_percent_metric(key: str) -> bool:
+    return key not in {
+        "heart_rate_bpm",
+        "heart_rate",
+        "hrv_sdnn_ms",
+        "hrv",
+        "breathing_rate_bpm",
+        "breathing_rate",
+        "stress_index",
+        "systolic_bp",
+        "diastolic_bp",
+        "cardiac_workload",
+        "blood_pressure",
+    }
 
 
-def _main_emotion_label(voice_metrics):
-    if not isinstance(voice_metrics, dict):
+def _format_metric_number(key: str, value):
+    if not isinstance(value, (int, float)):
         return None
-    emotion_keys = ["angry", "disgusted", "fearful", "happy", "other", "sad", "surprised"]
+    numeric = float(value)
+    if _is_percent_metric(key):
+        return f"{round(numeric * 100)}%"
+    if key == "stress_index":
+        return f"{numeric:.2f}".rstrip("0").rstrip(".")
+    return str(round(numeric))
+
+
+def _metric_detail_suffix(key: str) -> str:
+    return {
+        "heart_rate_bpm": "bpm",
+        "heart_rate": "bpm",
+        "breathing_rate_bpm": "bpm",
+        "breathing_rate": "bpm",
+        "hrv_sdnn_ms": "ms",
+        "hrv": "ms",
+        "blood_pressure": "mmHg",
+    }.get(key, "")
+
+
+def _metric_value(source, key: str, field: str):
+    if not isinstance(source, dict):
+        return None
+    metric = source.get(key)
+    if isinstance(metric, dict):
+        value = metric.get(field)
+        if isinstance(value, (int, float)):
+            return float(value)
+    elif field == "avg" and isinstance(metric, (int, float)):
+        return float(metric)
+    return None
+
+
+def _emotion_stat_label(source, field: str):
+    if not isinstance(source, dict):
+        return None
     ranked = []
-    for key in emotion_keys:
-        metric = voice_metrics.get(key)
-        if isinstance(metric, dict):
-            avg = metric.get("avg")
-        else:
-            avg = metric
-        if isinstance(avg, (int, float)) and avg > 0:
-            ranked.append((float(avg), key))
+    for key in EMOTION_KEYS:
+        value = _metric_value(source, key, field)
+        if isinstance(value, (int, float)) and value > 0:
+            ranked.append((float(value), key))
     if not ranked:
         return None
     ranked.sort(reverse=True)
     value, key = ranked[0]
-    return f"{key.replace('_', ' ').title()} ({round(value * 100)}%)"
+    return {
+        "label": key.replace("_", " ").title(),
+        "value": f"{round(value * 100)}%",
+    }
 
 
-def _build_latest_biomarker_highlights(latest_biomarkers):
-    if not isinstance(latest_biomarkers, dict):
-        return []
-    voice = latest_biomarkers.get("voice") or {}
-    vitals = latest_biomarkers.get("vitals") or {}
-    heart_rate_metric = vitals.get("heart_rate_bpm") or vitals.get("heart_rate")
-    items = [
-        ("BPM", _format_bpm_triplet(heart_rate_metric)),
-        ("Emotion", _main_emotion_label(voice)),
-        ("Stress", _format_percent((voice.get("stress") or {}).get("avg") if isinstance(voice.get("stress"), dict) else voice.get("stress"))),
-        ("Burnout", _format_percent((voice.get("burnout") or {}).get("avg") if isinstance(voice.get("burnout"), dict) else voice.get("burnout"))),
-        ("Fatigue", _format_percent((voice.get("fatigue") or {}).get("avg") if isinstance(voice.get("fatigue"), dict) else voice.get("fatigue"))),
-    ]
-    return [{"label": label, "value": value} for label, value in items if value]
+def _build_metric_row(source, key: str, label: str, *, window_sessions=None):
+    if key == "blood_pressure":
+        avg_sys = _metric_value(source, "systolic_bp", "avg")
+        avg_dia = _metric_value(source, "diastolic_bp", "avg")
+        max_sys = _metric_value(source, "systolic_bp", "max")
+        max_dia = _metric_value(source, "diastolic_bp", "max")
+        if avg_sys is None and avg_dia is None:
+            return None
+        average = f"{round(avg_sys) if avg_sys is not None else '—'}/{round(avg_dia) if avg_dia is not None else '—'}"
+        maximum = (
+            f"{round(max_sys) if max_sys is not None else '—'}/{round(max_dia) if max_dia is not None else '—'}"
+            if max_sys is not None or max_dia is not None
+            else None
+        )
+        return {
+            "label": label,
+            "average": average,
+            "max": maximum,
+            "window_sessions": window_sessions,
+            "unit": "mmHg",
+        }
 
-
-def _baseline_display_value(key: str, baseline):
-    if not isinstance(baseline, dict):
+    average_value = _metric_value(source, key, "avg")
+    max_value = _metric_value(source, key, "max")
+    if average_value is None and max_value is None:
         return None
-    averages = baseline.get("averages") or {}
-    value = averages.get(key)
-    if not isinstance(value, (int, float)):
+    return {
+        "label": label,
+        "average": _format_metric_number(key, average_value) if average_value is not None else None,
+        "max": _format_metric_number(key, max_value) if max_value is not None else None,
+        "window_sessions": window_sessions,
+        "unit": _metric_detail_suffix(key),
+    }
+
+
+def _empty_biomarker_message(*, audio_enabled: bool, video_enabled: bool, has_any_rows: bool) -> str | None:
+    if has_any_rows:
         return None
-    if key in {"heart_rate_bpm", "heart_rate", "hrv_sdnn_ms", "hrv", "breathing_rate_bpm", "breathing_rate", "stress_index"}:
-        return str(round(float(value)))
-    return f"{round(float(value) * 100)}%"
+    if not audio_enabled and not video_enabled:
+        return "Audio and video biomarkers were not enabled for this session."
+    if not audio_enabled and video_enabled:
+        return "Audio biomarkers were not enabled for this session."
+    if audio_enabled and not video_enabled:
+        return "Video biomarkers were not enabled for this session."
+    return "Biomarkers were enabled for this session, but no biomarker data was stored."
 
 
-def _grouped_biomarker_sections(biomarkers, baseline=None):
+def _build_session_biomarker_view(biomarkers, *, audio_enabled: bool, video_enabled: bool):
     if not isinstance(biomarkers, dict):
-        return []
+        return {
+            "headlines": [],
+            "groups": [],
+            "safety": None,
+            "empty_message": _empty_biomarker_message(
+                audio_enabled=audio_enabled,
+                video_enabled=video_enabled,
+                has_any_rows=False,
+            ),
+        }
+
     voice = biomarkers.get("voice") or {}
     vitals = biomarkers.get("vitals") or {}
     safety = biomarkers.get("safety") or {}
-    groups = [
-        (
-            "Vitals",
-            vitals,
-            ["heart_rate_bpm", "heart_rate", "hrv_sdnn_ms", "hrv", "breathing_rate_bpm", "breathing_rate", "stress_index"],
-            False,
+
+    stress_avg = _metric_value(voice, "stress", "avg")
+    stress_max = _metric_value(voice, "stress", "max")
+    heart_avg = _metric_value(vitals, "heart_rate_bpm", "avg") or _metric_value(vitals, "heart_rate", "avg")
+    heart_max = _metric_value(vitals, "heart_rate_bpm", "max") or _metric_value(vitals, "heart_rate", "max")
+    common_emotion = _emotion_stat_label(voice, "avg")
+    peak_emotion = _emotion_stat_label(voice, "max")
+
+    headlines = []
+    if stress_avg is not None:
+        headlines.append({
+            "label": "Stress",
+            "value": _format_metric_number("stress", stress_avg),
+            "detail": f"Max { _format_metric_number('stress', stress_max) }" if stress_max is not None else None,
+        })
+    if heart_avg is not None:
+        headlines.append({
+            "label": "Heart Rate",
+            "value": f"{_format_metric_number('heart_rate_bpm', heart_avg)} bpm",
+            "detail": f"Max {_format_metric_number('heart_rate_bpm', heart_max)} bpm" if heart_max is not None else None,
+        })
+    if common_emotion:
+        detail = f"Peak {peak_emotion['label']} ({peak_emotion['value']})" if peak_emotion else None
+        headlines.append({
+            "label": "Leading Emotion",
+            "value": f"{common_emotion['label']} ({common_emotion['value']})",
+            "detail": detail,
+        })
+    highest_level = safety.get("highest_level")
+    highest_alert = safety.get("highest_alert")
+    if highest_level is not None:
+        headlines.append({
+            "label": "Safety",
+            "value": f"Level {highest_level}",
+            "detail": highest_alert if highest_alert else None,
+        })
+
+    voice_rows = [row for key, label in VOICE_TILE_KEYS if (row := _build_metric_row(voice, key, label))]
+    video_rows = [row for key, label in VIDEO_TILE_KEYS if (row := _build_metric_row(vitals, key, label))]
+
+    safety_view = None
+    if highest_level is not None or safety.get("highest_concerns") or safety.get("highest_recommended_actions"):
+        safety_view = {
+            "level": highest_level,
+            "alert": highest_alert or None,
+            "policy": safety.get("active_policy") or None,
+            "concerns": list(safety.get("highest_concerns") or []),
+            "actions": list(safety.get("highest_recommended_actions") or []),
+        }
+
+    groups = []
+    if voice_rows:
+        groups.append({"title": "Voice Biomarkers", "rows": voice_rows})
+    if video_rows:
+        groups.append({"title": "Video Biomarkers", "rows": video_rows})
+
+    return {
+        "headlines": headlines,
+        "groups": groups,
+        "safety": safety_view,
+        "empty_message": _empty_biomarker_message(
+            audio_enabled=audio_enabled,
+            video_enabled=video_enabled,
+            has_any_rows=bool(headlines or groups or safety_view),
         ),
-        (
-            "Helios — Wellness",
-            voice,
-            ["distress", "stress", "burnout", "fatigue", "low_self_esteem"],
-            True,
-        ),
-        (
-            "Apollo — Clinical",
-            voice,
-            [
-                "depression_probability", "anxiety_probability", "anhedonia", "low_mood", "sleep_issues",
-                "low_energy", "appetite_issues", "worthlessness_issues", "concentration_issues",
-                "psychomotor_issues", "nervousness", "uncontrollable_worry", "excessive_worry",
-                "trouble_relaxing", "restlessness", "irritability", "dread",
-            ],
-            True,
-        ),
-        (
-            "Emotions",
-            voice,
-            ["angry", "disgusted", "fearful", "happy", "neutral", "other", "sad", "surprised"],
-            True,
-        ),
-    ]
-    sections = []
-    for title, source, keys, percent in groups:
-        rows = []
-        for key in keys:
-            metric = source.get(key)
-            if not isinstance(metric, dict):
-                continue
-            triplet = _format_metric_triplet(metric, percent=percent)
-            if not triplet:
-                continue
-            rows.append(
-                {
-                    "label": _display_metric_label(key),
-                    "triplet": triplet,
-                    "baseline": _baseline_display_value(key, baseline),
-                }
-            )
-        if rows:
-            sections.append({"title": title, "rows": rows})
-    safety_lines = []
-    if safety.get("highest_level") is not None:
-        safety_lines.append(f"Highest level: {safety['highest_level']}")
-    if safety.get("highest_concerns"):
-        safety_lines.append("Concerns: " + ", ".join(safety["highest_concerns"]))
-    if safety.get("highest_recommended_actions"):
-        safety_lines.append("Actions: " + "; ".join(safety["highest_recommended_actions"]))
-    if safety_lines:
-        sections.append({"title": "Safety", "rows": [{"label": "Summary", "triplet": line, "baseline": None} for line in safety_lines]})
-    return sections
+    }
+
+
+def _build_client_biomarker_view(baseline):
+    if not isinstance(baseline, dict):
+        return {
+            "headlines": [],
+            "groups": [],
+            "safety": None,
+            "empty_message": "No baseline established yet — needs at least one completed session.",
+        }
+
+    averages = baseline.get("averages") or {}
+    maxes = baseline.get("maxes") or {}
+    window_sessions = int(baseline.get("window_sessions") or 0)
+    source = {}
+    for key, value in averages.items():
+        if isinstance(value, (int, float)):
+            source[key] = {"avg": float(value)}
+    for key, value in maxes.items():
+        if isinstance(value, (int, float)):
+            source.setdefault(key, {})["max"] = float(value)
+
+    stress_avg = _metric_value(source, "stress", "avg")
+    stress_max = _metric_value(source, "stress", "max")
+    heart_avg = _metric_value(source, "heart_rate_bpm", "avg") or _metric_value(source, "heart_rate", "avg")
+    heart_max = _metric_value(source, "heart_rate_bpm", "max") or _metric_value(source, "heart_rate", "max")
+    common_emotion = _emotion_stat_label(source, "avg")
+    peak_emotion = _emotion_stat_label(source, "max")
+
+    headlines = []
+    if stress_avg is not None:
+        headlines.append({
+            "label": "Stress",
+            "value": _format_metric_number("stress", stress_avg),
+            "detail": f"Max avg {_format_metric_number('stress', stress_max)} · {window_sessions} sessions" if stress_max is not None else f"{window_sessions} sessions",
+        })
+    if heart_avg is not None:
+        detail = f"Max avg {_format_metric_number('heart_rate_bpm', heart_max)} bpm · {window_sessions} sessions" if heart_max is not None else f"{window_sessions} sessions"
+        headlines.append({
+            "label": "Heart Rate",
+            "value": f"{_format_metric_number('heart_rate_bpm', heart_avg)} bpm",
+            "detail": detail,
+        })
+    if common_emotion:
+        detail = (
+            f"Peak avg {peak_emotion['label']} ({peak_emotion['value']}) · {window_sessions} sessions"
+            if peak_emotion
+            else f"{window_sessions} sessions"
+        )
+        headlines.append({
+            "label": "Leading Emotion",
+            "value": f"{common_emotion['label']} ({common_emotion['value']})",
+            "detail": detail,
+        })
+
+    latest_safety = baseline.get("latest_safety") or {}
+    if latest_safety.get("highest_level") is not None:
+        headlines.append({
+            "label": "Safety",
+            "value": f"Level {latest_safety['highest_level']}",
+            "detail": latest_safety.get("highest_alert") or None,
+        })
+
+    voice_rows = [row for key, label in VOICE_TILE_KEYS if (row := _build_metric_row(source, key, label, window_sessions=window_sessions))]
+    video_rows = [row for key, label in VIDEO_TILE_KEYS if (row := _build_metric_row(source, key, label, window_sessions=window_sessions))]
+
+    safety_view = None
+    if latest_safety.get("highest_level") is not None or latest_safety.get("highest_concerns") or latest_safety.get("highest_recommended_actions"):
+        safety_view = {
+            "level": latest_safety.get("highest_level"),
+            "alert": latest_safety.get("highest_alert") or None,
+            "policy": latest_safety.get("active_policy") or None,
+            "concerns": list(latest_safety.get("highest_concerns") or []),
+            "actions": list(latest_safety.get("highest_recommended_actions") or []),
+        }
+
+    groups = []
+    if voice_rows:
+        groups.append({"title": "Voice Biomarkers", "rows": voice_rows})
+    if video_rows:
+        groups.append({"title": "Video Biomarkers", "rows": video_rows})
+
+    has_any_rows = bool(headlines or groups or safety_view)
+    return {
+        "headlines": headlines,
+        "groups": groups,
+        "safety": safety_view,
+        "empty_message": None if has_any_rows else "No baseline established yet — needs at least one completed session.",
+    }
 
 
 def _send_client_message(db, *, consultant_id: str, client, client_id: str, message_body: str):
@@ -1378,41 +1541,225 @@ def _refresh_client_derived_state(db, storage: EncryptedStorage, client_id: str)
     biomarker_rows = list_recent_biomarker_keys(db, client_id, limit=5)
 
     baseline_key = None
-    metrics = {}
+    average_metrics = {}
+    max_metrics = {}
+    latest_safety = None
+    successful_payloads = 0
     for row in biomarker_rows:
         payload = storage.get_json(row["biomarker_storage_key"], client_id)
         if not payload:
             continue
-        for key, value in payload.get("averages", {}).items():
-            if isinstance(value, (int, float)):
-                metrics.setdefault(key, []).append(float(value))
-                continue
-            if isinstance(value, dict):
-                avg_value = value.get("avg")
+        successful_payloads += 1
+        saw_group_metrics = False
+        for group_name in ("voice", "vitals"):
+            group = payload.get(group_name) or {}
+            for key, metric in group.items():
+                if not isinstance(metric, dict):
+                    continue
+                saw_group_metrics = True
+                avg_value = metric.get("avg")
+                max_value = metric.get("max")
                 if isinstance(avg_value, (int, float)):
-                    metrics.setdefault(key, []).append(float(avg_value))
+                    average_metrics.setdefault(key, []).append(float(avg_value))
+                if isinstance(max_value, (int, float)):
+                    max_metrics.setdefault(key, []).append(float(max_value))
+        if not saw_group_metrics:
+            # Backward compatibility for older biomarker payloads that only
+            # stored structured metric objects under `averages`.
+            for key, metric in (payload.get("averages") or {}).items():
+                if not isinstance(metric, dict):
+                    continue
+                avg_value = metric.get("avg")
+                max_value = metric.get("max")
+                if isinstance(avg_value, (int, float)):
+                    average_metrics.setdefault(key, []).append(float(avg_value))
+                if isinstance(max_value, (int, float)):
+                    max_metrics.setdefault(key, []).append(float(max_value))
+        safety = payload.get("safety") or {}
+        if latest_safety is None and isinstance(safety, dict):
+            latest_safety = {
+                "highest_level": safety.get("highest_level"),
+                "highest_alert": safety.get("highest_alert"),
+                "highest_concerns": list(safety.get("highest_concerns") or []),
+                "highest_recommended_actions": list(safety.get("highest_recommended_actions") or []),
+                "active_policy": safety.get("active_policy") or "",
+            }
 
-    if biomarker_rows:
+    if successful_payloads:
         baseline = {
-            "window_sessions": len(biomarker_rows),
+            "window_sessions": successful_payloads,
             "averages": {
                 key: round(sum(values) / len(values), 4)
-                for key, values in metrics.items()
+                for key, values in average_metrics.items()
                 if values
             },
+            "maxes": {
+                key: round(sum(values) / len(values), 4)
+                for key, values in max_metrics.items()
+                if values
+            },
+            "latest_safety": latest_safety or {},
         }
         baseline_key = f"clients/{client_id}/baseline.json.enc"
         storage.put_json(baseline_key, client_id, baseline)
+
+    session_rows = db.execute(
+        """
+        SELECT id, session_kind, meeting_id, summary_storage_key,
+               COALESCE(ended_at, started_at, created_at) AS session_at
+        FROM sessions
+        WHERE client_id = ?
+        ORDER BY COALESCE(ended_at, started_at, created_at) DESC
+        """,
+        (client_id,),
+    ).fetchall()
+
+    def _normalize_summary_payload(summary):
+        if not isinstance(summary, dict):
+            return {}
+        brief = (summary.get("brief_overview") or summary.get("overview") or "").strip()
+        full = (summary.get("full_summary") or brief).strip()
+        return {
+            "brief_overview": brief,
+            "overview": brief,
+            "full_summary": full,
+            "risk_overview": (summary.get("risk_overview") or "").strip(),
+            "follow_up": (summary.get("follow_up") or "").strip(),
+            "biomarker_summary": (summary.get("biomarker_summary") or "").strip(),
+        }
+
+    def _is_ai_session(row) -> bool:
+        kind = (row["session_kind"] or "").strip().lower()
+        return kind == "avatar_ai_session"
+
+    def _build_personal_summary_payload(kind_label: str, rows):
+        session_count = len(rows)
+        if not session_count:
+            return None
+        def _stringify_dt(value):
+            if not value:
+                return ""
+            if isinstance(value, datetime):
+                return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+            return str(value)
+        summaries = []
+        for row in rows:
+            if not row["summary_storage_key"]:
+                continue
+            payload = storage.get_json(row["summary_storage_key"], client_id)
+            normalized = _normalize_summary_payload(payload)
+            if normalized.get("brief_overview") or normalized.get("full_summary"):
+                normalized["session_at"] = row["session_at"] or ""
+                summaries.append(normalized)
+
+        if not summaries:
+            return {
+                "updated_at": iso_utc(utc_now()),
+                "session_count": session_count,
+                "window_sessions": 0,
+                "brief_overview": f"No {kind_label.lower()} summary stored yet.",
+                "full_summary": "",
+                "key_facts": [],
+                "open_threads": [],
+                "latest_session_at": _stringify_dt(rows[0]["session_at"]),
+            }
+
+        recent = summaries[:6]
+        brief_lines = []
+        seen_briefs = set()
+        for item in recent:
+            brief = item["brief_overview"]
+            if brief and brief not in seen_briefs:
+                seen_briefs.add(brief)
+                brief_lines.append(brief)
+            if len(brief_lines) >= 3:
+                break
+
+        risk_lines = []
+        follow_up_lines = []
+        key_facts = []
+        seen_risks = set()
+        seen_follow = set()
+        seen_facts = set()
+        for item in recent:
+            risk = item["risk_overview"]
+            follow = item["follow_up"]
+            if risk and risk not in seen_risks:
+                seen_risks.add(risk)
+                risk_lines.append(risk)
+            if follow and follow not in seen_follow:
+                seen_follow.add(follow)
+                follow_up_lines.append(follow)
+            for sentence in re.split(r"(?<=[.!?])\s+", item["full_summary"] or ""):
+                cleaned = " ".join(sentence.split()).strip()
+                if len(cleaned) < 40:
+                    continue
+                if cleaned in seen_facts:
+                    continue
+                seen_facts.add(cleaned)
+                key_facts.append(cleaned)
+                if len(key_facts) >= 5:
+                    break
+            if len(key_facts) >= 5:
+                break
+
+        latest_at = _stringify_dt(rows[0]["session_at"])
+        brief_overview = " ".join(brief_lines[:2]).strip() or f"{session_count} {kind_label.lower()} sessions on record."
+        full_parts = [
+            f"{session_count} {kind_label.lower()} sessions are on record for this client.",
+            "Recent themes: " + " ".join(brief_lines[:3]).strip() if brief_lines else "",
+            "Key facts: " + " ".join(key_facts[:3]).strip() if key_facts else "",
+            "Risk pattern: " + " ".join(risk_lines[:2]).strip() if risk_lines else "",
+            "Open threads: " + " ".join(follow_up_lines[:2]).strip() if follow_up_lines else "",
+        ]
+        full_summary = " ".join(part for part in full_parts if part).strip()
+
+        return {
+            "updated_at": iso_utc(utc_now()),
+            "session_count": session_count,
+            "window_sessions": len(summaries),
+            "brief_overview": brief_overview,
+            "overview": brief_overview,
+            "full_summary": full_summary,
+            "key_facts": key_facts[:5],
+            "open_threads": follow_up_lines[:5],
+            "latest_session_at": latest_at,
+        }
+
+    ai_rows = [row for row in session_rows if _is_ai_session(row)]
+    human_rows = [row for row in session_rows if not _is_ai_session(row)]
+    ai_summary_payload = _build_personal_summary_payload("AI", ai_rows)
+    human_summary_payload = _build_personal_summary_payload("Human", human_rows)
+    ai_summary_key = None
+    human_summary_key = None
+    if ai_summary_payload:
+        ai_summary_key = f"clients/{client_id}/ai_summary.json.enc"
+        storage.put_json(ai_summary_key, client_id, ai_summary_payload)
+    if human_summary_payload:
+        human_summary_key = f"clients/{client_id}/human_summary.json.enc"
+        storage.put_json(human_summary_key, client_id, human_summary_payload)
 
     db.execute(
         """
         UPDATE clients
         SET latest_summary_storage_key = ?,
             baseline_storage_key = ?,
+            ai_summary_storage_key = ?,
+            human_summary_storage_key = ?,
+            ai_session_count = ?,
+            human_session_count = ?,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
-        (latest_summary_key, baseline_key, client_id),
+        (
+            latest_summary_key,
+            baseline_key,
+            ai_summary_key,
+            human_summary_key,
+            len(ai_rows),
+            len(human_rows),
+            client_id,
+        ),
     )
 
 
@@ -1561,6 +1908,23 @@ def _client_name_fields_from_form(req) -> tuple[str, str, str]:
     return first_name, last_name, compose_client_display_name(first_name, last_name)
 
 
+def _client_demographics_from_form(req) -> tuple[Optional[int], str]:
+    raw_year = (req.form.get("year_of_birth") or "").strip()
+    sex = (req.form.get("sex") or "").strip().lower()
+    year_of_birth = None
+    if raw_year:
+        try:
+            year_of_birth = int(raw_year)
+        except ValueError as exc:
+            raise ValueError("Year of birth must be a valid year.") from exc
+        current_year = datetime.now(timezone.utc).year
+        if year_of_birth < 1900 or year_of_birth > current_year:
+            raise ValueError("Year of birth must be between 1900 and the current year.")
+    if sex and sex not in {"male", "female"}:
+        raise ValueError("Sex must be male or female.")
+    return year_of_birth, sex
+
+
 @web_bp.route("/consultant/clients/new", methods=["GET", "POST"])
 @require_consultant
 def consultant_client_new():
@@ -1569,6 +1933,7 @@ def consultant_client_new():
     form_defaults = {
         "phone_country_code": "US",
         "escalation_phone_country_code": "US",
+        "sex": "",
     }
     if request.method == "POST":
         first_name, last_name, display_name = _client_name_fields_from_form(request)
@@ -1592,6 +1957,8 @@ def consultant_client_new():
                 "notification_email": request.form.get("notification_email", "").strip(),
                 "escalation_phone_number": raw_escalation_phone,
                 "escalation_phone_country_code": escalation_phone_country_code,
+                "year_of_birth": (request.form.get("year_of_birth") or "").strip(),
+                "sex": (request.form.get("sex") or "").strip().lower(),
                 "notes": request.form.get("notes", "").strip(),
                 "direction": request.form.get("direction", "").strip(),
             }
@@ -1604,6 +1971,7 @@ def consultant_client_new():
                 db.close()
                 return _render_consultant_client_new_form(form_defaults=form_defaults)
             try:
+                year_of_birth, sex = _client_demographics_from_form(request)
                 phone_number = normalize_phone(raw_phone_number, phone_country_code) if raw_phone_number else ""
                 escalation_phone_number = (
                     normalize_phone(raw_escalation_phone, escalation_phone_country_code)
@@ -1627,6 +1995,8 @@ def consultant_client_new():
                 phone_number=phone_number,
                 notification_email=notification_email,
                 escalation_phone_number=escalation_phone_number,
+                year_of_birth=year_of_birth,
+                sex=sex,
                 notes=notes,
                 direction=direction,
             )
@@ -1724,6 +2094,7 @@ def consultant_client_detail(client_id: str):
                 flash("First name is required", "error")
             else:
                 try:
+                    year_of_birth, sex = _client_demographics_from_form(request)
                     if reset_password and (not email or not raw_phone_number):
                         raise ValueError("Email and phone number are required when setting a client password.")
                     phone_number = normalize_phone(raw_phone_number, phone_country_code) if raw_phone_number else ""
@@ -1741,6 +2112,8 @@ def consultant_client_detail(client_id: str):
                         phone_number=phone_number,
                         notification_email=notification_email,
                         escalation_phone_number=escalation_phone_number,
+                        year_of_birth=year_of_birth,
+                        sex=sex,
                         notes=notes,
                         direction=direction,
                     )
@@ -1819,20 +2192,19 @@ def consultant_client_detail(client_id: str):
         (client_id,),
     ).fetchone()
     storage = _storage()
-    latest_summary = None
-    latest_biomarkers = None
-    latest_biomarker_highlights = []
-    latest_biomarker_sections = []
+    if not client["ai_summary_storage_key"] or not client["human_summary_storage_key"]:
+        _refresh_client_derived_state(db, storage, client_id)
+        db.commit()
+        client = get_client_detail(db, client_id, consultant_id=consultant_id)
     baseline = None
-    if client["latest_summary_storage_key"]:
-        latest_summary = storage.get_json(client["latest_summary_storage_key"], client_id)
-    latest_session_row = sessions[0] if sessions else None
-    if latest_session_row and latest_session_row["biomarker_storage_key"]:
-        latest_biomarkers = storage.get_json(latest_session_row["biomarker_storage_key"], client_id)
-        latest_biomarker_highlights = _build_latest_biomarker_highlights(latest_biomarkers)
-        latest_biomarker_sections = _grouped_biomarker_sections(latest_biomarkers)
+    ai_personal_summary = None
+    human_personal_summary = None
     if client["baseline_storage_key"]:
         baseline = storage.get_json(client["baseline_storage_key"], client_id)
+    if client["ai_summary_storage_key"]:
+        ai_personal_summary = storage.get_json(client["ai_summary_storage_key"], client_id)
+    if client["human_summary_storage_key"]:
+        human_personal_summary = storage.get_json(client["human_summary_storage_key"], client_id)
     session_summaries = {}
     for session_row in sessions:
         summary_payload = None
@@ -1840,6 +2212,7 @@ def consultant_client_detail(client_id: str):
             summary_payload = storage.get_json(session_row["summary_storage_key"], client_id)
         session_summaries[session_row["id"]] = summary_payload or {}
     messages = _message_preview_rows(db, client_id, consultant_id, limit=20)
+    client_biomarkers = _build_client_biomarker_view(baseline)
     db.close()
     return render_template(
         "consultant/client_detail.html",
@@ -1850,11 +2223,13 @@ def consultant_client_detail(client_id: str):
         meetings=meetings,
         open_alerts=open_alerts,
         auth_identity=auth_identity,
-        latest_summary=latest_summary,
-        latest_biomarkers=latest_biomarkers,
-        latest_biomarker_highlights=latest_biomarker_highlights,
-        latest_biomarker_sections=latest_biomarker_sections,
         baseline=baseline,
+        biomarker_headlines=client_biomarkers["headlines"],
+        biomarker_groups=client_biomarkers["groups"],
+        biomarker_safety=client_biomarkers["safety"],
+        biomarker_empty_message=client_biomarkers["empty_message"],
+        ai_personal_summary=ai_personal_summary,
+        human_personal_summary=human_personal_summary,
         session_summaries=session_summaries,
         messages=messages,
         phone_countries=country_options(),
@@ -2198,8 +2573,11 @@ def consultant_meeting_detail(meeting_id: str):
         linked_summary = storage.get_json(meeting["summary_storage_key"], meeting["client_id"])
     if meeting["biomarker_storage_key"]:
         linked_biomarkers = storage.get_json(meeting["biomarker_storage_key"], meeting["client_id"])
-    biomarker_headlines = _build_latest_biomarker_highlights(linked_biomarkers)
-    biomarker_sections = _grouped_biomarker_sections(linked_biomarkers)
+    meeting_biomarkers = _build_session_biomarker_view(
+        linked_biomarkers,
+        audio_enabled=bool(meeting["audio_biomarkers_enabled"]),
+        video_enabled=bool(meeting["video_biomarkers_enabled"]),
+    )
     now = datetime.now(timezone.utc)
     meeting = _decorate_meeting(meeting, now=now)
     scheduled_start_at = _parse_iso_datetime(meeting["scheduled_start_at"])
@@ -2219,8 +2597,10 @@ def consultant_meeting_detail(meeting_id: str):
         events=events,
         join_url=join_url,
         linked_summary=linked_summary,
-        biomarker_headlines=biomarker_headlines,
-        biomarker_sections=biomarker_sections,
+        biomarker_headlines=meeting_biomarkers["headlines"],
+        biomarker_groups=meeting_biomarkers["groups"],
+        biomarker_safety=meeting_biomarkers["safety"],
+        biomarker_empty_message=meeting_biomarkers["empty_message"],
         can_cancel=can_cancel,
         can_end=can_end,
         can_delete=can_delete,
@@ -2666,7 +3046,7 @@ def consultant_sessions():
     )
 
 
-@web_bp.route("/consultant/sessions/<session_id>", methods=["GET", "POST"])
+@web_bp.route("/consultant/sessions/<session_id>", methods=["GET"])
 @require_consultant
 def consultant_session_detail(session_id: str):
     consultant_id = session.get("consultant_id")
@@ -2676,36 +3056,11 @@ def consultant_session_detail(session_id: str):
         db.close()
         abort(404)
 
-    if request.method == "POST":
-        update_client_context(
-            db,
-            client_id=session_row["client_id"],
-            notes=request.form.get("notes", "").strip(),
-            direction=request.form.get("direction", "").strip(),
-        )
-        log_audit(
-            db,
-            actor_type="consultant",
-            actor_id=consultant_id,
-            action="client_context_updated_from_session",
-            target_type="client",
-            target_id=session_row["client_id"],
-            session_id=session_id,
-            ip_address=request.headers.get("X-Forwarded-For", request.remote_addr or ""),
-            user_agent=request.headers.get("User-Agent", ""),
-        )
-        db.commit()
-        flash("Notes and direction updated", "muted")
-        session_row = get_session_detail(db, session_id, consultant_id=consultant_id)
-
     storage = _storage()
     summary = None
     transcript = None
     transcript_text = ""
     biomarkers = None
-    baseline = None
-    biomarker_sections = []
-    biomarker_headlines = []
     if session_row["summary_storage_key"]:
         summary = storage.get_json(session_row["summary_storage_key"], session_row["client_id"])
     if session_row["transcript_storage_key"]:
@@ -2724,10 +3079,11 @@ def consultant_session_detail(session_id: str):
             transcript_text = transcript.strip()
     if session_row["biomarker_storage_key"]:
         biomarkers = storage.get_json(session_row["biomarker_storage_key"], session_row["client_id"])
-        biomarker_headlines = _build_latest_biomarker_highlights(biomarkers)
-    if session_row["baseline_storage_key"]:
-        baseline = storage.get_json(session_row["baseline_storage_key"], session_row["client_id"])
-    biomarker_sections = _grouped_biomarker_sections(biomarkers, baseline=baseline)
+    session_biomarkers = _build_session_biomarker_view(
+        biomarkers,
+        audio_enabled=bool(session_row["audio_biomarkers_enabled"]),
+        video_enabled=bool(session_row["video_biomarkers_enabled"]),
+    )
     alerts = db.execute(
         """
         SELECT *
@@ -2737,7 +3093,6 @@ def consultant_session_detail(session_id: str):
         """,
         (session_id,),
     ).fetchall()
-    messages = _message_preview_rows(db, session_row["client_id"], consultant_id, limit=50)
     db.close()
     return render_template(
         "consultant/session_detail.html",
@@ -2752,13 +3107,11 @@ def consultant_session_detail(session_id: str):
         audio_biomarkers_enabled=bool(session_row["audio_biomarkers_enabled"]),
         video_biomarkers_enabled=bool(session_row["video_biomarkers_enabled"]),
         biomarkers=biomarkers,
-        baseline=baseline,
-        biomarker_headlines=biomarker_headlines,
-        biomarker_sections=biomarker_sections,
+        biomarker_headlines=session_biomarkers["headlines"],
+        biomarker_groups=session_biomarkers["groups"],
+        biomarker_safety=session_biomarkers["safety"],
+        biomarker_empty_message=session_biomarkers["empty_message"],
         alerts=alerts,
-        client_notes=session_row["notes_current"],
-        client_direction=session_row["direction_current"],
-        messages=messages,
     )
 
 
