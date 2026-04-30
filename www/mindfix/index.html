@@ -54,20 +54,32 @@
   <header id="hero" class="hero-section d-flex align-items-center">
     <div class="hero-overlay"></div>
     <div class="container text-center position-relative">
-      <h1 class="hero-title">AI Mental Wellness, Guided by a Human Therapist</h1>
+      <h1 class="hero-title">AI Mental Wellness,<br>Guided by a Human Therapist</h1>
       <p class="hero-subtitle">Start an AI wellness session</p>
       <div class="hero-avatars mt-4">
-        <a href="/app?profile=therapy&autoconnect=true&returnurl=/" class="hero-avatar-link">
-          <img src="img/avatar-1.png" alt="AI wellness companion" class="hero-avatar">
+        <a href="/app?profile=therapy&autoconnect=true&returnurl=/"
+           class="hero-avatar-link"
+           data-avatar-id="2f596519-d7c2-48ad-b501-934f641e8400"
+           data-voice-id="aEO01A4wXwd1O8GPgGlF">
+          <img src="img/avatars/2f596519-d7c2-48ad-b501-934f641e8400.png" alt="AI wellness companion" class="hero-avatar">
         </a>
-        <a href="/app?profile=therapy&autoconnect=true&returnurl=/" class="hero-avatar-link">
-          <img src="img/avatar-2.png" alt="AI wellness companion" class="hero-avatar">
+        <a href="/app?profile=therapy&autoconnect=true&returnurl=/"
+           class="hero-avatar-link"
+           data-avatar-id="82b1473e-ddd3-4e7f-a077-64f8b88b7034"
+           data-voice-id="gkNtCouZOO0T9qM30FeS">
+          <img src="img/avatars/82b1473e-ddd3-4e7f-a077-64f8b88b7034.png" alt="AI wellness companion" class="hero-avatar">
         </a>
-        <a href="/app?profile=therapy&autoconnect=true&returnurl=/" class="hero-avatar-link">
-          <img src="img/avatar-3.png" alt="AI wellness companion" class="hero-avatar">
+        <a href="/app?profile=therapy&autoconnect=true&returnurl=/"
+           class="hero-avatar-link"
+           data-avatar-id="aa5d6abd-416f-4dd4-a123-b5b29bf1644a"
+           data-voice-id="tkWr6klIDADZ7T8TWUuj">
+          <img src="img/avatars/aa5d6abd-416f-4dd4-a123-b5b29bf1644a.png" alt="AI wellness companion" class="hero-avatar">
         </a>
-        <a href="/app?profile=therapy&autoconnect=true&returnurl=/" class="hero-avatar-link">
-          <img src="img/avatar-4.png" alt="AI wellness companion" class="hero-avatar">
+        <a href="/app?profile=therapy&autoconnect=true&returnurl=/"
+           class="hero-avatar-link"
+           data-avatar-id="1bed9d5e-5e81-4d98-a04a-21e346bea528"
+           data-voice-id="cgSgspJ2msm6clMCkdW9">
+          <img src="img/avatars/1bed9d5e-5e81-4d98-a04a-21e346bea528.png" alt="AI wellness companion" class="hero-avatar">
         </a>
       </div>
       <p class="hero-trust mt-4">
@@ -299,7 +311,19 @@
         : clientBase + "?" + joinParams.toString();
 
       document.querySelectorAll(".hero-avatar-link").forEach(function (link) {
-        link.setAttribute("href", clientJoinUrl);
+        var avatarId = link.getAttribute("data-avatar-id");
+        var voiceId = link.getAttribute("data-voice-id");
+        var avatarParams = new URLSearchParams(joinParams.toString());
+        if (avatarId) {
+          avatarParams.set("avatar_id", avatarId);
+        }
+        if (voiceId) {
+          avatarParams.set("voice_id", voiceId);
+        }
+        var avatarJoinUrl = clientBase.startsWith("http")
+          ? clientBase.replace(/\/$/, "") + "/?" + avatarParams.toString()
+          : clientBase + "?" + avatarParams.toString();
+        link.setAttribute("href", avatarJoinUrl);
       });
 
       var howItWorksCta = document.getElementById("howItWorksCta");
