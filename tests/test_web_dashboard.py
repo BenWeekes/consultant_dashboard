@@ -663,6 +663,27 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertIn(b"Speech-to-text was not enabled for this session.", response.data)
         self.assertIn(b"Audio and video biomarkers were not enabled for this session.", response.data)
 
+    def test_session_detail_shows_audio_disabled_empty_state(self):
+        self.ingest_session(session_id="sess_audio_disabled_001", urgent_escalation=False)
+        db = get_db(self.app.config)
+        db.execute(
+            """
+            UPDATE sessions
+            SET audio_biomarkers_enabled = 0,
+                video_biomarkers_enabled = 1,
+                biomarker_storage_key = NULL
+            WHERE id = ?
+            """,
+            ("sess_audio_disabled_001",),
+        )
+        db.commit()
+        db.close()
+
+        self.consultant_login()
+        response = self.client.get("/consultant/sessions/sess_audio_disabled_001")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Audio biomarkers were not enabled for this session.", response.data)
+
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_meeting_detail_shows_signal_settings(self, mocked_deliver_email):
         self.consultant_login()

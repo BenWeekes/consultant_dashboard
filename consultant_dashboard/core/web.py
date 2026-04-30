@@ -1576,7 +1576,17 @@ def _refresh_client_derived_state(db, storage: EncryptedStorage, client_id: str)
                 if isinstance(max_value, (int, float)):
                     max_metrics.setdefault(key, []).append(float(max_value))
         safety = payload.get("safety") or {}
-        if latest_safety is None and isinstance(safety, dict):
+        if (
+            latest_safety is None
+            and isinstance(safety, dict)
+            and (
+                safety.get("highest_level") is not None
+                or safety.get("highest_alert")
+                or safety.get("active_policy")
+                or safety.get("highest_concerns")
+                or safety.get("highest_recommended_actions")
+            )
+        ):
             latest_safety = {
                 "highest_level": safety.get("highest_level"),
                 "highest_alert": safety.get("highest_alert"),
