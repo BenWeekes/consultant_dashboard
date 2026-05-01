@@ -755,6 +755,7 @@ def _load_recent_summaries(storage: EncryptedStorage, db, client_id: str, limit:
             {
                 "session_id": row["id"],
                 "ended_at": row["ended_at"] or row["started_at"] or row["created_at"],
+                "key_point_summary": payload.get("key_point_summary") or {},
                 "brief_overview": payload.get("brief_overview") or payload.get("overview") or "",
                 "full_summary": payload.get("full_summary") or payload.get("overview") or "",
                 "biomarker_summary": payload.get("biomarker_summary") or "",
@@ -775,7 +776,21 @@ def _normalize_summary_payload(summary):
         full_summary = summary.get("full_summary") or summary.get("overview") or ""
     else:
         return None
+    headline = (
+        (summary.get("key_point_summary") or {}).get("headline")
+        if isinstance(summary.get("key_point_summary"), dict)
+        else ""
+    ) or brief_overview
+    body = (
+        (summary.get("key_point_summary") or {}).get("body")
+        if isinstance(summary.get("key_point_summary"), dict)
+        else ""
+    ) or full_summary
     return {
+        "key_point_summary": {
+            "headline": headline,
+            "body": body,
+        },
         "brief_overview": brief_overview,
         "overview": brief_overview,
         "full_summary": full_summary,
@@ -801,6 +816,8 @@ def session_complete():
     summary_key = None
     transcript_key = None
     biomarker_key = None
+    ai_summary_key = None
+    human_summary_key = None
     meeting_id = payload.get("meeting_id")
     alert_keys = []
     if payload.get("summary"):
@@ -812,6 +829,12 @@ def session_complete():
     if payload.get("biomarkers"):
         biomarker_key = f"clients/{client_id}/sessions/{session_id}/biomarkers.json.enc"
         storage.put_json(biomarker_key, client_id, payload["biomarkers"])
+    if payload.get("ai_personal_summary"):
+        ai_summary_key = f"clients/{client_id}/ai_summary.json.enc"
+        storage.put_json(ai_summary_key, client_id, _normalize_summary_payload(payload["ai_personal_summary"]))
+    if payload.get("human_personal_summary"):
+        human_summary_key = f"clients/{client_id}/human_summary.json.enc"
+        storage.put_json(human_summary_key, client_id, _normalize_summary_payload(payload["human_personal_summary"]))
 
     db = get_db(current_app.config)
     meeting_signal_flags = {
@@ -827,6 +850,10 @@ def session_complete():
                 "audio_biomarkers_enabled": 1 if meeting_row["audio_biomarkers_enabled"] else 0,
                 "video_biomarkers_enabled": 1 if meeting_row["video_biomarkers_enabled"] else 0,
             }
+    if ai_summary_key:
+        db.execute("UPDATE clients SET ai_summary_storage_key = ? WHERE id = ?", (ai_summary_key, client_id))
+    if human_summary_key:
+        db.execute("UPDATE clients SET human_summary_storage_key = ? WHERE id = ?", (human_summary_key, client_id))
     upsert_session(
         db,
         session_id=session_id,

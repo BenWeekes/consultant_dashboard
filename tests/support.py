@@ -205,6 +205,14 @@ class ConsultantDashboardTestCase(unittest.TestCase):
             "duration_seconds": 300,
             "status": "completed",
             "summary": {"overview": "Generalized summary."},
+            "ai_personal_summary": {
+                "key_point_summary": {
+                    "headline": "Client Key Point Summary - AI Sessions",
+                    "body": "Recurring AI-session themes include stress, burnout, and the need for steady routines.",
+                },
+                "brief_overview": "Client Key Point Summary - AI Sessions",
+                "full_summary": "Recurring AI-session themes include stress, burnout, and the need for steady routines.",
+            },
             "biomarkers": {
                 "averages": {"stress_index": 52.5, "hrv": 31.0, "stress": 0.42, "burnout": 0.31},
                 "voice": {
@@ -218,7 +226,12 @@ class ConsultantDashboardTestCase(unittest.TestCase):
                     "hrv": {"avg": 31.0, "max": 38.0, "count": 4, "min": 24.0},
                     "heart_rate_bpm": {"avg": 72.0, "max": 81.0, "count": 4, "min": 66.0},
                 },
-                "safety": {"highest_level": 1, "highest_alert": "monitor", "highest_concerns": ["stress"]},
+                "safety": {
+                    "level_stats": {"avg": 0.75, "max": 1.0, "count": 4, "min": 0.0},
+                    "highest_level": 1,
+                    "highest_alert": "monitor",
+                    "highest_concerns": ["stress"],
+                },
             },
             "alerts": [],
         }

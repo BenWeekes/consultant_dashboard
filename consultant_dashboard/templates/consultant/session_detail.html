@@ -51,28 +51,22 @@
         {% endif %}
         {% if summary %}
           <div class="summary-card">
-            <h3>Brief summary</h3>
-            <div class="summary-copy">{{ summary.brief_overview or summary.overview or "No brief summary stored." }}</div>
+            <h3>Session Key Point Summary</h3>
+            {% set session_kps = summary.key_point_summary or {} %}
+            {% if session_kps.headline or summary.brief_overview or summary.overview %}
+              <div class="meta-primary">{{ session_kps.headline or summary.brief_overview or summary.overview }}</div>
+            {% endif %}
+            <div class="summary-copy summary-scroll" style="margin-top: 10px;">{{ session_kps.body or summary.full_summary or summary.overview or "No session key point summary stored." }}</div>
           </div>
-          <div class="summary-card">
-            <h3>Full summary</h3>
-            <div class="summary-copy summary-scroll">{{ summary.full_summary or summary.overview or "No full summary stored." }}</div>
-          </div>
-          {% if summary.risk_overview %}
+          {% if summary.risk_overview or summary.follow_up %}
             <div class="summary-card">
-              <h3>Risk overview</h3>
-              <div class="summary-copy">{{ summary.risk_overview }}</div>
-            </div>
-          {% endif %}
-          {% if summary.follow_up %}
-            <div class="summary-card">
-              <h3>Follow up</h3>
-              <div class="summary-copy">{{ summary.follow_up }}</div>
+              <h3>Safety Summary</h3>
+              <div class="summary-copy summary-scroll">{{ ((summary.risk_overview or '') ~ ' ' ~ (summary.follow_up or '')).strip() }}</div>
             </div>
           {% endif %}
         {% else %}
           <div class="summary-card">
-            <h3>Summary</h3>
+            <h3>Session Key Point Summary</h3>
             <div class="summary-copy">No transcript summary is stored for this session.</div>
           </div>
         {% endif %}

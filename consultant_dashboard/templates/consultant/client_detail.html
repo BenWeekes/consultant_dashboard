@@ -52,24 +52,28 @@
         </div>
         {% include "consultant/_biomarker_section.html" %}
         <div class="summary-card">
-          <h3>Client personal summary · AI</h3>
+          <h3>Client Key Point Summary - AI Sessions</h3>
           {% if ai_personal_summary %}
-            <div class="meta-secondary">{{ ai_personal_summary.session_count or client.ai_session_count or 0 }} AI sessions</div>
-            <div class="summary-copy">{{ ai_personal_summary.brief_overview or ai_personal_summary.overview or "No AI summary stored yet." }}</div>
-            {% if ai_personal_summary.full_summary %}
-              <div class="summary-copy summary-scroll" style="margin-top: 10px;">{{ ai_personal_summary.full_summary }}</div>
+            {% set ai_kps = ai_personal_summary.key_point_summary or {} %}
+            {% if ai_kps.headline %}
+              <div class="meta-primary">{{ ai_kps.headline }}</div>
+            {% endif %}
+            {% if ai_kps.body or ai_personal_summary.full_summary %}
+              <div class="summary-copy summary-scroll" style="margin-top: 10px;">{{ ai_kps.body or ai_personal_summary.full_summary }}</div>
             {% endif %}
           {% else %}
             <div class="muted">No AI personal summary stored yet.</div>
           {% endif %}
         </div>
         <div class="summary-card">
-          <h3>Client personal summary · Human</h3>
+          <h3>Client Key Point Summary - Human Sessions</h3>
           {% if human_personal_summary %}
-            <div class="meta-secondary">{{ human_personal_summary.session_count or client.human_session_count or 0 }} human sessions</div>
-            <div class="summary-copy">{{ human_personal_summary.brief_overview or human_personal_summary.overview or "No human summary stored yet." }}</div>
-            {% if human_personal_summary.full_summary %}
-              <div class="summary-copy summary-scroll" style="margin-top: 10px;">{{ human_personal_summary.full_summary }}</div>
+            {% set human_kps = human_personal_summary.key_point_summary or {} %}
+            {% if human_kps.headline %}
+              <div class="meta-primary">{{ human_kps.headline }}</div>
+            {% endif %}
+            {% if human_kps.body or human_personal_summary.full_summary %}
+              <div class="summary-copy summary-scroll" style="margin-top: 10px;">{{ human_kps.body or human_personal_summary.full_summary }}</div>
             {% endif %}
           {% else %}
             <div class="muted">No human personal summary stored yet.</div>

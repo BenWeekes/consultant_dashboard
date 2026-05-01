@@ -62,8 +62,14 @@
         {% endif %}
         {% if linked_summary %}
           <div class="summary-card">
-            <h3>Summary</h3>
-            <div class="summary-copy">{{ linked_summary.brief_overview or linked_summary.overview or '' }}</div>
+            <h3>Session Key Point Summary</h3>
+            {% set meeting_kps = linked_summary.key_point_summary or {} %}
+            {% if meeting_kps.headline or linked_summary.brief_overview or linked_summary.overview %}
+              <div class="meta-primary">{{ meeting_kps.headline or linked_summary.brief_overview or linked_summary.overview }}</div>
+            {% endif %}
+            {% if meeting_kps.body or linked_summary.full_summary %}
+              <div class="summary-copy summary-scroll" style="margin-top: 10px;">{{ meeting_kps.body or linked_summary.full_summary }}</div>
+            {% endif %}
           </div>
         {% endif %}
         {% include "consultant/_biomarker_section.html" %}
@@ -80,19 +86,19 @@
         <div class="summary-card">
           <h3>Schedule</h3>
           <div class="meta-list">
-            <div class="meta-line"><strong>Type</strong><span class="muted">{{ meeting_type_display }}</span></div>
-            <div class="meta-line"><strong>Status</strong><span class="muted">{{ status_display }}</span></div>
-            <div class="meta-line"><strong>Starts</strong><span class="muted">{{ meeting.scheduled_start_at|display_dt }}</span></div>
-            <div class="meta-line"><strong>Ends</strong><span class="muted">{{ meeting.scheduled_end_at|display_dt }}</span></div>
-            <div class="meta-line"><strong>Repeats</strong><span class="muted">{{ "Weekly" if meeting.repeat_weekly else "No" }}</span></div>
+            <div class="meta-line"><strong>Type</strong><span>{{ meeting_type_display }}</span></div>
+            <div class="meta-line"><strong>Status</strong><span>{{ status_display }}</span></div>
+            <div class="meta-line"><strong>Starts</strong><span>{{ meeting.scheduled_start_at|display_dt }}</span></div>
+            <div class="meta-line"><strong>Ends</strong><span>{{ meeting.scheduled_end_at|display_dt }}</span></div>
+            <div class="meta-line"><strong>Repeats</strong><span>{{ "Weekly" if meeting.repeat_weekly else "No" }}</span></div>
           </div>
         </div>
         <div class="summary-card">
           <h3>Signals</h3>
           <div class="meta-list">
-            <div class="meta-line"><strong>Speech-to-text</strong><span class="muted">{{ "Enabled" if meeting.transcription_enabled_display else "No" }}</span></div>
-            <div class="meta-line"><strong>Audio biomarkers</strong><span class="muted">{{ "Enabled" if meeting.audio_biomarkers_enabled_display else "No" }}</span></div>
-            <div class="meta-line"><strong>Video biomarkers</strong><span class="muted">{{ "Enabled" if meeting.video_biomarkers_enabled_display else "No" }}</span></div>
+            <div class="meta-line"><strong>Speech-to-text</strong><span>{{ "Enabled" if meeting.transcription_enabled_display else "No" }}</span></div>
+            <div class="meta-line"><strong>Audio biomarkers</strong><span>{{ "Enabled" if meeting.audio_biomarkers_enabled_display else "No" }}</span></div>
+            <div class="meta-line"><strong>Video biomarkers</strong><span>{{ "Enabled" if meeting.video_biomarkers_enabled_display else "No" }}</span></div>
           </div>
         </div>
       </div>

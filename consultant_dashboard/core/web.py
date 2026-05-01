@@ -1312,6 +1312,9 @@ def _build_session_biomarker_view(biomarkers, *, audio_enabled: bool, video_enab
     voice = biomarkers.get("voice") or {}
     vitals = biomarkers.get("vitals") or {}
     safety = biomarkers.get("safety") or {}
+    if isinstance(safety.get("level_stats"), dict):
+      voice = dict(voice)
+      voice["safety_level"] = safety.get("level_stats")
 
     stress_avg = _metric_value(voice, "stress", "avg")
     stress_max = _metric_value(voice, "stress", "max")
@@ -1349,7 +1352,10 @@ def _build_session_biomarker_view(biomarkers, *, audio_enabled: bool, video_enab
             "detail": highest_alert if highest_alert else None,
         })
 
-    voice_rows = [row for key, label in VOICE_TILE_KEYS if (row := _build_metric_row(voice, key, label))]
+    voice_rows = []
+    if (safety_row := _build_metric_row(voice, "safety_level", "Safety Level")):
+        voice_rows.append(safety_row)
+    voice_rows.extend([row for key, label in VOICE_TILE_KEYS if (row := _build_metric_row(voice, key, label))])
     video_rows = [row for key, label in VIDEO_TILE_KEYS if (row := _build_metric_row(vitals, key, label))]
 
     safety_view = None
@@ -1441,7 +1447,10 @@ def _build_client_biomarker_view(baseline):
             "detail": latest_safety.get("highest_alert") or None,
         })
 
-    voice_rows = [row for key, label in VOICE_TILE_KEYS if (row := _build_metric_row(source, key, label, window_sessions=window_sessions))]
+    voice_rows = []
+    if (safety_row := _build_metric_row(source, "safety_level", "Safety Level", window_sessions=window_sessions)):
+        voice_rows.append(safety_row)
+    voice_rows.extend([row for key, label in VOICE_TILE_KEYS if (row := _build_metric_row(source, key, label, window_sessions=window_sessions))])
     video_rows = [row for key, label in VIDEO_TILE_KEYS if (row := _build_metric_row(source, key, label, window_sessions=window_sessions))]
 
     safety_view = None
@@ -1576,6 +1585,14 @@ def _refresh_client_derived_state(db, storage: EncryptedStorage, client_id: str)
                 if isinstance(max_value, (int, float)):
                     max_metrics.setdefault(key, []).append(float(max_value))
         safety = payload.get("safety") or {}
+        level_stats = safety.get("level_stats") if isinstance(safety, dict) else None
+        if isinstance(level_stats, dict):
+            avg_value = level_stats.get("avg")
+            max_value = level_stats.get("max")
+            if isinstance(avg_value, (int, float)):
+                average_metrics.setdefault("safety_level", []).append(float(avg_value))
+            if isinstance(max_value, (int, float)):
+                max_metrics.setdefault("safety_level", []).append(float(max_value))
         if (
             latest_safety is None
             and isinstance(safety, dict)
@@ -1615,7 +1632,7 @@ def _refresh_client_derived_state(db, storage: EncryptedStorage, client_id: str)
 
     session_rows = db.execute(
         """
-        SELECT id, session_kind, meeting_id, summary_storage_key,
+        SELECT id, session_kind, meeting_id,
                COALESCE(ended_at, started_at, created_at) AS session_at
         FROM sessions
         WHERE client_id = ?
@@ -1624,138 +1641,18 @@ def _refresh_client_derived_state(db, storage: EncryptedStorage, client_id: str)
         (client_id,),
     ).fetchall()
 
-    def _normalize_summary_payload(summary):
-        if not isinstance(summary, dict):
-            return {}
-        brief = (summary.get("brief_overview") or summary.get("overview") or "").strip()
-        full = (summary.get("full_summary") or brief).strip()
-        return {
-            "brief_overview": brief,
-            "overview": brief,
-            "full_summary": full,
-            "risk_overview": (summary.get("risk_overview") or "").strip(),
-            "follow_up": (summary.get("follow_up") or "").strip(),
-            "biomarker_summary": (summary.get("biomarker_summary") or "").strip(),
-        }
-
     def _is_ai_session(row) -> bool:
         kind = (row["session_kind"] or "").strip().lower()
         return kind == "avatar_ai_session"
 
-    def _build_personal_summary_payload(kind_label: str, rows):
-        session_count = len(rows)
-        if not session_count:
-            return None
-        def _stringify_dt(value):
-            if not value:
-                return ""
-            if isinstance(value, datetime):
-                return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-            return str(value)
-        summaries = []
-        for row in rows:
-            if not row["summary_storage_key"]:
-                continue
-            payload = storage.get_json(row["summary_storage_key"], client_id)
-            normalized = _normalize_summary_payload(payload)
-            if normalized.get("brief_overview") or normalized.get("full_summary"):
-                normalized["session_at"] = row["session_at"] or ""
-                summaries.append(normalized)
-
-        if not summaries:
-            return {
-                "updated_at": iso_utc(utc_now()),
-                "session_count": session_count,
-                "window_sessions": 0,
-                "brief_overview": f"No {kind_label.lower()} summary stored yet.",
-                "full_summary": "",
-                "key_facts": [],
-                "open_threads": [],
-                "latest_session_at": _stringify_dt(rows[0]["session_at"]),
-            }
-
-        recent = summaries[:6]
-        brief_lines = []
-        seen_briefs = set()
-        for item in recent:
-            brief = item["brief_overview"]
-            if brief and brief not in seen_briefs:
-                seen_briefs.add(brief)
-                brief_lines.append(brief)
-            if len(brief_lines) >= 3:
-                break
-
-        risk_lines = []
-        follow_up_lines = []
-        key_facts = []
-        seen_risks = set()
-        seen_follow = set()
-        seen_facts = set()
-        for item in recent:
-            risk = item["risk_overview"]
-            follow = item["follow_up"]
-            if risk and risk not in seen_risks:
-                seen_risks.add(risk)
-                risk_lines.append(risk)
-            if follow and follow not in seen_follow:
-                seen_follow.add(follow)
-                follow_up_lines.append(follow)
-            for sentence in re.split(r"(?<=[.!?])\s+", item["full_summary"] or ""):
-                cleaned = " ".join(sentence.split()).strip()
-                if len(cleaned) < 40:
-                    continue
-                if cleaned in seen_facts:
-                    continue
-                seen_facts.add(cleaned)
-                key_facts.append(cleaned)
-                if len(key_facts) >= 5:
-                    break
-            if len(key_facts) >= 5:
-                break
-
-        latest_at = _stringify_dt(rows[0]["session_at"])
-        brief_overview = " ".join(brief_lines[:2]).strip() or f"{session_count} {kind_label.lower()} sessions on record."
-        full_parts = [
-            f"{session_count} {kind_label.lower()} sessions are on record for this client.",
-            "Recent themes: " + " ".join(brief_lines[:3]).strip() if brief_lines else "",
-            "Key facts: " + " ".join(key_facts[:3]).strip() if key_facts else "",
-            "Risk pattern: " + " ".join(risk_lines[:2]).strip() if risk_lines else "",
-            "Open threads: " + " ".join(follow_up_lines[:2]).strip() if follow_up_lines else "",
-        ]
-        full_summary = " ".join(part for part in full_parts if part).strip()
-
-        return {
-            "updated_at": iso_utc(utc_now()),
-            "session_count": session_count,
-            "window_sessions": len(summaries),
-            "brief_overview": brief_overview,
-            "overview": brief_overview,
-            "full_summary": full_summary,
-            "key_facts": key_facts[:5],
-            "open_threads": follow_up_lines[:5],
-            "latest_session_at": latest_at,
-        }
-
     ai_rows = [row for row in session_rows if _is_ai_session(row)]
     human_rows = [row for row in session_rows if not _is_ai_session(row)]
-    ai_summary_payload = _build_personal_summary_payload("AI", ai_rows)
-    human_summary_payload = _build_personal_summary_payload("Human", human_rows)
-    ai_summary_key = None
-    human_summary_key = None
-    if ai_summary_payload:
-        ai_summary_key = f"clients/{client_id}/ai_summary.json.enc"
-        storage.put_json(ai_summary_key, client_id, ai_summary_payload)
-    if human_summary_payload:
-        human_summary_key = f"clients/{client_id}/human_summary.json.enc"
-        storage.put_json(human_summary_key, client_id, human_summary_payload)
 
     db.execute(
         """
         UPDATE clients
         SET latest_summary_storage_key = ?,
             baseline_storage_key = ?,
-            ai_summary_storage_key = ?,
-            human_summary_storage_key = ?,
             ai_session_count = ?,
             human_session_count = ?,
             updated_at = CURRENT_TIMESTAMP
@@ -1764,8 +1661,6 @@ def _refresh_client_derived_state(db, storage: EncryptedStorage, client_id: str)
         (
             latest_summary_key,
             baseline_key,
-            ai_summary_key,
-            human_summary_key,
             len(ai_rows),
             len(human_rows),
             client_id,

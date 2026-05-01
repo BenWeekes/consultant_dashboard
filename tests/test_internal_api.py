@@ -108,12 +108,24 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
             "duration_seconds": 1800,
             "status": "completed",
             "summary": {
+                "key_point_summary": {
+                    "headline": "Human session follow-up",
+                    "body": "Human therapist follow-up focused on routines and coping.",
+                },
                 "brief_overview": "Human session follow-up.",
                 "full_summary": "Human therapist follow-up focused on routines and coping.",
                 "biomarker_summary": "",
                 "risk_overview": "",
                 "follow_up": "Continue reviewing routines with the therapist.",
                 "source": "custom-llm",
+            },
+            "human_personal_summary": {
+                "key_point_summary": {
+                    "headline": "Client Key Point Summary - Human Sessions",
+                    "body": "Human therapist sessions continue to focus on routines, coping, and stress management.",
+                },
+                "brief_overview": "Client Key Point Summary - Human Sessions",
+                "full_summary": "Human therapist sessions continue to focus on routines, coping, and stress management.",
             },
             "biomarkers": {"averages": {}},
             "alerts": [],
@@ -148,12 +160,19 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
         self.assertEqual(response.json["human_session_count"], 1)
         self.assertIsNotNone(response.json["ai_personal_summary"])
         self.assertIsNotNone(response.json["human_personal_summary"])
-        self.assertIn("ai sessions", response.json["ai_personal_summary"]["full_summary"].lower())
-        self.assertIn("human sessions", response.json["human_personal_summary"]["full_summary"].lower())
+        self.assertEqual(
+            response.json["ai_personal_summary"]["key_point_summary"]["headline"],
+            "Client Key Point Summary - AI Sessions",
+        )
+        self.assertEqual(
+            response.json["human_personal_summary"]["key_point_summary"]["headline"],
+            "Client Key Point Summary - Human Sessions",
+        )
         self.assertEqual(len(response.json["recent_summaries"]), 2)
         self.assertIsNotNone(response.json["baseline"])
         self.assertEqual(response.json["baseline"]["window_sessions"], 2)
         self.assertEqual(response.json["baseline"]["maxes"]["stress_index"], 64.2)
+        self.assertEqual(response.json["baseline"]["maxes"]["safety_level"], 1.0)
         self.assertEqual(len(response.json["alerts"]), 2)
 
     def test_crisis_escalate_init_returns_bundle_for_ai_session_without_scheduled_meeting(self):
