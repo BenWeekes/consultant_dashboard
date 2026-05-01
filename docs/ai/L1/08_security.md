@@ -25,6 +25,7 @@ Consultants:
 - then complete OTP verification
 - session is stored in Flask’s session cookie
 - production TTL is configured to 1 hour
+- a localhost-only support route can also create a consultant session, but only when explicitly enabled and only from the dashboard host itself
 
 Admins:
 
@@ -38,6 +39,14 @@ Current state:
 - clients can also reach hosted secure pages through hashed `client_access_links`
 - client-authenticated browser access is carried by a shared 1-hour auth cookie after successful backend login + OTP
 - AI-human crisis escalation events are internal-service initiated only; no browser route can start them directly
+
+Local support-login hard requirements:
+
+- `CONSULTANT_LOCAL_SUPPORT_LOGIN_ENABLED=true`
+- `CONSULTANT_LOCAL_SUPPORT_LOGIN_SECRET` set to a strong value
+- request originates from `127.0.0.1` or `::1`
+- operator logs in as a real consultant email on the current vendor
+- success and failure are both audit logged
 
 ## Internal Service Auth
 

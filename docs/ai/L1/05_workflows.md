@@ -138,6 +138,50 @@ For summary-like fields, keep the current ownership model explicit:
 4. If Twilio behavior changes, test both dev-mode and production-style branches conceptually.
 5. Update `07_gotchas.md` if the change is easy to misconfigure.
 
+## Use Local Support Login For Server-Side QA
+
+Use this only when you are on the dashboard host itself and need to inspect the live consultant UI without going through the normal OTP flow.
+
+Current route:
+
+- `http://127.0.0.1:8090/v/<vendor>/consultant/local-support-login`
+
+Hard requirements:
+
+- request must originate from `127.0.0.1` or `::1`
+- `CONSULTANT_LOCAL_SUPPORT_LOGIN_ENABLED=true`
+- `CONSULTANT_LOCAL_SUPPORT_LOGIN_SECRET` must be set
+- you must log in as a real consultant email that exists on that vendor
+
+Safe usage pattern:
+
+1. Enable the env vars in the repo-local `.env` on the server.
+2. Restart PM2:
+   - `pm2 restart consultant-dashboard`
+3. Open the route locally or use `curl` from the server.
+4. Confirm the route redirects to `/consultant/dashboard`.
+5. Disable it again after use if it is no longer needed.
+
+This route should never be exposed as a remote bypass and should never create a fake consultant identity.
+
+## Do A Browser-Level UI Check On The Server
+
+If the live consultant page needs a real rendered layout check and the repo does not already have Playwright installed locally:
+
+1. Create a disposable harness:
+   - `mkdir -p /tmp/pwcheck`
+   - `cd /tmp/pwcheck`
+   - `npm init -y`
+   - `npm install playwright@1.59.1 --no-save`
+2. Use the local support login route to create a real consultant session.
+3. Open the target consultant page in Playwright and inspect:
+   - panel heights
+   - computed font sizes / line heights
+   - scroll container behavior
+4. Save a screenshot to `/tmp/...` if needed for comparison.
+
+This is useful when CSS behavior on the live page is not obvious from server-rendered HTML alone.
+
 ## Deferred Hardening / Roadmap Work
 
 Keep deferred security and data-integrity items visible here until they are implemented.

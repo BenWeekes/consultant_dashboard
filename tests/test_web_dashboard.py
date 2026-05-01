@@ -507,7 +507,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Notes and direction updated", response.data)
+        self.assertIn(b"Client notes and summaries updated", response.data)
         self.assertIn(b"Updated notes from session page.", response.data)
         self.assertIn(b"Focus next session on sleep and stress.", response.data)
 
@@ -2026,7 +2026,8 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertNotIn(b"Last Session", response.data)
         self.assertIn(b"Messages", response.data)
         self.assertIn(b"Edit Contact Details", response.data)
-        self.assertIn(b"Notes And Direction", response.data)
+        self.assertIn(b"Notes", response.data)
+        self.assertIn(b"Direction", response.data)
         self.assertIn(b"Client Key Point Summary - AI Sessions", response.data)
         self.assertIn(b"Client Key Point Summary - Human Sessions", response.data)
         self.assertIn(b"Average", response.data)

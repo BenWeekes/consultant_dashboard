@@ -26,10 +26,22 @@
   - Chromium launch will fail with missing shared libraries like `libatk-1.0.so.0` until you run:
     - `npx playwright install chromium`
     - `sudo npx playwright install-deps chromium`
+  - for ad hoc live dashboard checks, a disposable harness under `/tmp/pwcheck` is acceptable when the repo does not already carry Playwright as a dependency
+  - if `require('playwright')` fails inside the repo, install `playwright` into that temporary harness and run the script from there instead of fighting the workspace module path
 - **Authenticated Playwright UI checks need a real client auth cookie.**
   - the `Biomarkers` screenshot test does not log in interactively
   - it expects `PLAYWRIGHT_CLIENT_AUTH_COOKIE` to contain a valid `mindfix_client_auth` cookie
   - if that cookie is expired, the browser test will bounce into auth and stop proving the in-session layout
+- **The consultant localhost support-login route is intentionally narrow.**
+  - route: `/v/<vendor>/consultant/local-support-login`
+  - it is disabled by default
+  - it only works from `127.0.0.1` / `::1`
+  - it requires `CONSULTANT_LOCAL_SUPPORT_LOGIN_SECRET`
+  - it logs in as a real consultant account and writes an audit event
+  - do not turn it into a generic remote bypass or a fake consultant identity
+- **Server-rendered tests can miss layout bugs.**
+  - the consultant client page needed a browser-level measurement pass because equal-height outer grid rows did not guarantee equal-height inner cards
+  - when spacing or panel heights matter, inspect live `getBoundingClientRect()` and computed styles instead of trusting only HTML assertions
 - **Use fake media devices for browser automation or meeting/app tests will hang behind camera/mic prompts.**
   - Playwright launch args should include:
     - `--use-fake-ui-for-media-stream`

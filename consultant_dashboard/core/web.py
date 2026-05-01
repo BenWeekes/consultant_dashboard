@@ -107,6 +107,36 @@ def _brand_name() -> str:
     return current_branding().get("name") or current_app.config["BRAND_NAME"]
 
 
+def _normalize_summary_edit_payload(summary):
+    if isinstance(summary, str):
+        brief_overview = summary
+        full_summary = summary
+        summary = {}
+    elif isinstance(summary, dict):
+        brief_overview = summary.get("brief_overview") or summary.get("overview") or ""
+        full_summary = summary.get("full_summary") or summary.get("overview") or ""
+    else:
+        summary = {}
+        brief_overview = ""
+        full_summary = ""
+    key_point_summary = summary.get("key_point_summary") if isinstance(summary.get("key_point_summary"), dict) else {}
+    headline = (key_point_summary.get("headline") or brief_overview or "").strip()
+    body = (key_point_summary.get("body") or full_summary or "").strip()
+    return {
+        "key_point_summary": {
+            "headline": headline,
+            "body": body,
+        },
+        "brief_overview": brief_overview.strip(),
+        "overview": brief_overview.strip(),
+        "full_summary": full_summary.strip(),
+        "biomarker_summary": (summary.get("biomarker_summary") or "").strip() if isinstance(summary, dict) else "",
+        "risk_overview": (summary.get("risk_overview") or "").strip() if isinstance(summary, dict) else "",
+        "follow_up": (summary.get("follow_up") or "").strip() if isinstance(summary, dict) else "",
+        "source": (summary.get("source") or "consultant-dashboard") if isinstance(summary, dict) else "consultant-dashboard",
+    }
+
+
 def _normalize_vendor_domain(domain: str) -> str:
     value = (domain or "").strip().lower()
     if not value:
@@ -1970,6 +2000,43 @@ def consultant_client_detail(client_id: str):
                 notes=request.form.get("notes", "").strip(),
                 direction=request.form.get("direction", "").strip(),
             )
+            storage = _storage()
+            ai_summary_key = client["ai_summary_storage_key"] or f"clients/{client_id}/ai_summary.json.enc"
+            human_summary_key = client["human_summary_storage_key"] or f"clients/{client_id}/human_summary.json.enc"
+            existing_ai_summary = _normalize_summary_edit_payload(
+                storage.get_json(client["ai_summary_storage_key"], client_id) if client["ai_summary_storage_key"] else None
+            )
+            existing_human_summary = _normalize_summary_edit_payload(
+                storage.get_json(client["human_summary_storage_key"], client_id) if client["human_summary_storage_key"] else None
+            )
+            ai_body = request.form.get("ai_kps_body")
+            human_body = request.form.get("human_kps_body")
+            if ai_body is not None:
+                existing_ai_summary["key_point_summary"]["body"] = ai_body.strip()
+                if not existing_ai_summary["key_point_summary"]["headline"]:
+                    existing_ai_summary["key_point_summary"]["headline"] = existing_ai_summary["key_point_summary"]["body"][:120].strip()
+            existing_ai_summary["full_summary"] = existing_ai_summary["key_point_summary"]["body"]
+            existing_ai_summary["brief_overview"] = existing_ai_summary["key_point_summary"]["headline"]
+            existing_ai_summary["overview"] = existing_ai_summary["key_point_summary"]["headline"]
+            if human_body is not None:
+                existing_human_summary["key_point_summary"]["body"] = human_body.strip()
+                if not existing_human_summary["key_point_summary"]["headline"]:
+                    existing_human_summary["key_point_summary"]["headline"] = existing_human_summary["key_point_summary"]["body"][:120].strip()
+            existing_human_summary["full_summary"] = existing_human_summary["key_point_summary"]["body"]
+            existing_human_summary["brief_overview"] = existing_human_summary["key_point_summary"]["headline"]
+            existing_human_summary["overview"] = existing_human_summary["key_point_summary"]["headline"]
+            storage.put_json(ai_summary_key, client_id, existing_ai_summary)
+            storage.put_json(human_summary_key, client_id, existing_human_summary)
+            db.execute(
+                """
+                UPDATE clients
+                SET ai_summary_storage_key = ?,
+                    human_summary_storage_key = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (ai_summary_key, human_summary_key, client_id),
+            )
             log_audit(
                 db,
                 actor_type="consultant",
@@ -1981,7 +2048,7 @@ def consultant_client_detail(client_id: str):
                 user_agent=request.headers.get("User-Agent", ""),
             )
             db.commit()
-            flash("Notes and direction updated", "muted")
+            flash("Client notes and summaries updated", "muted")
             client = get_client_detail(db, client_id, consultant_id=consultant_id)
         else:
             first_name, last_name, display_name = _client_name_fields_from_form(request)

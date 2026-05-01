@@ -18,7 +18,7 @@
   </div>
 
   <div class="client-top-grid two-column">
-    <div class="card panel-equal">
+    <div class="card client-context-card">
       <div class="panel-head">
         <div class="panel-title">
           <div class="panel-kicker">Client Overview</div>
@@ -54,60 +54,50 @@
       </div>
     </div>
 
-    <div class="card panel-equal">
-      <div class="client-side-stack">
-        <div class="client-side-section" id="notes">
-          <div class="panel-head tight">
-            <div class="panel-title">
-              <div class="panel-kicker">Notes And Direction</div>
-            </div>
-          </div>
-          <div class="section-stack client-fixed-scroll">
-            <form method="post">
-              <input type="hidden" name="form_name" value="save_context">
-              <label class="field-label">Notes <span class="tooltip" tabindex="0" data-tooltip="Background context for the AI. Keep this general rather than overly specific.">?</span></label>
-              <textarea name="notes" class="compact-context">{{ client.notes_current or '' }}</textarea>
-              <label class="field-label">Direction <span class="tooltip" tabindex="0" data-tooltip="How you want the next AI session to be guided. This is injected into the next session context.">?</span></label>
-              <textarea name="direction" class="compact-context">{{ client.direction_current or '' }}</textarea>
-              <button type="submit">Save notes and direction</button>
-            </form>
+    <div class="card client-editor-card" data-client-editor-card>
+      <form method="post" class="client-side-stack" data-client-editor-form>
+        <input type="hidden" name="form_name" value="save_context">
+        <div class="client-side-section notes-section" id="notes">
+          <div class="summary-card notes-fixed-panel note-card">
+            <h3>Notes</h3>
+            <textarea name="notes" class="compact-context" title="Background context for the AI. Keep this general rather than overly specific.">{{ client.notes_current or '' }}</textarea>
           </div>
         </div>
 
-        <div class="client-side-section">
-          <div class="summary-card client-fixed-scroll">
+        <div class="client-side-section notes-section">
+          <div class="summary-card notes-fixed-panel note-card">
+            <h3>Direction</h3>
+            <textarea name="direction" class="compact-context" title="How you want the next AI session to be guided. This is injected into the next session context.">{{ client.direction_current or '' }}</textarea>
+          </div>
+        </div>
+
+        <div class="client-side-section kps-section">
+          <div class="summary-card kps-card">
             <h3>Client Key Point Summary - AI Sessions</h3>
             {% if ai_personal_summary %}
               {% set ai_kps = ai_personal_summary.key_point_summary or {} %}
-              {% if ai_kps.headline %}
-                <div class="meta-primary" style="margin-top: 10px;">{{ ai_kps.headline }}</div>
-              {% endif %}
-              {% if ai_kps.body or ai_personal_summary.full_summary %}
-                <div class="summary-copy" style="margin-top: 10px;">{{ ai_kps.body or ai_personal_summary.full_summary }}</div>
-              {% endif %}
+              <textarea name="ai_kps_body" class="kps-context">{{ ai_kps.body or ai_personal_summary.full_summary or '' }}</textarea>
             {% else %}
-              <div class="muted" style="margin-top: 10px;">No AI personal summary stored yet.</div>
+              <textarea name="ai_kps_body" class="kps-context" placeholder="No AI personal summary stored yet."></textarea>
             {% endif %}
           </div>
         </div>
 
-        <div class="client-side-section">
-          <div class="summary-card client-fixed-scroll">
+        <div class="client-side-section kps-section">
+          <div class="summary-card kps-card">
             <h3>Client Key Point Summary - Human Sessions</h3>
             {% if human_personal_summary %}
               {% set human_kps = human_personal_summary.key_point_summary or {} %}
-              {% if human_kps.headline %}
-                <div class="meta-primary" style="margin-top: 10px;">{{ human_kps.headline }}</div>
-              {% endif %}
-              {% if human_kps.body or human_personal_summary.full_summary %}
-                <div class="summary-copy" style="margin-top: 10px;">{{ human_kps.body or human_personal_summary.full_summary }}</div>
-              {% endif %}
+              <textarea name="human_kps_body" class="kps-context">{{ human_kps.body or human_personal_summary.full_summary or '' }}</textarea>
             {% else %}
-              <div class="muted" style="margin-top: 10px;">No human personal summary stored yet.</div>
+              <textarea name="human_kps_body" class="kps-context" placeholder="No human personal summary stored yet."></textarea>
             {% endif %}
           </div>
         </div>
-      </div>
+        <div class="row" style="justify-content: flex-end; margin-top: 6px;">
+          <button type="submit">Save All</button>
+        </div>
+      </form>
     </div>
   </div>
 
@@ -366,6 +356,7 @@
           });
         });
       }
+
     })();
   </script>
 {% endblock %}
