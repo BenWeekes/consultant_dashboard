@@ -134,6 +134,7 @@ def current_branding() -> Dict[str, Any]:
     brand_data.setdefault("www_root", www_root)
     brand_data.setdefault("wordmark", brand_data.get("site_title") or brand_data["name"])
     brand_data.setdefault("site_title", brand_data["name"])
+    brand_data.setdefault("primary_host", vendor.get("primary_host") or current_app.config.get("PUBLIC_BASE_URL") or "")
     brand_data.setdefault("icon_class", "fa-solid fa-brain")
     brand_data.setdefault("logo_url", "/img/logo-mark.svg")
     brand_data.setdefault("accent", "#0f6b42")

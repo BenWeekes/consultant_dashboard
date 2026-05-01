@@ -61,6 +61,8 @@ class ConsultantDashboardTestCase(unittest.TestCase):
         os.environ["CRISIS_CALL_SIP_GATEWAY"] = "agora-us-east.pstn.ashburn.twilio.com"
         os.environ["CRISIS_CALL_REGION"] = "AREA_CODE_NA"
         os.environ["CRISIS_CALL_PSTN_UID"] = "43455"
+        os.environ["CONSULTANT_LOCAL_SUPPORT_LOGIN_ENABLED"] = "false"
+        os.environ["CONSULTANT_LOCAL_SUPPORT_LOGIN_SECRET"] = ""
 
         self.app = create_app()
         self.app.testing = True

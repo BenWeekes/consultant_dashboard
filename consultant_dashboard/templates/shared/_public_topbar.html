@@ -1,4 +1,6 @@
-{% if request.path.startswith('/consultant') %}
+{% if request.path == '/consultant/login' %}
+  {% set topbar_href = vendor_branding.primary_host or tenant_url_for('web.home') %}
+{% elif request.path.startswith('/consultant') %}
   {% set topbar_href = tenant_url_for('web.consultant_dashboard') %}
 {% elif request.path.startswith('/admin') %}
   {% set topbar_href = tenant_url_for('web.admin_dashboard') %}

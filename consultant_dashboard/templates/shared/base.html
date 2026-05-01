@@ -186,7 +186,8 @@
       .client-top-grid.two-column { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .client-top-grid.single-column { grid-template-columns: 1fr; }
       .client-top-grid > .card { overflow: hidden; }
-      .client-bottom-grid { display: grid; gap: 16px; grid-template-columns: 1.1fr 0.9fr; margin-top: 16px; align-items: start; }
+      .client-bottom-grid { display: grid; gap: 16px; grid-template-columns: 1.1fr 0.9fr; margin-top: 16px; align-items: stretch; }
+      .client-bottom-grid.three-column { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .client-bottom-grid.single-column { grid-template-columns: 1fr; }
       .panel-equal { display: grid; grid-template-rows: auto 1fr; align-content: start; }
       .panel-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; margin-bottom: 14px; }
@@ -229,8 +230,21 @@
       .chat-bubble-outbound { background: var(--accent-soft-solid); border: 1px solid color-mix(in srgb, var(--accent) 18%, white); }
       .chat-body { margin-top: 8px; font-size: 14px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
       .chat-panel { min-height: 0; display: grid; grid-template-rows: auto 1fr auto; }
-      .chat-compose-box { min-height: 84px; max-height: 84px; }
-      .compact-context { min-height: 92px; max-height: 92px; }
+      .chat-compose-box {
+        min-height: 56px;
+        max-height: 56px;
+        resize: none;
+        font-size: 14px;
+        line-height: 1.45;
+        padding: 14px 16px;
+      }
+      .compact-context {
+        min-height: 92px;
+        max-height: 92px;
+        resize: none;
+        font-size: 14px;
+        line-height: 1.45;
+      }
       .compact-metric-grid {
         display: grid;
         gap: 8px;
@@ -290,6 +304,10 @@
       .summary-card h3 { margin: 0; font-size: 14px; }
       .summary-card .summary-copy { margin-top: 6px; font-size: 14px; }
       .summary-scroll { max-height: 180px; overflow: auto; padding-right: 4px; }
+      .client-side-stack { display: grid; grid-template-rows: minmax(260px, 1.2fr) minmax(180px, 1fr) minmax(180px, 1fr); gap: 14px; min-height: 100%; }
+      .client-side-section { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
+      .client-fixed-scroll { min-height: 0; overflow: auto; padding-right: 4px; }
+      .client-compose-grid { display: grid; grid-template-rows: auto 1fr auto; gap: 12px; min-height: 100%; }
       .biomarker-headline-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
       .biomarker-headline-item { padding: 12px; border-radius: 12px; background: var(--accent-soft-solid); display: grid; gap: 6px; }
       .biomarker-headline-item strong { font-size: 16px; }
@@ -308,6 +326,54 @@
       .status-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--accent-soft-solid); color: var(--text-muted); font-size: 12px; font-weight: 700; }
       .status-chip.live { background: #e7f7eb; color: #14743c; }
       .status-chip.unread { background: #edf4fd; color: #1f4f8e; }
+      .history-card.panel-equal { grid-template-rows: auto 1fr; }
+      .client-side-section > .summary-card,
+      .client-side-section > .client-fixed-scroll {
+        height: 100%;
+        box-sizing: border-box;
+      }
+      .client-side-section > .summary-card {
+        display: grid;
+        grid-template-rows: auto auto 1fr;
+        align-content: start;
+      }
+      .client-side-section > .summary-card .summary-copy,
+      .client-side-section > .summary-card .muted {
+        min-height: 0;
+        overflow: auto;
+        padding-right: 4px;
+      }
+      .client-fixed-scroll > form {
+        min-height: 100%;
+        display: grid;
+        align-content: start;
+        gap: 10px;
+      }
+      .client-compose-grid { display: grid; grid-template-rows: 1fr auto; gap: 12px; min-height: 100%; }
+      .chat-thread-scroll {
+        max-height: none;
+        min-height: 0;
+        overflow: auto;
+        padding-right: 4px;
+        align-content: start;
+      }
+      .chat-compose { display: grid; gap: 10px; align-content: end; }
+      .chat-compose-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: end;
+      }
+      .chat-send-button {
+        width: 56px;
+        min-width: 56px;
+        height: 56px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+      }
       .dialog-backdrop {
         position: fixed;
         inset: 0;
@@ -375,7 +441,8 @@
       @media (max-width: 800px) {
         .split { grid-template-columns: 1fr; }
         .client-header { display: grid; }
-        .client-top-grid, .client-bottom-grid { grid-template-columns: 1fr; }
+        .client-top-grid, .client-bottom-grid, .client-bottom-grid.three-column { grid-template-columns: 1fr; }
+        .client-side-stack { grid-template-rows: auto auto auto; }
         .chat-panel { min-height: 0; }
         .chat-thread-scroll { max-height: 45vh; }
         .phone-row, .field-grid-two { grid-template-columns: 1fr; }

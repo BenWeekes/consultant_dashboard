@@ -180,7 +180,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         response = self.client.get("/v/mindfix/consultant/login")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"MindFix", response.data)
-        self.assertIn(b"/v/mindfix/consultant/dashboard", response.data)
+        self.assertIn(b'href="https://mindfix.me"', response.data)
         self.assertIn(b"/v/mindfix/consultant/google", response.data)
         self.assertIn(b">Continue<", response.data)
 
@@ -192,6 +192,41 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         response = self.client.get(response.location, follow_redirects=False)
         self.assertEqual(response.status_code, 302)
         self.assertIn("/v/mindfix/consultant/verify", response.location)
+
+    def test_local_support_login_is_hidden_when_disabled(self):
+        response = self.client.get(
+            "/v/mindfix/consultant/local-support-login",
+            environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_local_support_login_requires_localhost(self):
+        self.app.config["LOCAL_SUPPORT_LOGIN_ENABLED"] = True
+        self.app.config["LOCAL_SUPPORT_LOGIN_SECRET"] = "support-secret"
+        response = self.client.get(
+            "/v/mindfix/consultant/local-support-login",
+            environ_overrides={"REMOTE_ADDR": "203.0.113.5"},
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_local_support_login_can_create_consultant_session_for_localhost(self):
+        self.app.config["LOCAL_SUPPORT_LOGIN_ENABLED"] = True
+        self.app.config["LOCAL_SUPPORT_LOGIN_SECRET"] = "support-secret"
+        response = self.client.post(
+            "/v/mindfix/consultant/local-support-login",
+            data={"email": "consultant@example.com", "secret": "support-secret"},
+            follow_redirects=False,
+            environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/v/mindfix/consultant/dashboard", response.location)
+
+        dashboard = self.client.get(
+            "/v/mindfix/consultant/dashboard",
+            environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+        )
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertIn(b"Consultant Dashboard", dashboard.data)
 
     def test_consultant_google_uses_shared_google_callback_uri(self):
         self.app.config["AUTH_DEV_MODE"] = False

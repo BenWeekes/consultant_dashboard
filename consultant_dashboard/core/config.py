@@ -70,4 +70,6 @@ def load_config() -> dict:
         "CRISIS_CALL_SIP_GATEWAY": os.environ.get("CRISIS_CALL_SIP_GATEWAY", ""),
         "CRISIS_CALL_REGION": os.environ.get("CRISIS_CALL_REGION", "AREA_CODE_NA"),
         "CRISIS_CALL_PSTN_UID": os.environ.get("CRISIS_CALL_PSTN_UID", "43455"),
+        "LOCAL_SUPPORT_LOGIN_ENABLED": os.environ.get("CONSULTANT_LOCAL_SUPPORT_LOGIN_ENABLED", "").lower() == "true",
+        "LOCAL_SUPPORT_LOGIN_SECRET": os.environ.get("CONSULTANT_LOCAL_SUPPORT_LOGIN_SECRET", ""),
     }

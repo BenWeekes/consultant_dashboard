@@ -241,6 +241,18 @@ def _require_admin(fn):
     return wrapped
 
 
+def _is_local_support_request() -> bool:
+    remote_addr = (request.remote_addr or "").strip()
+    return remote_addr in {"127.0.0.1", "::1"}
+
+
+def _support_login_enabled() -> bool:
+    return bool(
+        current_app.config.get("LOCAL_SUPPORT_LOGIN_ENABLED")
+        and current_app.config.get("LOCAL_SUPPORT_LOGIN_SECRET", "").strip()
+    )
+
+
 def _record_audit(actor_type: str, actor_id: str, action: str, details: Optional[Dict] = None) -> None:
     db = get_db(current_app.config)
     log_audit(
@@ -422,6 +434,54 @@ def consultant_verify():
     session["consultant_id"] = consultant_id
     session.permanent = True
     _record_audit("consultant", consultant_id, "login_success")
+    return redirect(tenant_url_for("web.consultant_dashboard"))
+
+
+@auth_bp.route("/consultant/local-support-login", methods=["GET", "POST"])
+def consultant_local_support_login():
+    if not _is_local_support_request() or not _support_login_enabled():
+        return ("Not found", 404)
+
+    if request.method == "GET":
+        return render_template(
+            "consultant/local_support_login.html",
+            brand=_brand_name(),
+            theme="consultant",
+        )
+
+    secret = request.form.get("secret", "").strip()
+    email = request.form.get("email", "").strip().lower()
+    expected_secret = current_app.config.get("LOCAL_SUPPORT_LOGIN_SECRET", "").strip()
+    if not secret or not expected_secret or not hmac.compare_digest(secret, expected_secret):
+        _record_audit("consultant", email or "unknown", "local_support_login_failed")
+        flash("Invalid support secret", "error")
+        return render_template(
+            "consultant/local_support_login.html",
+            brand=_brand_name(),
+            theme="consultant",
+        ), 403
+
+    db = get_db(current_app.config)
+    consultant = get_consultant_by_email(db, email, vendor_id=_current_vendor_id())
+    db.close()
+    if not consultant:
+        _record_audit("consultant", email or "unknown", "local_support_login_failed")
+        flash("Consultant account not found for this vendor", "error")
+        return render_template(
+            "consultant/local_support_login.html",
+            brand=_brand_name(),
+            theme="consultant",
+        ), 404
+
+    _clear_consultant_session()
+    session["consultant_id"] = consultant["id"]
+    session.permanent = True
+    _record_audit(
+        "consultant",
+        consultant["id"],
+        "local_support_login_success",
+        {"email": consultant["email"], "remote_addr": request.remote_addr or ""},
+    )
     return redirect(tenant_url_for("web.consultant_dashboard"))
 
 

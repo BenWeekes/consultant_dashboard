@@ -1,0 +1,17 @@
+{% extends "shared/base.html" %}
+{% block body %}
+  <div class="auth-shell">
+    <div class="card">
+      <div class="label">{{ brand }}</div>
+      <h1>Local Support Login</h1>
+      <div class="muted" style="margin-bottom: 14px;">
+        This route is only available from the dashboard host itself and is intended for local support access.
+      </div>
+      <form method="post">
+        <input type="email" name="email" placeholder="Consultant email" required>
+        <input type="password" name="secret" placeholder="Support secret" required>
+        <button type="submit">Continue</button>
+      </form>
+    </div>
+  </div>
+{% endblock %}
