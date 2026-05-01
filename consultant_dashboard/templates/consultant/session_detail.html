@@ -61,7 +61,12 @@
           {% if summary.risk_overview or summary.follow_up %}
             <div class="summary-card">
               <h3>Safety Summary</h3>
-              <div class="summary-copy summary-scroll">{{ ((summary.risk_overview or '') ~ ' ' ~ (summary.follow_up or '')).strip() }}</div>
+              {% if summary.risk_overview %}
+                <div class="summary-copy"><strong>Risk</strong><br>{{ summary.risk_overview }}</div>
+              {% endif %}
+              {% if summary.follow_up %}
+                <div class="summary-copy{% if summary.risk_overview %} summary-scroll{% endif %}" style="{% if summary.risk_overview %}margin-top: 10px;{% endif %}"><strong>Follow up</strong><br>{{ summary.follow_up }}</div>
+              {% endif %}
             </div>
           {% endif %}
         {% else %}

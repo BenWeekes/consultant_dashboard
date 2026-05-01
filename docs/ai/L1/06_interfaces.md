@@ -47,6 +47,12 @@ Contract expectations:
 - browser-supplied meeting ids, participant ids, and UIDs must not override dashboard authorization results
 - `crisis-escalate-status` rejects unknown phases with `400`
 - `crisis-escalate-status` returns `404` if the `escalation_event_id` does not exist
+- `client-context` is the canonical prompt-bootstrap contract for `server-custom-llm`
+- `session-complete` is the canonical ingestion contract for:
+  - session key point summaries
+  - client key point summaries
+  - biomarker aggregates
+  - transcript artifacts
 
 ## Realtime Interfaces
 
@@ -67,6 +73,14 @@ Most important payload families:
 - reminder sweep results
 - session-complete ingestion payloads from `server-custom-llm`
 - AI-human crisis escalation init/status payloads
+
+Current summary ownership rule:
+
+- `server-custom-llm` generates:
+  - session key point summary
+  - updated client key point summary
+- `consultant_dashboard` stores and renders those summaries
+- `consultant_dashboard` no longer synthesizes AI/human client summaries from old session rows during normal ingestion
 
 If an integration change affects one of those payloads, update tests in both this repo and the calling service.
 

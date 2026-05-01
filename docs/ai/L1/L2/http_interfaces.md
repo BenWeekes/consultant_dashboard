@@ -87,11 +87,18 @@ Returns consultant-facing prompt context:
 
 - `client_id`
 - `display_name`
+- `year_of_birth`
+- `sex`
 - `consultant_id`
 - `consultant_name`
 - `notes`
 - `direction`
 - `latest_summary`
+- `ai_personal_summary`
+- `human_personal_summary`
+- `ai_session_count`
+- `human_session_count`
+- `recent_summaries`
 - `baseline`
 - `alerts`
 
@@ -185,6 +192,43 @@ Current accepted payload fields:
 - `duration_seconds`
 - `status`
 - `summary`
+- `ai_personal_summary`
+- `human_personal_summary`
+- `biomarkers`
+- `memory_storage_key`
+- `transcript`
+- `alerts`
+
+`summary` current expected shape:
+
+- `key_point_summary`
+  - `headline`
+  - `body`
+- `brief_overview`
+- `full_summary`
+- `biomarker_summary`
+- `risk_overview`
+- `follow_up`
+- `source`
+
+Client key point summary shape (`ai_personal_summary` / `human_personal_summary`):
+
+- `key_point_summary`
+  - `headline`
+  - `body`
+- `brief_overview`
+- `full_summary`
+- `source`
+
+Current behavior:
+
+- dashboard stores `summary` under the session artifact key
+- dashboard stores `ai_personal_summary` or `human_personal_summary` directly on the client artifact key for that session type
+- dashboard still recomputes:
+  - session counts
+  - biomarker baseline
+  - latest safety snapshot
+- dashboard does not re-author AI/human client summaries locally during normal ingestion
 
 ### `POST /internal/crisis-escalate-init`
 

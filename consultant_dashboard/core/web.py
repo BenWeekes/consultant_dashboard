@@ -1187,6 +1187,7 @@ def _is_percent_metric(key: str) -> bool:
         "hrv",
         "breathing_rate_bpm",
         "breathing_rate",
+        "safety_level",
         "stress_index",
         "systolic_bp",
         "diastolic_bp",

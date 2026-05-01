@@ -122,6 +122,14 @@ If the field is derived from live safety or biomarker streams, document whether 
 - worst state seen during the call
 - rolling baseline comparison
 
+For summary-like fields, keep the current ownership model explicit:
+
+- `server-custom-llm` generates:
+  - session key point summary
+  - updated AI or human client key point summary
+- `consultant_dashboard` stores and renders those artifacts
+- `consultant_dashboard` still derives counts and baseline aggregates, but not the long-lived AI/human key point summary text itself
+
 ## Add a New Login Rule
 
 1. Modify `core/auth.py`.
