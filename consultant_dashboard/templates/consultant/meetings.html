@@ -10,17 +10,40 @@
       <a href="{{ tenant_url_for('web.consultant_meeting_new') }}" class="titlebar-link-button">New Meeting</a>
     </div>
     <div class="history-toolbar">
-      <div class="actions">
-        <a href="{{ tenant_url_for('web.consultant_meetings') }}?filter=all" class="titlebar-link-button {% if filter_name == 'all' %}filter-link-active{% endif %}">All</a>
-        <a href="{{ tenant_url_for('web.consultant_meetings') }}?filter=open" class="titlebar-link-button {% if filter_name == 'open' %}filter-link-active{% endif %}">Open</a>
-        <a href="{{ tenant_url_for('web.consultant_meetings') }}?filter=upcoming" class="titlebar-link-button {% if filter_name == 'upcoming' %}filter-link-active{% endif %}">Upcoming</a>
-        <a href="{{ tenant_url_for('web.consultant_meetings') }}?filter=past" class="titlebar-link-button {% if filter_name == 'past' %}filter-link-active{% endif %}">Past</a>
-        <a href="{{ tenant_url_for('web.consultant_meetings') }}?filter=cancelled" class="titlebar-link-button {% if filter_name == 'cancelled' %}filter-link-active{% endif %}">Cancelled</a>
+      <div class="history-toolbar-left">
+        <div class="actions">
+          <a href="{{ tenant_url_for('web.consultant_meetings') }}?filter=all{{ current_meeting_type_query }}{{ current_search_query }}" class="titlebar-link-button {% if filter_name == 'all' %}filter-link-active{% endif %}">All</a>
+          <a href="{{ tenant_url_for('web.consultant_meetings') }}?filter=open{{ current_meeting_type_query }}{{ current_search_query }}" class="titlebar-link-button {% if filter_name == 'open' %}filter-link-active{% endif %}">Open</a>
+          <a href="{{ tenant_url_for('web.consultant_meetings') }}?filter=upcoming{{ current_meeting_type_query }}{{ current_search_query }}" class="titlebar-link-button {% if filter_name == 'upcoming' %}filter-link-active{% endif %}">Upcoming</a>
+          <a href="{{ tenant_url_for('web.consultant_meetings') }}?filter=past{{ current_meeting_type_query }}{{ current_search_query }}" class="titlebar-link-button {% if filter_name == 'past' %}filter-link-active{% endif %}">Past</a>
+          <a href="{{ tenant_url_for('web.consultant_meetings') }}?filter=cancelled{{ current_meeting_type_query }}{{ current_search_query }}" class="titlebar-link-button {% if filter_name == 'cancelled' %}filter-link-active{% endif %}">Cancelled</a>
+        </div>
       </div>
-      <form method="get" class="history-search">
-        <input type="hidden" name="filter" value="{{ filter_name }}">
-        <input type="search" name="q" value="{{ search or '' }}" placeholder="Search client, title or date">
-      </form>
+      <div class="history-toolbar-center">
+        <form method="get" class="meeting-inline-toggles">
+          <input type="hidden" name="filter" value="{{ filter_name }}">
+          {% if search %}
+            <input type="hidden" name="q" value="{{ search }}">
+          {% endif %}
+          <label class="toggle-option">
+            <input type="checkbox" name="type" value="human" {% if 'human' in selected_meeting_types %}checked{% endif %} onchange="this.form.submit()">
+            <span>Human</span>
+          </label>
+          <label class="toggle-option">
+            <input type="checkbox" name="type" value="ai" {% if 'ai' in selected_meeting_types %}checked{% endif %} onchange="this.form.submit()">
+            <span>AI</span>
+          </label>
+        </form>
+      </div>
+      <div class="history-toolbar-right">
+        <form method="get" class="history-search">
+          <input type="hidden" name="filter" value="{{ filter_name }}">
+          {% for value in selected_meeting_types|sort %}
+            <input type="hidden" name="type" value="{{ value }}">
+          {% endfor %}
+          <input type="search" name="q" value="{{ search or '' }}" placeholder="Search client, title or date">
+        </form>
+      </div>
     </div>
     <table class="table">
       <thead>
@@ -28,6 +51,7 @@
           <th>When</th>
           <th>Client</th>
           <th>Type</th>
+          <th>Repeats</th>
           <th>Title</th>
           <th>Status</th>
         </tr>
@@ -38,11 +62,12 @@
           <td><a href="{{ tenant_path('/consultant/meetings/' ~ meeting.id) }}">{{ meeting.scheduled_start_at|display_dt }}</a></td>
           <td>{{ meeting.client_name }}</td>
           <td>{{ meeting.meeting_type_display }}</td>
+          <td>{{ meeting.repeat_frequency_display }}</td>
           <td>{{ meeting.title }}</td>
           <td><span class="status-chip {% if meeting.is_live_display %}live{% endif %}">{{ meeting.status_display }}</span></td>
         </tr>
       {% else %}
-        <tr><td colspan="5" class="muted">No meetings yet. Create one for now or schedule one for later.</td></tr>
+        <tr><td colspan="6" class="muted">No meetings yet. Create one for now or schedule one for later.</td></tr>
       {% endfor %}
       </tbody>
     </table>

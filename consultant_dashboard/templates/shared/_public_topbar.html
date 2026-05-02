@@ -8,7 +8,7 @@
   {% set topbar_href = tenant_url_for('web.home') %}
 {% endif %}
 <div class="public-topbar-shell">
-  <a class="public-topbar-link" href="{{ topbar_href }}" aria-label="Go to home page">
+  <a class="public-topbar-link{% if request.path.startswith('/consultant') %} public-topbar-hidden{% endif %}" href="{{ topbar_href }}" aria-label="Go to home page">
     <span class="public-topbar-mark">
       {% if vendor_branding.logo_url %}
         <img src="{{ tenant_path(vendor_branding.logo_url) if vendor_branding.logo_url.startswith('/img/') else vendor_branding.logo_url }}" alt="" class="public-topbar-logo">

@@ -1,7 +1,7 @@
 <div class="nav">
   <a href="{{ tenant_url_for('web.consultant_dashboard') }}" class="{% if request.path == '/consultant/dashboard' %}nav-active{% endif %}">Overview</a>
   <a href="{{ tenant_url_for('web.consultant_clients') }}" class="{% if request.path.startswith('/consultant/clients') %}nav-active{% endif %}">Clients</a>
-  <a href="{{ tenant_url_for('web.consultant_meetings') }}" class="{% if request.path.startswith('/consultant/meetings') %}nav-active{% endif %}">Meetings</a>
   <a href="{{ tenant_url_for('web.consultant_sessions') }}" class="{% if request.path.startswith('/consultant/sessions') %}nav-active{% endif %}">Sessions</a>
+  <a href="{{ tenant_url_for('web.consultant_meetings') }}" class="{% if request.path.startswith('/consultant/meetings') %}nav-active{% endif %}">Meetings</a>
   <a href="{{ tenant_url_for('auth.consultant_account') }}" class="{% if request.path == '/consultant/account' %}nav-active{% endif %}">Account</a>
 </div>

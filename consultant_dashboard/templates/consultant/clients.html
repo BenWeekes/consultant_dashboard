@@ -12,11 +12,12 @@
       <thead>
         <tr>
           <th>Name</th>
-          <th>Contact</th>
           <th>Unread</th>
           <th>Next Meeting</th>
-          <th>Sessions</th>
-          <th>Last Session</th>
+          <th>AI</th>
+          <th>Last AI</th>
+          <th>Human</th>
+          <th>Last Human</th>
           <th>Actions</th>
         </tr>
       </thead>
@@ -24,7 +25,6 @@
         {% for client in clients %}
           <tr>
             <td><a href="{{ tenant_path('/consultant/clients/' ~ client.id) }}">{{ client.display_name }}</a></td>
-            <td>{{ client.email or client.phone_number or "Not set" }}</td>
             <td>
               {% if client.unread_message_count %}
                 <span class="status-chip unread">{{ client.unread_message_count }} unread</span>
@@ -35,17 +35,28 @@
             <td>
               {% if client.next_meeting_at %}
                 <div>{{ client.next_meeting_at|display_dt }}</div>
-                <div class="muted">{{ client.next_meeting_status_display if client.next_meeting_status_display else '—' }}</div>
               {% else %}
                 <span class="muted">—</span>
               {% endif %}
             </td>
-            <td>{{ client.session_count }}</td>
             <td>
-              {% if client.last_session_at and client.last_session_id %}
-                <a href="{{ tenant_path('/consultant/sessions/' ~ client.last_session_id) }}">{{ client.last_session_at|display_dt }}</a>
+              {{ client.ai_session_count or 0 }}
+            </td>
+            <td>
+              {% if client.last_ai_session_at and client.last_ai_session_id %}
+                <a href="{{ tenant_path('/consultant/sessions/' ~ client.last_ai_session_id) }}">{{ client.last_ai_session_at|display_dt }}</a>
               {% else %}
-                Not yet
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td>
+              {{ client.human_session_count or 0 }}
+            </td>
+            <td>
+              {% if client.last_human_session_at and client.last_human_session_id %}
+                <a href="{{ tenant_path('/consultant/sessions/' ~ client.last_human_session_id) }}">{{ client.last_human_session_at|display_dt }}</a>
+              {% else %}
+                <span class="muted">—</span>
               {% endif %}
             </td>
             <td>
@@ -53,7 +64,7 @@
             </td>
           </tr>
         {% else %}
-          <tr><td colspan="7" class="muted">No clients yet.</td></tr>
+          <tr><td colspan="8" class="muted">No clients yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>

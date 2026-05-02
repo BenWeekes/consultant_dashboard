@@ -209,6 +209,18 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         )
         self.assertEqual(response.status_code, 404)
 
+    def test_local_support_login_rejects_xff_spoof_from_remote_peer(self):
+        self.app.config["LOCAL_SUPPORT_LOGIN_ENABLED"] = True
+        self.app.config["LOCAL_SUPPORT_LOGIN_SECRET"] = "support-secret"
+        response = self.client.get(
+            "/v/mindfix/consultant/local-support-login",
+            environ_overrides={
+                "REMOTE_ADDR": "203.0.113.5",
+                "HTTP_X_FORWARDED_FOR": "127.0.0.1",
+            },
+        )
+        self.assertEqual(response.status_code, 404)
+
     def test_local_support_login_can_create_consultant_session_for_localhost(self):
         self.app.config["LOCAL_SUPPORT_LOGIN_ENABLED"] = True
         self.app.config["LOCAL_SUPPORT_LOGIN_SECRET"] = "support-secret"
@@ -227,6 +239,25 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         )
         self.assertEqual(dashboard.status_code, 200)
         self.assertIn(b"Consultant Dashboard", dashboard.data)
+
+    def test_local_support_login_rejects_wrong_secret_for_localhost(self):
+        self.app.config["LOCAL_SUPPORT_LOGIN_ENABLED"] = True
+        self.app.config["LOCAL_SUPPORT_LOGIN_SECRET"] = "support-secret"
+        response = self.client.post(
+            "/v/mindfix/consultant/local-support-login",
+            data={"email": "consultant@example.com", "secret": "wrong-secret"},
+            follow_redirects=False,
+            environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+        )
+        self.assertEqual(response.status_code, 403)
+
+        db = get_db(self.app.config)
+        row = db.execute(
+            "SELECT action FROM audit_log WHERE action = 'local_support_login_failed' ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        db.close()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["action"], "local_support_login_failed")
 
     def test_consultant_google_uses_shared_google_callback_uri(self):
         self.app.config["AUTH_DEV_MODE"] = False
@@ -520,6 +551,96 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertEqual(row["notes_current"], "Updated notes from session page.")
         self.assertEqual(row["direction_current"], "Focus next session on sleep and stress.")
 
+    def test_consultant_can_update_ai_and_human_kps_from_client_page(self):
+        self.ingest_session(session_id="sess_kps_edit_001", urgent_escalation=False)
+        db = get_db(self.app.config)
+        human_payload = {
+            "client_id": self.client_id,
+            "consultant_id": self.consultant_id,
+            "session_id": "sess_kps_edit_human_001",
+            "session_kind": "consultant_live_session",
+            "profile": "therapy",
+            "channel": "human-kps-edit",
+            "started_at": "2026-04-14T19:00:00Z",
+            "ended_at": "2026-04-14T19:30:00Z",
+            "duration_seconds": 1800,
+            "status": "completed",
+            "summary": {"overview": "Human session summary"},
+            "human_personal_summary": {
+                "key_point_summary": {
+                    "headline": "Client Key Point Summary - Human Sessions",
+                    "body": "Original human KPS body.",
+                },
+                "brief_overview": "Client Key Point Summary - Human Sessions",
+                "full_summary": "Original human KPS body.",
+            },
+            "biomarkers": {"averages": {}},
+            "alerts": [],
+        }
+        body = json.dumps(human_payload, separators=(",", ":"))
+        response = self.client.post(
+            "/internal/session-complete",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/session-complete", body),
+        )
+        self.assertEqual(response.status_code, 200)
+        db.close()
+
+        self.consultant_login()
+        response = self.client.post(
+            f"/consultant/clients/{self.client_id}",
+            data={
+                "form_name": "save_context",
+                "notes": "Updated notes.",
+                "direction": "Updated direction.",
+                "ai_kps_body": "EDITED AI BODY",
+                "human_kps_body": "EDITED HUMAN BODY",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+
+        query_string = f"client_id={self.client_id}"
+        response = self.client.get(
+            f"/internal/client-context?{query_string}",
+            headers=self.internal_headers("GET", "/internal/client-context", query_string),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json["ai_personal_summary"]["key_point_summary"]["body"],
+            "EDITED AI BODY",
+        )
+        self.assertEqual(
+            response.json["human_personal_summary"]["key_point_summary"]["body"],
+            "EDITED HUMAN BODY",
+        )
+
+    def test_consultant_notes_only_save_does_not_touch_ai_kps(self):
+        self.ingest_session(session_id="sess_notes_only_001", urgent_escalation=False)
+        self.consultant_login()
+        response = self.client.post(
+            f"/consultant/clients/{self.client_id}",
+            data={
+                "form_name": "save_context",
+                "notes": "Notes only update.",
+                "direction": "Direction only update.",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+
+        query_string = f"client_id={self.client_id}"
+        response = self.client.get(
+            f"/internal/client-context?{query_string}",
+            headers=self.internal_headers("GET", "/internal/client-context", query_string),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json["ai_personal_summary"]["key_point_summary"]["body"],
+            "Recurring AI-session themes include stress, burnout, and the need for steady routines.",
+        )
+
     def test_consultant_can_delete_client_from_detail_page(self):
         self.consultant_login()
         response = self.client.post(
@@ -695,8 +816,10 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.consultant_login()
         response = self.client.get("/consultant/sessions/sess_disabled_signals_001")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Speech-to-text was not enabled for this session.", response.data)
-        self.assertIn(b"Audio and video biomarkers were not enabled for this session.", response.data)
+        self.assertIn(b"Stress", response.data)
+        self.assertIn(b"Heart Rate", response.data)
+        self.assertIn(b"Crisis Level", response.data)
+        self.assertNotIn(b"Audio and video biomarkers were not enabled for this session.", response.data)
 
     def test_session_detail_shows_audio_disabled_empty_state(self):
         self.ingest_session(session_id="sess_audio_disabled_001", urgent_escalation=False)
@@ -717,7 +840,10 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.consultant_login()
         response = self.client.get("/consultant/sessions/sess_audio_disabled_001")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Audio biomarkers were not enabled for this session.", response.data)
+        self.assertIn(b"Stress", response.data)
+        self.assertIn(b"Heart Rate", response.data)
+        self.assertIn(b"Crisis Level", response.data)
+        self.assertNotIn(b"Audio biomarkers were not enabled for this session.", response.data)
 
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_meeting_detail_shows_signal_settings(self, mocked_deliver_email):
@@ -1954,6 +2080,70 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertNotIn(b"Work stress remains high", response.data)
         self.assertIn(b"All clients", response.data)
 
+    def test_consultant_sessions_support_human_and_ai_filters(self):
+        ai_payload = {
+            "client_id": self.client_id,
+            "consultant_id": self.consultant_id,
+            "session_id": "sess_ai",
+            "session_kind": "avatar_ai_session",
+            "profile": "therapy",
+            "channel": "channel-ai",
+            "started_at": "2026-04-13T18:00:00Z",
+            "ended_at": "2026-04-13T18:05:00Z",
+            "duration_seconds": 300,
+            "status": "completed",
+            "summary": {"brief_overview": "AI session summary"},
+            "biomarkers": {"averages": {"stress_index": 40.0}},
+            "alerts": [],
+        }
+        body = json.dumps(ai_payload, separators=(",", ":"))
+        response = self.client.post(
+            "/internal/session-complete",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/session-complete", body),
+        )
+        self.assertEqual(response.status_code, 200)
+
+        human_payload = {
+            "client_id": self.client_id,
+            "consultant_id": self.consultant_id,
+            "session_id": "sess_human",
+            "session_kind": "consultant_live_session",
+            "profile": "therapy",
+            "channel": "channel-human",
+            "started_at": "2026-04-14T18:00:00Z",
+            "ended_at": "2026-04-14T18:25:00Z",
+            "duration_seconds": 1500,
+            "status": "completed",
+            "summary": {"brief_overview": "Human session summary"},
+            "biomarkers": {"averages": {"stress_index": 55.0}},
+            "alerts": [],
+        }
+        body = json.dumps(human_payload, separators=(",", ":"))
+        response = self.client.post(
+            "/internal/session-complete",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/session-complete", body),
+        )
+        self.assertEqual(response.status_code, 200)
+
+        self.consultant_login()
+
+        response = self.client.get("/consultant/sessions?type=ai")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"/consultant/sessions/sess_ai", response.data)
+        self.assertNotIn(b"/consultant/sessions/sess_human", response.data)
+        self.assertIn(b"Human", response.data)
+        self.assertIn(b"AI", response.data)
+        self.assertNotIn(b">Filter<", response.data)
+
+        response = self.client.get("/consultant/sessions?type=human")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"/consultant/sessions/sess_human", response.data)
+        self.assertNotIn(b"/consultant/sessions/sess_ai", response.data)
+
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_consultant_cannot_delete_meeting_from_detail_page(self, mocked_deliver_email):
         self.consultant_login()
@@ -2055,6 +2245,9 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertNotIn(b"Full summary", response.data)
         self.assertNotIn(f'action="/v/mindfix/consultant/clients/{self.client_id}/messages/send"'.encode(), response.data)
         self.assertNotIn(f'data-thread-endpoint="/v/mindfix/consultant/clients/{self.client_id}/messages/thread"'.encode(), response.data)
+        self.assertIn(b"Safety Level", response.data)
+        safety_block = response.data.split(b"<strong>Safety Level</strong>", 1)[1][:300]
+        self.assertNotIn(b"100%", safety_block)
 
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_consultant_can_send_email_message(self, mocked_deliver_email):

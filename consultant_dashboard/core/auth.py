@@ -242,8 +242,9 @@ def _require_admin(fn):
 
 
 def _is_local_support_request() -> bool:
-    remote_addr = (request.remote_addr or "").strip()
-    return remote_addr in {"127.0.0.1", "::1"}
+    original = request.environ.get("werkzeug.proxy_fix.orig") or {}
+    peer = original.get("REMOTE_ADDR") or request.environ.get("REMOTE_ADDR", "")
+    return peer.strip() in {"127.0.0.1", "::1"}
 
 
 def _support_login_enabled() -> bool:

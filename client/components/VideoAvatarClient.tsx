@@ -2,7 +2,6 @@
 
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import {
-  Brain,
   Mic,
   MicOff,
   Video,
@@ -1096,26 +1095,14 @@ export function VideoAvatarClient() {
       <header className="flex-shrink-0 border-b border-white/8 bg-[#1b2838]/82 px-4 py-3 shadow-[0_14px_40px_rgba(0,0,0,0.18)] backdrop-blur md:px-6 md:py-4">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#2bb58e]/18 text-[#2bb58e] ring-1 ring-[#2bb58e]/28">
-                <Brain className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-[0.7rem] font-semibold uppercase tracking-[0.26em] text-[#8fb2c9]">
-                  MindFix
-                </p>
-                <h1 className="truncate font-[family-name:var(--font-geist-sans)] text-lg font-semibold tracking-[-0.03em] text-white md:text-2xl">
-                  {meetingMode ? "Secure Meeting Room" : "Secure Session"}
-                </h1>
-              </div>
-            </div>
-            <p className="mt-2 max-w-2xl text-xs text-[#b5c7d4] md:pl-14 md:text-sm">
-              {meetingMode
-                ? `AI mental wellness, guided by a human therapist. ${meetingTranscriptionEnabled ? "Transcription on." : "Transcription off."}`
-                : "Private, browser-based support with live biomarker insight."}
+            <p className="text-[0.7rem] font-semibold uppercase tracking-[0.26em] text-[#8fb2c9]">
+              MindFix
             </p>
+            <h1 className="mt-1 truncate font-[family-name:var(--font-geist-sans)] text-lg font-semibold tracking-[-0.03em] text-white md:text-2xl">
+              Secure Session
+            </h1>
             {authError && (
-              <p className="mt-1 text-xs text-red-300 md:pl-14 md:text-sm">
+              <p className="mt-2 text-xs text-red-300 md:text-sm">
                 {authError}
               </p>
             )}
@@ -1151,10 +1138,7 @@ export function VideoAvatarClient() {
                 <div className="grid w-full max-w-5xl gap-6 lg:grid-cols-[1.15fr_0.85fr]">
                   <section className="overflow-hidden rounded-[1.75rem] border border-white/10 bg-[rgba(20,34,47,0.82)] shadow-[0_24px_80px_rgba(0,0,0,0.28)] backdrop-blur">
                     <div className="border-b border-white/8 px-6 py-5">
-                      <p className="text-[0.7rem] font-semibold uppercase tracking-[0.24em] text-[#8fb2c9]">
-                        MindFix
-                      </p>
-                      <h2 className="mt-2 font-[family-name:var(--font-geist-sans)] text-2xl font-semibold tracking-[-0.03em] text-white">
+                      <h2 className="font-[family-name:var(--font-geist-sans)] text-2xl font-semibold tracking-[-0.03em] text-white">
                         Enter your meeting room
                       </h2>
                       <p className="mt-2 text-sm text-[#b5c7d4]">
@@ -1170,6 +1154,7 @@ export function VideoAvatarClient() {
                             muted
                             playsInline
                             className="aspect-video w-full object-cover"
+                            style={{ transform: "scaleX(-1)" }}
                           />
                         ) : (
                           <div className="flex aspect-video items-center justify-center text-sm text-[#8fb2c9]">
@@ -1292,10 +1277,7 @@ export function VideoAvatarClient() {
                 <div className="grid w-full max-w-5xl gap-6 lg:grid-cols-[1.15fr_0.85fr]">
                   <section className="overflow-hidden rounded-[1.75rem] border border-white/10 bg-[rgba(20,34,47,0.82)] shadow-[0_24px_80px_rgba(0,0,0,0.28)] backdrop-blur">
                     <div className="border-b border-white/8 px-6 py-5">
-                      <p className="text-[0.7rem] font-semibold uppercase tracking-[0.24em] text-[#8fb2c9]">
-                        MindFix
-                      </p>
-                      <h2 className="mt-2 font-[family-name:var(--font-geist-sans)] text-2xl font-semibold tracking-[-0.03em] text-white">
+                      <h2 className="font-[family-name:var(--font-geist-sans)] text-2xl font-semibold tracking-[-0.03em] text-white">
                         Start your session
                       </h2>
                       <p className="mt-2 text-sm text-[#b5c7d4]">
@@ -1311,6 +1293,7 @@ export function VideoAvatarClient() {
                             muted
                             playsInline
                             className="aspect-video w-full object-cover"
+                            style={{ transform: "scaleX(-1)" }}
                           />
                         ) : (
                           <div className="flex aspect-video items-center justify-center text-sm text-[#8fb2c9]">

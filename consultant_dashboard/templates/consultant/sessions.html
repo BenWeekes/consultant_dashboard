@@ -8,22 +8,53 @@
       </div>
     </div>
     <div class="history-toolbar">
-      <form method="get" class="actions" style="align-items: end;">
-        <div>
-          <label class="label" for="client_id">Client</label>
-          <select id="client_id" name="client_id">
-            <option value="">All clients</option>
-            {% for client in clients %}
-              <option value="{{ client.id }}" {% if selected_client_id == client.id %}selected{% endif %}>{{ client.display_name }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="history-search">
-          <label class="label" for="q">Search summaries</label>
+      <div class="history-toolbar-left">
+        <form method="get" class="actions" style="align-items: end;">
+          <div>
+            <select id="client_id" name="client_id">
+              <option value="">All clients</option>
+              {% for client in clients %}
+                <option value="{{ client.id }}" {% if selected_client_id == client.id %}selected{% endif %}>{{ client.display_name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          {% for value in selected_session_types|sort %}
+            <input type="hidden" name="type" value="{{ value }}">
+          {% endfor %}
+          {% if search %}
+            <input type="hidden" name="q" value="{{ search }}">
+          {% endif %}
+        </form>
+      </div>
+      <div class="history-toolbar-center">
+        <form method="get" class="meeting-inline-toggles">
+          {% if selected_client_id %}
+            <input type="hidden" name="client_id" value="{{ selected_client_id }}">
+          {% endif %}
+          {% if search %}
+            <input type="hidden" name="q" value="{{ search }}">
+          {% endif %}
+          <label class="toggle-option">
+            <input type="checkbox" name="type" value="human" {% if 'human' in selected_session_types %}checked{% endif %} onchange="this.form.submit()">
+            <span>Human</span>
+          </label>
+          <label class="toggle-option">
+            <input type="checkbox" name="type" value="ai" {% if 'ai' in selected_session_types %}checked{% endif %} onchange="this.form.submit()">
+            <span>AI</span>
+          </label>
+        </form>
+      </div>
+      <div class="history-toolbar-right">
+        <form method="get" class="history-search">
+          {% if selected_client_id %}
+            <input type="hidden" name="client_id" value="{{ selected_client_id }}">
+          {% endif %}
+          {% for value in selected_session_types|sort %}
+            <input type="hidden" name="type" value="{{ value }}">
+          {% endfor %}
           <input id="q" type="search" name="q" value="{{ search or '' }}" placeholder="Search summary text">
-        </div>
-        <button type="submit">Filter</button>
-      </form>
+        </form>
+      </div>
     </div>
     <table class="table">
       <thead>

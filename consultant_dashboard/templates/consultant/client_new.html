@@ -86,10 +86,10 @@
       </div>
 
       <label class="field-label">Notes <span class="tooltip" tabindex="0" data-tooltip="Optional. Background context for the AI. Keep this concise and general rather than highly personal.">?</span></label>
-      <textarea name="notes" placeholder="Background notes for the AI">{{ form_defaults.notes or '' }}</textarea>
+      <textarea name="notes" class="compact-context" placeholder="Background notes for the AI">{{ form_defaults.notes or '' }}</textarea>
 
       <label class="field-label">Direction <span class="tooltip" tabindex="0" data-tooltip="Optional. How you want the next AI session to be guided. This is injected into session context at call start.">?</span></label>
-      <textarea name="direction" placeholder="Direction for the next session">{{ form_defaults.direction or '' }}</textarea>
+      <textarea name="direction" class="compact-context" placeholder="Direction for the next session">{{ form_defaults.direction or '' }}</textarea>
 
       <div class="actions">
         <button type="submit">Create Client</button>

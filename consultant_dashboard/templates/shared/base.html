@@ -59,6 +59,10 @@
         font-size: 1.05rem;
       }
       .public-topbar-logo { display: block; height: 24px; width: auto; }
+      .public-topbar-link.public-topbar-hidden {
+        visibility: hidden;
+        pointer-events: none;
+      }
       .grid { display: grid; gap: 16px; }
       .stats { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
       .stat { background: var(--accent-soft-solid); border-radius: 14px; padding: 16px; }
@@ -76,6 +80,17 @@
         font-size: 14px;
       }
       .toggle-option input { width: auto; margin: 0; }
+      .meeting-inline-toggles {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 14px;
+        align-items: center;
+      }
+      .meeting-inline-toggles .toggle-option {
+        margin-top: 0 !important;
+        white-space: nowrap;
+        padding: 8px 10px;
+      }
       .field-help { margin-top: -6px; font-size: 12px; color: var(--text-muted); }
       .field-help-reserved { min-height: 18px; }
       .phone-row { display: grid; gap: 12px; grid-template-columns: 200px 1fr; align-items: end; }
@@ -183,8 +198,8 @@
       .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
       .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
       .meta-list { display: grid; gap: 10px; }
-      .meta-line { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
-      .meta-line strong { font-size: 13px; }
+      .meta-line { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 14px; line-height: 1.45; }
+      .meta-line strong { font-size: 14px; font-weight: 700; }
       .summary-section { display: grid; gap: 8px; }
       .summary-copy { white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
       .metric-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
@@ -266,14 +281,15 @@
       .chat-body { margin-top: 8px; font-size: 14px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
       .chat-panel { min-height: 0; display: grid; grid-template-rows: auto 1fr auto; }
       .chat-compose-box {
-        min-height: 56px;
-        max-height: 56px;
+        min-height: 64px;
+        max-height: 64px;
         resize: none;
         font-size: 14px;
         line-height: 1.45;
         font-family: inherit;
         font-weight: 400;
-        padding: 14px 16px;
+        padding: 10px 16px;
+        display: block;
       }
       .compact-context {
         min-height: 92px;
@@ -335,7 +351,10 @@
       .list { display: grid; gap: 12px; }
       .item { padding: 14px; border: 1px solid #d8e6db; border-radius: 14px; background: #fbfdfb; }
       .history-card { margin-top: 0; position: relative; z-index: 0; }
-      .history-toolbar { display: flex; justify-content: space-between; align-items: end; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+      .history-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(280px, 360px); align-items: end; gap: 16px; margin-bottom: 16px; }
+      .history-toolbar-left { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; justify-content: flex-start; min-width: 0; }
+      .history-toolbar-center { display: flex; justify-content: center; }
+      .history-toolbar-right { display: flex; justify-content: flex-end; min-width: 0; }
       .history-search { min-width: 280px; max-width: 360px; }
       .history-list-scroll { max-height: 520px; overflow: auto; padding-right: 4px; }
       .session-history-item { background: #fbfdfd; }
@@ -368,10 +387,50 @@
       .notes-fixed-panel { min-height: 0; overflow: hidden; }
       .notes-fixed-panel .compact-context,
       .notes-fixed-panel .kps-context { width: 100%; }
+      .session-top-card {
+        display: flex;
+        flex-direction: column;
+        min-height: 860px;
+      }
+      .session-top-card .section-stack {
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+      .session-biomarker-stack {
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+      .session-side-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        min-height: 100%;
+        height: 100%;
+      }
+      .session-side-section {
+        min-height: 0;
+        overflow: hidden;
+      }
+      .session-side-section.summary-section { flex: 1.1 1 0; }
+      .session-side-section.transcript-section { flex: 1.6 1 0; }
+      .session-side-section.security-section { flex: 1.1 1 0; }
+      .session-side-section > .summary-card {
+        height: 100%;
+        box-sizing: border-box;
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        gap: 10px;
+      }
+      .summary-fill {
+        min-height: 0;
+        overflow: auto;
+        padding-right: 4px;
+      }
       .client-compose-grid { display: grid; grid-template-rows: auto 1fr auto; gap: 12px; min-height: 100%; }
-      .biomarker-headline-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+      .biomarker-headline-grid { display: grid; gap: 10px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
       .biomarker-headline-item { padding: 12px; border-radius: 12px; background: var(--accent-soft-solid); display: grid; gap: 6px; }
-      .biomarker-headline-item strong { font-size: 16px; }
+      .biomarker-headline-item .compact-metric-label { white-space: nowrap; }
+      .biomarker-headline-item strong { font-size: 14px; line-height: 1.3; }
       .biomarker-section { border: 1px solid #d8e6db; border-radius: 14px; background: #fbfdfd; overflow: hidden; }
       .biomarker-section summary { padding: 14px 16px; }
       .biomarker-section-body { padding: 0 16px 16px; display: grid; gap: 10px; }
@@ -507,10 +566,15 @@
         .client-top-grid, .client-bottom-grid, .client-bottom-grid.three-column { grid-template-columns: 1fr; }
         [data-client-editor-card] { height: auto; }
         .client-side-stack { grid-template-rows: auto auto auto auto auto; }
+        .session-top-card { min-height: auto; }
+        .session-side-stack { height: auto; }
         .chat-panel { min-height: 0; }
         .chat-thread-scroll { max-height: 45vh; }
         .phone-row, .field-grid-two { grid-template-columns: 1fr; }
-        .history-toolbar { align-items: stretch; }
+        .history-toolbar { grid-template-columns: 1fr; align-items: stretch; }
+        .history-toolbar-left,
+        .history-toolbar-center,
+        .history-toolbar-right { justify-content: flex-start; }
         .history-search { min-width: 0; max-width: none; width: 100%; }
         .toast-stack { left: 16px; right: 16px; top: 16px; }
         .toast { min-width: 0; max-width: none; }

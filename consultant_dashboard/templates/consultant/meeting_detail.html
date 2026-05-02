@@ -13,7 +13,7 @@
       <div class="section-stack">
         <div class="meta-block">
           <div class="meta-primary">{{ meeting.scheduled_start_at|display_dt }}</div>
-          <div class="meta-secondary">{{ meeting_type_display }} · {{ status_display }}{% if meeting.repeat_weekly %} · Weekly{% endif %}</div>
+          <div class="meta-secondary">{{ meeting_type_display }} · {{ status_display }}{% if meeting.repeat_frequency_display != "No" %} · {{ meeting.repeat_frequency_display }}{% endif %}</div>
         </div>
         <div class="summary-card">
           <h3>Client</h3>
@@ -90,7 +90,7 @@
             <div class="meta-line"><strong>Status</strong><span>{{ status_display }}</span></div>
             <div class="meta-line"><strong>Starts</strong><span>{{ meeting.scheduled_start_at|display_dt }}</span></div>
             <div class="meta-line"><strong>Ends</strong><span>{{ meeting.scheduled_end_at|display_dt }}</span></div>
-            <div class="meta-line"><strong>Repeats</strong><span>{{ "Weekly" if meeting.repeat_weekly else "No" }}</span></div>
+            <div class="meta-line"><strong>Repeats</strong><span>{{ meeting.repeat_frequency_display }}</span></div>
           </div>
         </div>
         <div class="summary-card">

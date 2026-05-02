@@ -25,72 +25,81 @@
     </div>
   </div>
 
-  <div class="client-top-grid single-column">
-    <div class="card panel-equal">
+  <div class="client-top-grid two-column">
+    <div class="card panel-equal session-top-card">
       <div class="panel-head">
         <div class="panel-title">
-          <div class="panel-kicker">Transcripts</div>
+          <div class="panel-kicker">Biomarkers</div>
         </div>
       </div>
-      <div class="section-stack">
-        {% if transcript_text %}
-          <div class="summary-card">
-            <h3>Transcript</h3>
-            <div class="summary-copy summary-scroll" style="white-space: pre-wrap;">{{ transcript_text }}</div>
-          </div>
-        {% elif transcript_enabled and transcript %}
-          <div class="summary-card">
-            <h3>Transcript</h3>
-            <div class="summary-copy">Speech-to-text was enabled for this session, but no transcript text was stored.</div>
-          </div>
-        {% elif not transcript_enabled %}
-          <div class="summary-card">
-            <h3>Transcript</h3>
-            <div class="summary-copy">Speech-to-text was not enabled for this session.</div>
-          </div>
-        {% endif %}
-        {% if summary %}
+      <div class="session-biomarker-stack">
+        {% include "consultant/_biomarker_section.html" %}
+      </div>
+    </div>
+
+    <div class="card client-editor-card session-top-card">
+      <div class="session-side-stack">
+        <div class="session-side-section summary-section">
           <div class="summary-card">
             <h3>Session Key Point Summary</h3>
-            {% set session_kps = summary.key_point_summary or {} %}
-            {% if session_kps.headline or summary.brief_overview or summary.overview %}
-              <div class="meta-primary">{{ session_kps.headline or summary.brief_overview or summary.overview }}</div>
-            {% endif %}
-            <div class="summary-copy summary-scroll" style="margin-top: 10px;">{{ session_kps.body or summary.full_summary or summary.overview or "No session key point summary stored." }}</div>
-          </div>
-          {% if summary.risk_overview or summary.follow_up %}
-            <div class="summary-card">
-              <h3>Safety Summary</h3>
-              {% if summary.risk_overview %}
-                <div class="summary-copy"><strong>Risk</strong><br>{{ summary.risk_overview }}</div>
+            {% if summary %}
+              {% set session_kps = summary.key_point_summary or {} %}
+              {% if session_kps.headline or summary.brief_overview or summary.overview %}
+                <div class="meta-primary">{{ session_kps.headline or summary.brief_overview or summary.overview }}</div>
               {% endif %}
-              {% if summary.follow_up %}
-                <div class="summary-copy{% if summary.risk_overview %} summary-scroll{% endif %}" style="{% if summary.risk_overview %}margin-top: 10px;{% endif %}"><strong>Follow up</strong><br>{{ summary.follow_up }}</div>
+              <div class="summary-copy summary-fill">{{ session_kps.body or summary.full_summary or summary.overview or "No session key point summary stored." }}</div>
+            {% else %}
+              <div class="summary-copy summary-fill">No transcript summary is stored for this session.</div>
+            {% endif %}
+          </div>
+        </div>
+
+        {% if is_human_session %}
+          <div class="session-side-section transcript-section">
+            <div class="summary-card">
+              <h3>Transcript</h3>
+              {% if transcript_text %}
+                <div class="summary-copy summary-fill" style="white-space: pre-wrap;">{{ transcript_text }}</div>
+              {% elif transcript_enabled and transcript %}
+                <div class="summary-copy summary-fill">Speech-to-text was enabled for this session, but no transcript text was stored.</div>
+              {% elif not transcript_enabled %}
+                <div class="summary-copy summary-fill">Speech-to-text was not enabled for this session.</div>
+              {% else %}
+                <div class="summary-copy summary-fill">No transcript text is stored for this session.</div>
               {% endif %}
             </div>
-          {% endif %}
-        {% else %}
-          <div class="summary-card">
-            <h3>Session Key Point Summary</h3>
-            <div class="summary-copy">No transcript summary is stored for this session.</div>
           </div>
         {% endif %}
-        {% if alerts %}
-          <div class="summary-card">
-            <h3>Follow-up flags</h3>
-            <div class="section-stack compact">
-              {% for alert in alerts %}
-                <div>
-                  <strong>{{ alert.title }}</strong>
-                  <div class="muted">{{ alert.severity }} · {{ alert.source }}</div>
-                </div>
-              {% endfor %}
+
+        {% if summary and (summary.biomarker_summary or summary.risk_overview or summary.follow_up or alerts) %}
+          <div class="session-side-section security-section">
+            <div class="summary-card">
+              <h3>Final Security Profile</h3>
+              <div class="section-stack compact summary-fill">
+                {% if summary.biomarker_summary %}
+                  <div class="summary-copy"><strong>Biomarkers</strong><br>{{ summary.biomarker_summary }}</div>
+                {% endif %}
+                {% if summary.risk_overview %}
+                  <div class="summary-copy"><strong>Risk</strong><br>{{ summary.risk_overview }}</div>
+                {% endif %}
+                {% if summary.follow_up %}
+                  <div class="summary-copy"><strong>Guidance</strong><br>{{ summary.follow_up }}</div>
+                {% endif %}
+                {% if alerts %}
+                  <div class="summary-copy">
+                    <strong>Flags</strong><br>
+                    {% for alert in alerts %}
+                      <div{% if not loop.first %} style="margin-top: 8px;"{% endif %}>
+                        {{ alert.title }} <span class="muted">· {{ alert.severity }} · {{ alert.source }}</span>
+                      </div>
+                    {% endfor %}
+                  </div>
+                {% endif %}
+              </div>
             </div>
           </div>
         {% endif %}
       </div>
     </div>
   </div>
-
-  {% include "consultant/_biomarker_section.html" %}
 {% endblock %}

@@ -139,6 +139,7 @@ CREATE TABLE IF NOT EXISTS scheduled_meetings (
     consultant_id TEXT NOT NULL,
     meeting_type TEXT NOT NULL DEFAULT 'human',
     repeat_weekly INTEGER NOT NULL DEFAULT 0,
+    repeat_frequency TEXT NOT NULL DEFAULT 'none',
     transcription_enabled INTEGER NOT NULL DEFAULT 0,
     audio_biomarkers_enabled INTEGER NOT NULL DEFAULT 1,
     video_biomarkers_enabled INTEGER NOT NULL DEFAULT 1,

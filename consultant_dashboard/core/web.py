@@ -1,4 +1,5 @@
 import base64
+import calendar
 import hashlib
 import hmac
 import json
@@ -474,11 +475,25 @@ def _decorate_meeting(meeting, now: Optional[datetime] = None):
     decorated["stale_open"] = stale_open
     decorated["is_live_display"] = status_display == "Meeting now"
     decorated["meeting_type_display"] = _meeting_type_display(_meeting_field(meeting, "meeting_type", "human"))
+    decorated["repeat_frequency_display"] = _meeting_repeat_display(_meeting_repeat_frequency(meeting))
     decorated["repeat_weekly_display"] = bool(_meeting_field(meeting, "repeat_weekly", 0))
     decorated["transcription_enabled_display"] = bool(_meeting_field(meeting, "transcription_enabled", 0))
     decorated["audio_biomarkers_enabled_display"] = bool(_meeting_field(meeting, "audio_biomarkers_enabled", 1))
     decorated["video_biomarkers_enabled_display"] = bool(_meeting_field(meeting, "video_biomarkers_enabled", 1))
     return decorated
+
+
+def _meeting_repeat_frequency(meeting) -> str:
+    value = (_meeting_field(meeting, "repeat_frequency", "") or "").strip().lower()
+    if value in {"weekly", "monthly"}:
+        return value
+    if bool(_meeting_field(meeting, "repeat_weekly", 0)):
+        return "weekly"
+    return "none"
+
+
+def _meeting_repeat_display(value: str) -> str:
+    return {"weekly": "Weekly", "monthly": "Monthly"}.get((value or "").strip().lower(), "No")
 
 
 def _normalize_next_meeting_fields(row: dict) -> None:
@@ -680,7 +695,7 @@ def _create_meeting_from_form(db, *, consultant_id: str, client_id: str, form_de
         client_id=client_id,
         consultant_id=consultant_id,
         meeting_type=meeting_type,
-        repeat_weekly=bool(form_defaults.get("repeat_weekly")),
+        repeat_frequency=(form_defaults.get("repeat_frequency") or "none"),
         transcription_enabled=transcription_enabled,
         audio_biomarkers_enabled=audio_biomarkers_enabled,
         video_biomarkers_enabled=video_biomarkers_enabled,
@@ -841,8 +856,9 @@ def _meeting_delivery_content(meeting, hosted_link: str, *, reminder_kind: str =
         )
     if meeting["invite_message"]:
         body += f"\n{meeting['invite_message']}\n"
-    if not immediate and bool(_meeting_field(meeting, "repeat_weekly", 0)):
-        body += "\nRepeats: Weekly\n"
+    repeat_frequency = _meeting_repeat_frequency(meeting)
+    if not immediate and repeat_frequency != "none":
+        body += f"\nRepeats: {_meeting_repeat_display(repeat_frequency)}\n"
     if reminder_kind == "24h":
         body += "\nReminder: your meeting is within the next 24 hours.\n"
     elif reminder_kind == "1m":
@@ -960,7 +976,10 @@ def _send_meeting_invite(db, meeting, access_token: str = "", *, reminder_kind: 
     return delivery_status, delivery_error, hosted_link
 
 
-def _find_next_weekly_occurrence(db, meeting):
+def _find_next_recurrence_occurrence(db, meeting):
+    repeat_frequency = _meeting_repeat_frequency(meeting)
+    if repeat_frequency == "none":
+        return None
     return db.execute(
         """
         SELECT id
@@ -968,7 +987,7 @@ def _find_next_weekly_occurrence(db, meeting):
         WHERE consultant_id = ?
           AND client_id = ?
           AND meeting_type = ?
-          AND repeat_weekly = 1
+          AND repeat_frequency = ?
           AND scheduled_start_at > ?
         ORDER BY scheduled_start_at ASC
         LIMIT 1
@@ -977,15 +996,19 @@ def _find_next_weekly_occurrence(db, meeting):
             meeting["consultant_id"],
             meeting["client_id"],
             (meeting["meeting_type"] or "human").strip().lower(),
+            repeat_frequency,
             meeting["scheduled_start_at"] or "",
         ),
     ).fetchone()
 
 
-def _next_weekly_occurrence_times(meeting):
+def _next_recurrence_occurrence_times(meeting):
     start_at = _parse_iso_datetime(meeting["scheduled_start_at"])
     end_at = _parse_iso_datetime(meeting["scheduled_end_at"])
     if not start_at or not end_at:
+        return None
+    repeat_frequency = _meeting_repeat_frequency(meeting)
+    if repeat_frequency not in {"weekly", "monthly"}:
         return None
     timezone_name = (meeting["timezone_name"] or "UTC").strip() or "UTC"
     try:
@@ -995,8 +1018,18 @@ def _next_weekly_occurrence_times(meeting):
         timezone_name = "UTC"
     local_start = start_at.astimezone(tz)
     local_end = end_at.astimezone(tz)
-    next_local_start = local_start + timedelta(days=7)
-    next_local_end = local_end + timedelta(days=7)
+    if repeat_frequency == "weekly":
+        next_local_start = local_start + timedelta(days=7)
+        next_local_end = local_end + timedelta(days=7)
+    else:
+        def _add_one_month(value: datetime) -> datetime:
+            year = value.year + (1 if value.month == 12 else 0)
+            month = 1 if value.month == 12 else value.month + 1
+            day = min(value.day, calendar.monthrange(year, month)[1])
+            return value.replace(year=year, month=month, day=day)
+
+        next_local_start = _add_one_month(local_start)
+        next_local_end = _add_one_month(local_end)
     next_start_utc = next_local_start.astimezone(timezone.utc)
     next_end_utc = next_local_end.astimezone(timezone.utc)
     join_start, join_end = build_join_window(next_start_utc, next_end_utc)
@@ -1009,25 +1042,27 @@ def _next_weekly_occurrence_times(meeting):
     }
 
 
-def _ensure_next_weekly_occurrence(
+def _ensure_next_recurrence_occurrence(
     db,
     *,
     meeting_id: str,
     actor_type: str = "system",
-    actor_id: str = "weekly-recurrence",
+    actor_id: str = "meeting-recurrence",
 ):
     meeting = get_scheduled_meeting(db, meeting_id)
-    if not meeting or not bool(_meeting_field(meeting, "repeat_weekly", 0)):
+    repeat_frequency = _meeting_repeat_frequency(meeting) if meeting else "none"
+    if not meeting or repeat_frequency == "none":
         return None
     if meeting["status"] not in {"completed", "cancelled", "declined"}:
         return None
-    if _find_next_weekly_occurrence(db, meeting):
+    if _find_next_recurrence_occurrence(db, meeting):
         return None
-    next_times = _next_weekly_occurrence_times(meeting)
+    next_times = _next_recurrence_occurrence_times(meeting)
     if not next_times:
         current_app.logger.warning(
-            "weekly_recurrence_skipped_invalid_times meeting_id=%s",
+            "meeting_recurrence_skipped_invalid_times meeting_id=%s repeat_frequency=%s",
             meeting_id,
+            repeat_frequency,
         )
         return None
 
@@ -1044,7 +1079,7 @@ def _ensure_next_weekly_occurrence(
         client_id=meeting["client_id"],
         consultant_id=meeting["consultant_id"],
         meeting_type=meeting["meeting_type"] or "human",
-        repeat_weekly=True,
+        repeat_frequency=repeat_frequency,
         transcription_enabled=bool(meeting["transcription_enabled"]),
         audio_biomarkers_enabled=bool(meeting["audio_biomarkers_enabled"]),
         video_biomarkers_enabled=bool(meeting["video_biomarkers_enabled"]),
@@ -1071,12 +1106,28 @@ def _ensure_next_weekly_occurrence(
         details={"source_meeting_id": meeting_id},
     )
     current_app.logger.info(
-        "weekly_recurrence_created source_meeting_id=%s next_meeting_id=%s start=%s",
+        "meeting_recurrence_created source_meeting_id=%s next_meeting_id=%s repeat_frequency=%s start=%s",
         meeting_id,
         next_meeting_id,
+        repeat_frequency,
         next_times["scheduled_start_at"],
     )
     return next_meeting_id
+
+
+def _ensure_next_weekly_occurrence(
+    db,
+    *,
+    meeting_id: str,
+    actor_type: str = "system",
+    actor_id: str = "weekly-recurrence",
+):
+    return _ensure_next_recurrence_occurrence(
+        db,
+        meeting_id=meeting_id,
+        actor_type=actor_type,
+        actor_id=actor_id,
+    )
 
 
 def run_due_meeting_reminders():
@@ -1234,6 +1285,8 @@ def _format_metric_number(key: str, value):
         return f"{round(numeric * 100)}%"
     if key == "stress_index":
         return f"{numeric:.2f}".rstrip("0").rstrip(".")
+    if key == "safety_level":
+        return f"{numeric:.1f}".rstrip("0").rstrip(".")
     return str(round(numeric))
 
 
@@ -1327,18 +1380,44 @@ def _empty_biomarker_message(*, audio_enabled: bool, video_enabled: bool, has_an
     return "Biomarkers were enabled for this session, but no biomarker data was stored."
 
 
+def _placeholder_metric_row(label: str, *, unit: str = "", window_sessions=None):
+    return {
+        "label": label,
+        "average": None,
+        "max": None,
+        "window_sessions": window_sessions,
+        "unit": unit,
+    }
+
+
+def _placeholder_session_biomarker_view():
+    voice_rows = [
+        _placeholder_metric_row("Safety Level"),
+        *[_placeholder_metric_row(label, unit=_metric_detail_suffix(key)) for key, label in VOICE_TILE_KEYS],
+    ]
+    video_rows = []
+    for key, label in VIDEO_TILE_KEYS:
+        unit = "mmHg" if key == "blood_pressure" else _metric_detail_suffix(key)
+        video_rows.append(_placeholder_metric_row(label, unit=unit))
+    return {
+        "headlines": [
+            {"label": "Stress", "value": "—", "detail": None},
+            {"label": "Heart Rate", "value": "—", "detail": None},
+            {"label": "Leading Emotion", "value": "—", "detail": None},
+            {"label": "Crisis Level", "value": "—", "detail": None},
+        ],
+        "groups": [
+            {"title": "Voice Biomarkers", "rows": voice_rows},
+            {"title": "Video Biomarkers", "rows": video_rows},
+        ],
+        "safety": None,
+        "empty_message": None,
+    }
+
+
 def _build_session_biomarker_view(biomarkers, *, audio_enabled: bool, video_enabled: bool):
     if not isinstance(biomarkers, dict):
-        return {
-            "headlines": [],
-            "groups": [],
-            "safety": None,
-            "empty_message": _empty_biomarker_message(
-                audio_enabled=audio_enabled,
-                video_enabled=video_enabled,
-                has_any_rows=False,
-            ),
-        }
+        return _placeholder_session_biomarker_view()
 
     voice = biomarkers.get("voice") or {}
     vitals = biomarkers.get("vitals") or {}
@@ -1355,19 +1434,23 @@ def _build_session_biomarker_view(biomarkers, *, audio_enabled: bool, video_enab
     peak_emotion = _emotion_stat_label(voice, "max")
 
     headlines = []
+    has_real_headline_data = False
     if stress_avg is not None:
+        has_real_headline_data = True
         headlines.append({
             "label": "Stress",
             "value": _format_metric_number("stress", stress_avg),
             "detail": f"Max { _format_metric_number('stress', stress_max) }" if stress_max is not None else None,
         })
     if heart_avg is not None:
+        has_real_headline_data = True
         headlines.append({
             "label": "Heart Rate",
             "value": f"{_format_metric_number('heart_rate_bpm', heart_avg)} bpm",
             "detail": f"Max {_format_metric_number('heart_rate_bpm', heart_max)} bpm" if heart_max is not None else None,
         })
     if common_emotion:
+        has_real_headline_data = True
         detail = f"Peak {peak_emotion['label']} ({peak_emotion['value']})" if peak_emotion else None
         headlines.append({
             "label": "Leading Emotion",
@@ -1377,11 +1460,12 @@ def _build_session_biomarker_view(biomarkers, *, audio_enabled: bool, video_enab
     highest_level = safety.get("highest_level")
     highest_alert = safety.get("highest_alert")
     if highest_level is not None:
-        headlines.append({
-            "label": "Safety",
-            "value": f"Level {highest_level}",
-            "detail": highest_alert if highest_alert else None,
-        })
+        has_real_headline_data = True
+    headlines.append({
+        "label": "Crisis Level",
+        "value": str(highest_level) if highest_level is not None else "—",
+        "detail": highest_alert if highest_alert else None,
+    })
 
     voice_rows = []
     if (safety_row := _build_metric_row(voice, "safety_level", "Safety Level")):
@@ -1405,16 +1489,20 @@ def _build_session_biomarker_view(biomarkers, *, audio_enabled: bool, video_enab
     if video_rows:
         groups.append({"title": "Video Biomarkers", "rows": video_rows})
 
-    return {
+    has_real_group_data = bool(voice_rows or video_rows)
+    view = {
         "headlines": headlines,
         "groups": groups,
         "safety": safety_view,
         "empty_message": _empty_biomarker_message(
             audio_enabled=audio_enabled,
             video_enabled=video_enabled,
-            has_any_rows=bool(headlines or groups or safety_view),
+            has_any_rows=bool(has_real_headline_data or has_real_group_data or safety_view),
         ),
     }
+    if not (has_real_headline_data or has_real_group_data or safety_view):
+        return _placeholder_session_biomarker_view()
+    return view
 
 
 def _build_client_biomarker_view(baseline):
@@ -1449,21 +1537,17 @@ def _build_client_biomarker_view(baseline):
         headlines.append({
             "label": "Stress",
             "value": _format_metric_number("stress", stress_avg),
-            "detail": f"Max avg {_format_metric_number('stress', stress_max)} · {window_sessions} sessions" if stress_max is not None else f"{window_sessions} sessions",
+            "detail": f"Max avg {_format_metric_number('stress', stress_max)}" if stress_max is not None else None,
         })
     if heart_avg is not None:
-        detail = f"Max avg {_format_metric_number('heart_rate_bpm', heart_max)} bpm · {window_sessions} sessions" if heart_max is not None else f"{window_sessions} sessions"
+        detail = f"Max avg {_format_metric_number('heart_rate_bpm', heart_max)} bpm" if heart_max is not None else None
         headlines.append({
             "label": "Heart Rate",
             "value": f"{_format_metric_number('heart_rate_bpm', heart_avg)} bpm",
             "detail": detail,
         })
     if common_emotion:
-        detail = (
-            f"Peak avg {peak_emotion['label']} ({peak_emotion['value']}) · {window_sessions} sessions"
-            if peak_emotion
-            else f"{window_sessions} sessions"
-        )
+        detail = f"Peak avg {peak_emotion['label']} ({peak_emotion['value']})" if peak_emotion else None
         headlines.append({
             "label": "Leading Emotion",
             "value": f"{common_emotion['label']} ({common_emotion['value']})",
@@ -1471,12 +1555,11 @@ def _build_client_biomarker_view(baseline):
         })
 
     latest_safety = baseline.get("latest_safety") or {}
-    if latest_safety.get("highest_level") is not None:
-        headlines.append({
-            "label": "Safety",
-            "value": f"Level {latest_safety['highest_level']}",
-            "detail": latest_safety.get("highest_alert") or None,
-        })
+    headlines.append({
+        "label": "Crisis Level",
+        "value": str(latest_safety["highest_level"]) if latest_safety.get("highest_level") is not None else "—",
+        "detail": latest_safety.get("highest_alert") or None,
+    })
 
     voice_rows = []
     if (safety_row := _build_metric_row(source, "safety_level", "Safety Level", window_sessions=window_sessions)):
@@ -2001,42 +2084,49 @@ def consultant_client_detail(client_id: str):
                 direction=request.form.get("direction", "").strip(),
             )
             storage = _storage()
-            ai_summary_key = client["ai_summary_storage_key"] or f"clients/{client_id}/ai_summary.json.enc"
-            human_summary_key = client["human_summary_storage_key"] or f"clients/{client_id}/human_summary.json.enc"
-            existing_ai_summary = _normalize_summary_edit_payload(
-                storage.get_json(client["ai_summary_storage_key"], client_id) if client["ai_summary_storage_key"] else None
-            )
-            existing_human_summary = _normalize_summary_edit_payload(
-                storage.get_json(client["human_summary_storage_key"], client_id) if client["human_summary_storage_key"] else None
-            )
             ai_body = request.form.get("ai_kps_body")
             human_body = request.form.get("human_kps_body")
+            summary_key_updates = []
             if ai_body is not None:
+                ai_summary_key = client["ai_summary_storage_key"] or f"clients/{client_id}/ai_summary.json.enc"
+                existing_ai_summary = _normalize_summary_edit_payload(
+                    storage.get_json(client["ai_summary_storage_key"], client_id) if client["ai_summary_storage_key"] else None
+                )
                 existing_ai_summary["key_point_summary"]["body"] = ai_body.strip()
                 if not existing_ai_summary["key_point_summary"]["headline"]:
                     existing_ai_summary["key_point_summary"]["headline"] = existing_ai_summary["key_point_summary"]["body"][:120].strip()
-            existing_ai_summary["full_summary"] = existing_ai_summary["key_point_summary"]["body"]
-            existing_ai_summary["brief_overview"] = existing_ai_summary["key_point_summary"]["headline"]
-            existing_ai_summary["overview"] = existing_ai_summary["key_point_summary"]["headline"]
+                existing_ai_summary["full_summary"] = existing_ai_summary["key_point_summary"]["body"]
+                existing_ai_summary["brief_overview"] = existing_ai_summary["key_point_summary"]["headline"]
+                existing_ai_summary["overview"] = existing_ai_summary["key_point_summary"]["headline"]
+                if existing_ai_summary["key_point_summary"]["body"] or client["ai_summary_storage_key"]:
+                    storage.put_json(ai_summary_key, client_id, existing_ai_summary)
+                    summary_key_updates.append(("ai_summary_storage_key", ai_summary_key))
             if human_body is not None:
+                human_summary_key = client["human_summary_storage_key"] or f"clients/{client_id}/human_summary.json.enc"
+                existing_human_summary = _normalize_summary_edit_payload(
+                    storage.get_json(client["human_summary_storage_key"], client_id) if client["human_summary_storage_key"] else None
+                )
                 existing_human_summary["key_point_summary"]["body"] = human_body.strip()
                 if not existing_human_summary["key_point_summary"]["headline"]:
                     existing_human_summary["key_point_summary"]["headline"] = existing_human_summary["key_point_summary"]["body"][:120].strip()
-            existing_human_summary["full_summary"] = existing_human_summary["key_point_summary"]["body"]
-            existing_human_summary["brief_overview"] = existing_human_summary["key_point_summary"]["headline"]
-            existing_human_summary["overview"] = existing_human_summary["key_point_summary"]["headline"]
-            storage.put_json(ai_summary_key, client_id, existing_ai_summary)
-            storage.put_json(human_summary_key, client_id, existing_human_summary)
-            db.execute(
-                """
-                UPDATE clients
-                SET ai_summary_storage_key = ?,
-                    human_summary_storage_key = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-                """,
-                (ai_summary_key, human_summary_key, client_id),
-            )
+                existing_human_summary["full_summary"] = existing_human_summary["key_point_summary"]["body"]
+                existing_human_summary["brief_overview"] = existing_human_summary["key_point_summary"]["headline"]
+                existing_human_summary["overview"] = existing_human_summary["key_point_summary"]["headline"]
+                if existing_human_summary["key_point_summary"]["body"] or client["human_summary_storage_key"]:
+                    storage.put_json(human_summary_key, client_id, existing_human_summary)
+                    summary_key_updates.append(("human_summary_storage_key", human_summary_key))
+            if summary_key_updates:
+                assignments = ", ".join(f"{column} = ?" for column, _value in summary_key_updates)
+                values = [value for _column, value in summary_key_updates]
+                db.execute(
+                    f"""
+                    UPDATE clients
+                    SET {assignments},
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (*values, client_id),
+                )
             log_audit(
                 db,
                 actor_type="consultant",
@@ -2225,7 +2315,7 @@ def _consultant_meeting_new_page(*, preselected_client_id: str = ""):
         "client_id": selected_client_id,
         "title": f"{_brand_name()} session",
         "meeting_type": "human",
-        "repeat_weekly": False,
+        "repeat_frequency": "none",
         "transcription_enabled": True,
         "audio_biomarkers_enabled": True,
         "video_biomarkers_enabled": True,
@@ -2256,7 +2346,10 @@ def _consultant_meeting_new_page(*, preselected_client_id: str = ""):
             "client_id": request.form.get("client_id", "").strip() or selected_client_id,
             "title": request.form.get("title", "").strip(),
             "meeting_type": (request.form.get("meeting_type", "human").strip() or "human").lower(),
-            "repeat_weekly": request.form.get("repeat_weekly") == "1",
+            "repeat_frequency": (
+                request.form.get("repeat_frequency", "").strip().lower()
+                or ("weekly" if request.form.get("repeat_weekly") == "1" else "none")
+            ),
             "transcription_enabled": transcription_enabled,
             "audio_biomarkers_enabled": audio_biomarkers_enabled,
             "video_biomarkers_enabled": video_biomarkers_enabled,
@@ -2279,12 +2372,12 @@ def _consultant_meeting_new_page(*, preselected_client_id: str = ""):
             if not client:
                 raise ValueError("Selected client was not found.")
             current_app.logger.info(
-                "meeting_form_submit consultant_id=%s client_id=%s type=%s start=%s repeat_weekly=%s stt=%s audio=%s video=%s",
+                "meeting_form_submit consultant_id=%s client_id=%s type=%s start=%s repeat_frequency=%s stt=%s audio=%s video=%s",
                 consultant_id,
                 selected_client_id,
                 form_defaults.get("meeting_type"),
                 form_defaults.get("scheduled_start_at"),
-                form_defaults.get("repeat_weekly"),
+                form_defaults.get("repeat_frequency"),
                 form_defaults.get("transcription_enabled"),
                 form_defaults.get("audio_biomarkers_enabled"),
                 form_defaults.get("video_biomarkers_enabled"),
@@ -2405,12 +2498,22 @@ def consultant_meetings():
     db.close()
     filter_name = (request.args.get("filter") or "all").strip().lower()
     search = (request.args.get("q") or "").strip().lower()
+    selected_meeting_types = {
+        value.strip().lower()
+        for value in request.args.getlist("type")
+        if value.strip().lower() in {"human", "ai"}
+    }
+    if not selected_meeting_types:
+        selected_meeting_types = {"human", "ai"}
     now = datetime.now(timezone.utc)
     meetings = [_decorate_meeting(meeting, now=now) for meeting in meetings]
 
     def include(meeting):
         status = meeting["status"]
         start_at = _parse_iso_datetime(meeting["scheduled_start_at"])
+        meeting_type = (meeting.get("meeting_type") or "human").strip().lower()
+        if meeting_type not in selected_meeting_types:
+            return False
         if filter_name == "open":
             return status in {"scheduled", "client_viewed", "accepted", "in_progress"} and not meeting.get("stale_open")
         if filter_name == "upcoming":
@@ -2443,6 +2546,9 @@ def consultant_meetings():
         meetings=meetings,
         filter_name=filter_name,
         search=search,
+        selected_meeting_types=selected_meeting_types,
+        current_meeting_type_query="".join(f"&type={value}" for value in sorted(selected_meeting_types)),
+        current_search_query=(f"&q={urllib.parse.quote(search)}" if search else ""),
     )
 
 
@@ -2987,12 +3093,23 @@ def consultant_sessions():
     storage = _storage()
     selected_client_id = (request.args.get("client_id") or "").strip()
     search = (request.args.get("q") or "").strip().lower()
+    selected_session_types = {
+        (value or "").strip().lower()
+        for value in request.args.getlist("type")
+        if (value or "").strip().lower() in {"human", "ai"}
+    }
+    if not selected_session_types:
+        selected_session_types = {"human", "ai"}
     decorated_sessions = []
     for session_row in sessions:
         row = dict(session_row)
         if selected_client_id and row.get("client_id") != selected_client_id:
             continue
         row["session_kind_display"] = _session_kind_display(row.get("session_kind", ""))
+        session_type = "human" if row.get("session_kind") == "consultant_live_session" else "ai"
+        row["session_type"] = session_type
+        if session_type not in selected_session_types:
+            continue
         summary_search_text = ""
         if row.get("summary_storage_key"):
             summary_payload = storage.get_json(row["summary_storage_key"], row["client_id"]) or {}
@@ -3015,6 +3132,7 @@ def consultant_sessions():
         sessions=decorated_sessions,
         clients=clients,
         selected_client_id=selected_client_id,
+        selected_session_types=selected_session_types,
         search=search,
     )
 
@@ -3073,6 +3191,7 @@ def consultant_session_detail(session_id: str):
         theme="consultant",
         session_row=session_row,
         session_kind_display=_session_kind_display(session_row["session_kind"]),
+        is_human_session=(session_row["session_kind"] == "consultant_live_session"),
         summary=summary,
         transcript=transcript,
         transcript_text=transcript_text,

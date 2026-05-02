@@ -177,6 +177,7 @@ def _ensure_migrations(db: sqlite3.Connection, config: Optional[dict] = None) ->
             consultant_id TEXT NOT NULL,
             meeting_type TEXT NOT NULL DEFAULT 'human',
             repeat_weekly INTEGER NOT NULL DEFAULT 0,
+            repeat_frequency TEXT NOT NULL DEFAULT 'none',
             transcription_enabled INTEGER NOT NULL DEFAULT 0,
             audio_biomarkers_enabled INTEGER NOT NULL DEFAULT 1,
             video_biomarkers_enabled INTEGER NOT NULL DEFAULT 1,
@@ -238,6 +239,18 @@ def _ensure_migrations(db: sqlite3.Connection, config: Optional[dict] = None) ->
         db.execute("ALTER TABLE scheduled_meetings ADD COLUMN meeting_type TEXT NOT NULL DEFAULT 'human'")
     if "repeat_weekly" not in meeting_columns:
         db.execute("ALTER TABLE scheduled_meetings ADD COLUMN repeat_weekly INTEGER NOT NULL DEFAULT 0")
+    if "repeat_frequency" not in meeting_columns:
+        db.execute("ALTER TABLE scheduled_meetings ADD COLUMN repeat_frequency TEXT NOT NULL DEFAULT 'none'")
+        db.execute(
+            """
+            UPDATE scheduled_meetings
+            SET repeat_frequency = CASE
+                WHEN repeat_weekly = 1 THEN 'weekly'
+                ELSE 'none'
+            END
+            WHERE repeat_frequency IS NULL OR repeat_frequency = ''
+            """
+        )
     if "transcription_enabled" not in meeting_columns:
         db.execute("ALTER TABLE scheduled_meetings ADD COLUMN transcription_enabled INTEGER NOT NULL DEFAULT 0")
     if "audio_biomarkers_enabled" not in meeting_columns:
@@ -637,6 +650,7 @@ def _ensure_scheduled_meetings_channel_not_unique(db: sqlite3.Connection) -> Non
             consultant_id TEXT NOT NULL,
             meeting_type TEXT NOT NULL DEFAULT 'human',
             repeat_weekly INTEGER NOT NULL DEFAULT 0,
+            repeat_frequency TEXT NOT NULL DEFAULT 'none',
             transcription_enabled INTEGER NOT NULL DEFAULT 0,
             audio_biomarkers_enabled INTEGER NOT NULL DEFAULT 1,
             video_biomarkers_enabled INTEGER NOT NULL DEFAULT 1,
@@ -683,7 +697,7 @@ def _ensure_scheduled_meetings_channel_not_unique(db: sqlite3.Connection) -> Non
     db.execute(
         """
         INSERT INTO scheduled_meetings_new (
-            id, client_id, consultant_id, meeting_type, repeat_weekly, transcription_enabled, audio_biomarkers_enabled, video_biomarkers_enabled, transcription_provider, transcription_language, status, title, invite_message, timezone_name,
+            id, client_id, consultant_id, meeting_type, repeat_weekly, repeat_frequency, transcription_enabled, audio_biomarkers_enabled, video_biomarkers_enabled, transcription_provider, transcription_language, status, title, invite_message, timezone_name,
             scheduled_start_at, scheduled_end_at, join_window_start_at, join_window_end_at,
             channel_name, response_access_link_id, invite_delivery_status, invite_delivery_error,
             reminder_24h_sent_at, reminder_1m_sent_at,
@@ -693,7 +707,7 @@ def _ensure_scheduled_meetings_channel_not_unique(db: sqlite3.Connection) -> Non
             biomarker_storage_key, linked_session_id, created_at, updated_at
         )
         SELECT
-            id, client_id, consultant_id, 'human', 0, 0, 1, 1, '', '', status, title, invite_message, timezone_name,
+            id, client_id, consultant_id, 'human', 0, 'none', 0, 1, 1, '', '', status, title, invite_message, timezone_name,
             scheduled_start_at, scheduled_end_at, join_window_start_at, join_window_end_at,
             channel_name, response_access_link_id, invite_delivery_status, invite_delivery_error,
             NULL, NULL,
@@ -1153,6 +1167,7 @@ def create_scheduled_meeting(
     consultant_id: str,
     meeting_type: str = "human",
     repeat_weekly: bool = False,
+    repeat_frequency: str = "none",
     transcription_enabled: bool = False,
     audio_biomarkers_enabled: bool = True,
     video_biomarkers_enabled: bool = True,
@@ -1168,23 +1183,28 @@ def create_scheduled_meeting(
     channel_name: str,
     response_access_link_id: str,
 ) -> str:
+    normalized_repeat = (repeat_frequency or "").strip().lower()
+    if normalized_repeat not in {"none", "weekly", "monthly"}:
+        normalized_repeat = "weekly" if repeat_weekly else "none"
+    repeat_weekly_flag = 1 if (repeat_weekly or normalized_repeat == "weekly") else 0
     db.execute(
         """
         INSERT INTO scheduled_meetings (
-            vendor_id, client_id, consultant_id, meeting_type, repeat_weekly,
+            vendor_id, client_id, consultant_id, meeting_type, repeat_weekly, repeat_frequency,
             transcription_enabled, audio_biomarkers_enabled, video_biomarkers_enabled,
             transcription_provider, transcription_language,
             title, invite_message, timezone_name,
             scheduled_start_at, scheduled_end_at, join_window_start_at, join_window_end_at,
             channel_name, response_access_link_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             _vendor_id_for_client(db, client_id),
             client_id,
             consultant_id,
             (meeting_type or "human").strip().lower(),
-            1 if repeat_weekly else 0,
+            repeat_weekly_flag,
+            normalized_repeat,
             1 if transcription_enabled else 0,
             1 if audio_biomarkers_enabled else 0,
             1 if video_biomarkers_enabled else 0,
@@ -2113,6 +2133,18 @@ def list_clients_for_consultant(db: sqlite3.Connection, consultant_id: str):
                    WHERE s.client_id = c.id
                ) AS session_count,
                (
+                   SELECT COUNT(*)
+                   FROM sessions s
+                   WHERE s.client_id = c.id
+                     AND s.session_kind = 'avatar_ai_session'
+               ) AS ai_session_count,
+               (
+                   SELECT COUNT(*)
+                   FROM sessions s
+                   WHERE s.client_id = c.id
+                     AND s.session_kind = 'consultant_live_session'
+               ) AS human_session_count,
+               (
                    SELECT MAX(COALESCE(s.ended_at, s.started_at, s.created_at))
                    FROM sessions s
                    WHERE s.client_id = c.id
@@ -2124,6 +2156,34 @@ def list_clients_for_consultant(db: sqlite3.Connection, consultant_id: str):
                    ORDER BY COALESCE(s.ended_at, s.started_at, s.created_at) DESC
                    LIMIT 1
                ) AS last_session_id,
+               (
+                   SELECT MAX(COALESCE(s.ended_at, s.started_at, s.created_at))
+                   FROM sessions s
+                   WHERE s.client_id = c.id
+                     AND s.session_kind = 'avatar_ai_session'
+               ) AS last_ai_session_at,
+               (
+                   SELECT s.id
+                   FROM sessions s
+                   WHERE s.client_id = c.id
+                     AND s.session_kind = 'avatar_ai_session'
+                   ORDER BY COALESCE(s.ended_at, s.started_at, s.created_at) DESC
+                   LIMIT 1
+               ) AS last_ai_session_id,
+               (
+                   SELECT MAX(COALESCE(s.ended_at, s.started_at, s.created_at))
+                   FROM sessions s
+                   WHERE s.client_id = c.id
+                     AND s.session_kind = 'consultant_live_session'
+               ) AS last_human_session_at,
+               (
+                   SELECT s.id
+                   FROM sessions s
+                   WHERE s.client_id = c.id
+                     AND s.session_kind = 'consultant_live_session'
+                   ORDER BY COALESCE(s.ended_at, s.started_at, s.created_at) DESC
+                   LIMIT 1
+               ) AS last_human_session_id,
                (
                    SELECT COUNT(*)
                    FROM client_messages m

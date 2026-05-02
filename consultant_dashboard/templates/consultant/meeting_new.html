@@ -74,10 +74,12 @@
           <input name="duration_minutes" type="number" min="5" max="240" value="{{ form_defaults.duration_minutes or '30' }}" required>
         </div>
         <div>
-          <label class="toggle-option" style="margin-top: 0;">
-            <input type="checkbox" name="repeat_weekly" value="1" {% if form_defaults.repeat_weekly %}checked{% endif %}>
-            <span>Repeat Weekly</span>
-          </label>
+          <label class="field-label">Repeats</label>
+          <select name="repeat_frequency">
+            <option value="none" {% if (form_defaults.repeat_frequency or 'none') == 'none' %}selected{% endif %}>Does not repeat</option>
+            <option value="weekly" {% if form_defaults.repeat_frequency == 'weekly' %}selected{% endif %}>Weekly</option>
+            <option value="monthly" {% if form_defaults.repeat_frequency == 'monthly' %}selected{% endif %}>Monthly</option>
+          </select>
         </div>
       </div>
       <div class="field-help">Defaults to now in Europe/London. Leave it as-is for a meeting that can start right away, or change it to schedule ahead.</div>

@@ -175,6 +175,59 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
         self.assertEqual(response.json["baseline"]["maxes"]["safety_level"], 1.0)
         self.assertEqual(len(response.json["alerts"]), 2)
 
+    def test_client_context_preserves_prior_ai_kps_when_second_session_omits_it(self):
+        self.ingest_session(session_id="sess_internal_keep_kps_001", urgent_escalation=False)
+        db = get_db(self.app.config)
+        row = db.execute(
+            "SELECT ai_summary_storage_key FROM clients WHERE id = ?",
+            (self.client_id,),
+        ).fetchone()
+        initial_key = row["ai_summary_storage_key"]
+        db.close()
+
+        payload = {
+            "client_id": self.client_id,
+            "consultant_id": self.consultant_id,
+            "session_id": "sess_internal_keep_kps_002",
+            "profile": "therapy",
+            "channel": "keep-kps-channel",
+            "started_at": "2026-04-14T18:00:00Z",
+            "ended_at": "2026-04-14T18:05:00Z",
+            "duration_seconds": 300,
+            "status": "completed",
+            "summary": {"overview": "Second session without KPS update."},
+            "ai_personal_summary": None,
+            "biomarkers": {"averages": {"stress_index": 41.0}},
+            "alerts": [],
+        }
+        body = json.dumps(payload, separators=(",", ":"))
+        response = self.client.post(
+            "/internal/session-complete",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/session-complete", body),
+        )
+        self.assertEqual(response.status_code, 200)
+
+        query_string = f"client_id={self.client_id}"
+        response = self.client.get(
+            f"/internal/client-context?{query_string}",
+            headers=self.internal_headers("GET", "/internal/client-context", query_string),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json["ai_personal_summary"]["key_point_summary"]["body"],
+            "Recurring AI-session themes include stress, burnout, and the need for steady routines.",
+        )
+
+        db = get_db(self.app.config)
+        row = db.execute(
+            "SELECT ai_summary_storage_key FROM clients WHERE id = ?",
+            (self.client_id,),
+        ).fetchone()
+        db.close()
+        self.assertEqual(row["ai_summary_storage_key"], initial_key)
+
     def test_crisis_escalate_init_returns_bundle_for_ai_session_without_scheduled_meeting(self):
         payload = {
             "client_id": self.client_id,
