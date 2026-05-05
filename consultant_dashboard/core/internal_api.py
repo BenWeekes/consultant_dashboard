@@ -707,7 +707,7 @@ def _compute_baseline(storage: EncryptedStorage, db, client_id: str):
         FROM sessions
         WHERE client_id = ? AND biomarker_storage_key IS NOT NULL
         ORDER BY ended_at DESC, created_at DESC
-        LIMIT 5
+        LIMIT 10
         """,
         (client_id,),
     ).fetchall()
@@ -732,6 +732,71 @@ def _compute_baseline(storage: EncryptedStorage, db, client_id: str):
     return {
         "window_sessions": len(rows),
         "averages": averages,
+    }
+
+
+def _compute_history_snapshot(
+    storage: EncryptedStorage,
+    db,
+    client_id: str,
+    *,
+    session_id: str,
+    session_ended_at: str,
+    limit: int = 10,
+):
+    rows = db.execute(
+        """
+        SELECT id, biomarker_storage_key
+        FROM sessions
+        WHERE client_id = ?
+          AND biomarker_storage_key IS NOT NULL
+          AND id != ?
+          AND COALESCE(ended_at, started_at, created_at) <= ?
+        ORDER BY COALESCE(ended_at, started_at, created_at) DESC
+        LIMIT ?
+        """,
+        (client_id, session_id, session_ended_at, limit),
+    ).fetchall()
+    metrics: Dict[str, List[float]] = {}
+    successful_payloads = 0
+    for row in rows:
+        payload = storage.get_json(row["biomarker_storage_key"], client_id)
+        if not payload:
+            continue
+        successful_payloads += 1
+        saw_group_metrics = False
+        for group_name in ("voice", "vitals"):
+            group = payload.get(group_name) or {}
+            for key, metric in group.items():
+                if not isinstance(metric, dict):
+                    continue
+                saw_group_metrics = True
+                avg_value = metric.get("avg")
+                if isinstance(avg_value, (int, float)):
+                    metrics.setdefault(key, []).append(float(avg_value))
+        if not saw_group_metrics:
+            for key, metric in (payload.get("averages") or {}).items():
+                if isinstance(metric, (int, float)):
+                    metrics.setdefault(key, []).append(float(metric))
+                    continue
+                if not isinstance(metric, dict):
+                    continue
+                avg_value = metric.get("avg")
+                if isinstance(avg_value, (int, float)):
+                    metrics.setdefault(key, []).append(float(avg_value))
+        safety = payload.get("safety") or {}
+        level_stats = safety.get("level_stats") if isinstance(safety, dict) else None
+        if isinstance(level_stats, dict):
+            avg_value = level_stats.get("avg")
+            if isinstance(avg_value, (int, float)):
+                metrics.setdefault("safety_level", []).append(float(avg_value))
+    return {
+        "window_sessions": successful_payloads,
+        "averages": {
+            key: round(sum(values) / len(values), 4)
+            for key, values in metrics.items()
+            if values
+        },
     }
 
 
@@ -806,12 +871,19 @@ def session_complete():
     payload = request.get_json(force=True)
     client_id = payload["client_id"]
     session_id = payload["session_id"]
+    biomarkers_payload = payload.get("biomarkers") or {}
+    safety_payload = biomarkers_payload.get("safety") or {}
+    safety_stats = safety_payload.get("level_stats") or {}
+    highest_safety_level = safety_payload.get("highest_level")
+    if highest_safety_level is None:
+        highest_safety_level = safety_stats.get("max")
     print(
         f"[consultant-dashboard] session-complete received "
         f"client_id={client_id} session_id={session_id} "
         f"profile={payload.get('profile', 'default')} urgent={bool(payload.get('urgent_escalation'))}"
     )
     storage = EncryptedStorage(storage_root_for_client(client_id), current_app.config["MASTER_KEY"])
+    db = get_db(current_app.config)
 
     summary_key = None
     transcript_key = None
@@ -828,7 +900,19 @@ def session_complete():
         storage.put_json(transcript_key, client_id, payload["transcript"])
     if payload.get("biomarkers"):
         biomarker_key = f"clients/{client_id}/sessions/{session_id}/biomarkers.json.enc"
-        storage.put_json(biomarker_key, client_id, payload["biomarkers"])
+        biomarker_payload = dict(payload["biomarkers"])
+        session_ended_at = payload.get("ended_at") or payload.get("started_at") or datetime.now(timezone.utc).isoformat()
+        history_snapshot = _compute_history_snapshot(
+            storage,
+            db,
+            client_id,
+            session_id=session_id,
+            session_ended_at=session_ended_at,
+            limit=10,
+        )
+        biomarker_payload["history_averages"] = history_snapshot.get("averages") or {}
+        biomarker_payload["history_window_sessions"] = int(history_snapshot.get("window_sessions") or 0)
+        storage.put_json(biomarker_key, client_id, biomarker_payload)
     if payload.get("ai_personal_summary"):
         ai_summary_key = f"clients/{client_id}/ai_summary.json.enc"
         storage.put_json(ai_summary_key, client_id, _normalize_summary_payload(payload["ai_personal_summary"]))
@@ -836,7 +920,6 @@ def session_complete():
         human_summary_key = f"clients/{client_id}/human_summary.json.enc"
         storage.put_json(human_summary_key, client_id, _normalize_summary_payload(payload["human_personal_summary"]))
 
-    db = get_db(current_app.config)
     meeting_signal_flags = {
         "transcription_enabled": 0,
         "audio_biomarkers_enabled": 1,
@@ -854,6 +937,13 @@ def session_complete():
         db.execute("UPDATE clients SET ai_summary_storage_key = ? WHERE id = ?", (ai_summary_key, client_id))
     if human_summary_key:
         db.execute("UPDATE clients SET human_summary_storage_key = ? WHERE id = ?", (human_summary_key, client_id))
+    latest_escalation_event = get_latest_escalation_event(db, session_id=session_id)
+    inferred_urgent_escalation = bool(payload.get("urgent_escalation"))
+    if not inferred_urgent_escalation:
+        inferred_urgent_escalation = bool(
+            (highest_safety_level is not None and float(highest_safety_level) >= 3)
+            or (latest_escalation_event and int(latest_escalation_event["safety_level"]) >= 3)
+        )
     upsert_session(
         db,
         session_id=session_id,
@@ -874,7 +964,7 @@ def session_complete():
         transcript_storage_key=transcript_key,
         biomarker_storage_key=biomarker_key,
         memory_storage_key=payload.get("memory_storage_key"),
-        urgent_escalation=1 if payload.get("urgent_escalation") else 0,
+        urgent_escalation=1 if inferred_urgent_escalation else 0,
         escalation_reason=payload.get("escalation_reason", ""),
     )
     if meeting_id:
@@ -908,13 +998,13 @@ def session_complete():
         "SELECT baseline_storage_key FROM clients WHERE id = ?",
         (client_id,),
     ).fetchone()["baseline_storage_key"]
-    if payload.get("urgent_escalation"):
+    if inferred_urgent_escalation:
         details_key = f"clients/{client_id}/sessions/{session_id}/alerts/urgent.json.enc"
         storage.put_json(
             details_key,
             client_id,
             {
-                "reason": payload.get("escalation_reason", ""),
+                "reason": payload.get("escalation_reason", "") or (latest_escalation_event["reason"] if latest_escalation_event else ""),
                 "source": payload.get("escalation_source", "llm"),
             },
         )

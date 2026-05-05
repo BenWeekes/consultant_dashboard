@@ -917,6 +917,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
     def test_human_and_ai_open_meetings_do_not_block_each_other(self, mocked_deliver_email):
         self.consultant_login()
         future_value = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
+        later_value = (datetime.now(timezone.utc) + timedelta(days=1, hours=1)).strftime("%Y-%m-%dT%H:%M")
         human_response = self.client.post(
             "/consultant/meetings/new",
             data={
@@ -938,7 +939,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
                 "client_id": self.client_id,
                 "meeting_type": "ai",
                 "title": "AI Check-In",
-                "scheduled_start_at": future_value,
+                "scheduled_start_at": later_value,
                 "duration_minutes": "30",
                 "timezone_name": "Europe/London",
                 "invite_message": "",
@@ -956,7 +957,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertNotEqual(rows[0]["channel_name"], rows[1]["channel_name"])
 
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
-    def test_future_meeting_blocked_when_open_meeting_exists_for_pair(self, mocked_deliver_email):
+    def test_future_meeting_allowed_when_existing_open_meeting_does_not_overlap(self, mocked_deliver_email):
         self.consultant_login()
         now_value = self._future_local_time(days=0, minutes=0)
         self.client.post(
@@ -986,7 +987,45 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"already has an active meeting", response.data)
+        self.assertIn(b"Meeting scheduled", response.data)
+
+        db = get_db(self.app.config)
+        count = db.execute("SELECT COUNT(*) AS c FROM scheduled_meetings").fetchone()["c"]
+        db.close()
+        self.assertEqual(count, 2)
+
+    @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
+    def test_future_meeting_blocked_when_times_overlap(self, mocked_deliver_email):
+        self.consultant_login()
+        future_value = self._future_local_time(days=1, minutes=0)
+        self.client.post(
+            "/consultant/meetings/new",
+            data={
+                "client_id": self.client_id,
+                "title": "Scheduled One",
+                "scheduled_start_at": future_value,
+                "duration_minutes": "30",
+                "timezone_name": "Europe/London",
+                "invite_message": "",
+            },
+            follow_redirects=True,
+        )
+
+        overlap_value = self._future_local_time(days=1, minutes=15)
+        response = self.client.post(
+            "/consultant/meetings/new",
+            data={
+                "client_id": self.client_id,
+                "title": "Overlapping Meeting",
+                "scheduled_start_at": overlap_value,
+                "duration_minutes": "30",
+                "timezone_name": "Europe/London",
+                "invite_message": "",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"meeting time clashes with an existing meeting", response.data.lower())
 
         db = get_db(self.app.config)
         count = db.execute("SELECT COUNT(*) AS c FROM scheduled_meetings").fetchone()["c"]

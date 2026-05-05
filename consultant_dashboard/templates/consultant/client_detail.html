@@ -103,7 +103,7 @@
 
   <div class="client-bottom-grid three-column">
     <div class="card history-card panel-equal">
-      <div class="history-toolbar">
+      <div class="history-toolbar-inline">
         <div class="panel-title">
           <div class="panel-kicker">Meetings</div>
         </div>
@@ -111,27 +111,35 @@
           <input id="meeting-search" type="search" placeholder="Search meeting date or title">
         </div>
       </div>
-        <div class="list history-list-scroll" id="meeting-history-list">
+      <div class="history-table-wrap" id="meeting-history-list">
+        <table class="history-table">
+          <thead>
+            <tr>
+              <th style="width: 36%;">Date</th>
+              <th style="width: 36%;">Meeting</th>
+              <th style="width: 28%;">Status</th>
+            </tr>
+          </thead>
+          <tbody>
         {% for meeting in meetings %}
-          <a class="item session-history-link" href="{{ tenant_path('/consultant/meetings/' ~ meeting.id) }}" data-search="{{ meeting.scheduled_start_at|display_dt }} {{ meeting.title }} {{ meeting.meeting_type_display }} {{ meeting.status }}">
-            <div class="details-summary">
-              <div class="session-history-summary">
-                <strong>{{ meeting.scheduled_start_at|display_dt }}</strong>
-                <span class="muted summary-copy">{{ meeting.meeting_type_display }} · {{ meeting.title }}</span>
-              </div>
-              <div class="actions">
-                <span class="status-chip {% if meeting.is_live_display %}live{% endif %}">{{ meeting.status_display }}</span>
-              </div>
-            </div>
-          </a>
+          <tr data-search="{{ meeting.scheduled_start_at|display_dt }} {{ meeting.title }} {{ meeting.meeting_type_display }} {{ meeting.status }}">
+            <td><a href="{{ tenant_path('/consultant/meetings/' ~ meeting.id) }}">{{ meeting.scheduled_start_at|display_dt }}</a></td>
+            <td>
+              <a href="{{ tenant_path('/consultant/meetings/' ~ meeting.id) }}">{{ meeting.title }}</a>
+              <span class="muted summary-copy">{{ meeting.meeting_type_display }}</span>
+            </td>
+            <td><span class="status-chip {% if meeting.is_live_display %}live{% endif %}">{{ meeting.status_display }}</span></td>
+          </tr>
         {% else %}
-          <div class="muted">No meetings yet.</div>
+          <tr><td colspan="3" class="muted">No meetings yet.</td></tr>
         {% endfor %}
+          </tbody>
+        </table>
       </div>
     </div>
 
     <div class="card history-card panel-equal">
-      <div class="history-toolbar">
+      <div class="history-toolbar-inline">
         <div class="panel-title">
           <div class="panel-kicker">Previous Sessions</div>
         </div>
@@ -139,30 +147,31 @@
           <input id="session-search" type="search" placeholder="Search session date or summary">
         </div>
       </div>
-      <div class="list history-list-scroll" id="session-history-list">
+      <div class="history-table-wrap" id="session-history-list">
+        <table class="history-table">
+          <thead>
+            <tr>
+              <th style="width: 32%;">Date</th>
+              <th style="width: 52%;">Summary</th>
+              <th style="width: 16%;">Flag</th>
+            </tr>
+          </thead>
+          <tbody>
       {% for session_row in sessions %}
         {% set session_summary = session_summaries.get(session_row.id, {}) %}
         {% set brief_summary = session_summary.brief_overview or session_summary.overview or session_summary.full_summary or '' %}
-        <a
-          class="item session-history-item session-history-link"
-          href="{{ tenant_path('/consultant/sessions/' ~ session_row.id) }}"
-          data-search="{{ (session_row.ended_at or session_row.started_at or session_row.created_at)|display_dt }} {{ session_row.status }} {{ brief_summary }}"
-        >
-          <div class="details-summary">
-            <div class="session-history-summary">
-              <strong>{{ (session_row.ended_at or session_row.started_at or session_row.created_at)|display_dt }}</strong>
-              {% if brief_summary %}
-                <span class="muted summary-copy">{{ brief_summary }}</span>
-              {% endif %}
-            </div>
-            <div class="actions">
-              {% if session_row.urgent_escalation %}<span class="muted">Urgent</span>{% endif %}
-            </div>
-          </div>
-        </a>
+        <tr data-search="{{ (session_row.ended_at or session_row.started_at or session_row.created_at)|display_dt }} {{ session_row.status }} {{ brief_summary }}">
+          <td><a href="{{ tenant_path('/consultant/sessions/' ~ session_row.id) }}">{{ (session_row.ended_at or session_row.started_at or session_row.created_at)|display_dt }}</a></td>
+          <td>
+            <a href="{{ tenant_path('/consultant/sessions/' ~ session_row.id) }}">{{ brief_summary or session_row.status|capitalize }}</a>
+          </td>
+          <td>{% if session_row.urgent_escalation %}<span class="muted">Urgent</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+        </tr>
       {% else %}
-        <div class="muted">No sessions yet.</div>
+        <tr><td colspan="3" class="muted">No sessions yet.</td></tr>
       {% endfor %}
+          </tbody>
+        </table>
       </div>
     </div>
 

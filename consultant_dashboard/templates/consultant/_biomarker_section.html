@@ -44,6 +44,18 @@
                   {% endif %}
                 </span>
               </div>
+              {% if biomarker_show_history_average %}
+                <div class="biomarker-stat-line">
+                  <span>History Avg</span>
+                  <span>
+                    {% if row.history_average %}
+                      {{ row.history_average }}{% if row.unit and row.label != 'Blood Pressure' %} {{ row.unit }}{% endif %}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </span>
+                </div>
+              {% endif %}
               {% if row.window_sessions %}
                 <div class="biomarker-meta">{{ row.window_sessions }} sessions</div>
               {% endif %}
@@ -54,7 +66,7 @@
     {% endfor %}
   {% endif %}
 
-  {% if biomarker_safety %}
+  {% if biomarker_safety and biomarker_show_safety_details != false %}
     <details class="biomarker-section">
       <summary class="details-summary">
         <strong>Safety Details</strong>

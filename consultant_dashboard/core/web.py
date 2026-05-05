@@ -39,6 +39,7 @@ from .db import (
     get_scheduled_meeting_detail,
     get_scheduled_meeting,
     get_session_detail,
+    get_latest_escalation_event,
     get_vendor_by_id,
     find_open_meeting_for_pair,
     get_client_access_link_by_id,
@@ -70,6 +71,7 @@ from .db import (
     update_consultant_password,
     update_vendor,
     upsert_client_auth_identity,
+    has_overlapping_meeting,
 )
 from .client_identity import build_identity_hashes
 from .messaging import (
@@ -651,15 +653,27 @@ def _is_immediate_schedule(start_at: datetime) -> bool:
     return start_at <= (datetime.now(timezone.utc) + timedelta(minutes=1))
 
 
+def _default_meeting_title(meeting_type: str, repeat_frequency: str) -> str:
+    meeting_type_value = (meeting_type or "human").strip().lower()
+    repeat_value = (repeat_frequency or "none").strip().lower()
+    cadence = {
+        "weekly": "Weekly",
+        "monthly": "Monthly",
+    }.get(repeat_value, "")
+    meeting_label = "AI" if meeting_type_value == "ai" else "Human"
+    return f"{_brand_name()} {cadence} {meeting_label}".replace("  ", " ").strip()
+
+
 def _create_meeting_from_form(db, *, consultant_id: str, client_id: str, form_defaults: dict):
     timezone_name, start_at, end_at = _parse_meeting_schedule_form(form_defaults)
     meeting_type = (form_defaults.get("meeting_type") or "human").strip().lower()
+    repeat_frequency = (form_defaults.get("repeat_frequency") or "none").strip().lower()
     transcription_enabled = bool(form_defaults.get("transcription_enabled")) or meeting_type == "ai"
     audio_biomarkers_enabled = bool(form_defaults.get("audio_biomarkers_enabled"))
     video_biomarkers_enabled = bool(form_defaults.get("video_biomarkers_enabled"))
     transcription_provider = (form_defaults.get("transcription_provider") or "").strip() if transcription_enabled else ""
     transcription_language = (form_defaults.get("transcription_language") or "").strip() if transcription_enabled else ""
-    default_title = f"{_brand_name()} AI session" if meeting_type == "ai" else f"{_brand_name()} session"
+    default_title = _default_meeting_title(meeting_type, repeat_frequency)
     existing_open = find_open_meeting_for_pair(
         db,
         consultant_id=consultant_id,
@@ -677,10 +691,28 @@ def _create_meeting_from_form(db, *, consultant_id: str, client_id: str, form_de
                 ended_by_id=existing_open["ended_by_id"] or "",
             )
             existing_open = None
+    requested_start_at = iso_utc(start_at)
+    requested_end_at = iso_utc(end_at)
+    overlaps_existing = has_overlapping_meeting(
+        db,
+        consultant_id=consultant_id,
+        client_id=client_id,
+        scheduled_start_at=requested_start_at,
+        scheduled_end_at=requested_end_at,
+    )
+    if overlaps_existing:
         if existing_open:
-            if _is_immediate_schedule(start_at):
+            existing_start_at = _parse_iso_utc(existing_open["scheduled_start_at"])
+            existing_end_at = _parse_iso_utc(existing_open["scheduled_end_at"])
+            if (
+                existing_start_at
+                and existing_end_at
+                and start_at < existing_end_at
+                and end_at > existing_start_at
+                and _is_immediate_schedule(start_at)
+            ):
                 return existing_open["id"], True
-            raise ValueError("This client already has an active meeting. Complete or cancel it before scheduling another.")
+        raise ValueError("This meeting time clashes with an existing meeting. Choose another time.")
     access_token = new_access_token()
     access_link_id = create_client_access_link(
         db,
@@ -695,7 +727,7 @@ def _create_meeting_from_form(db, *, consultant_id: str, client_id: str, form_de
         client_id=client_id,
         consultant_id=consultant_id,
         meeting_type=meeting_type,
-        repeat_frequency=(form_defaults.get("repeat_frequency") or "none"),
+        repeat_frequency=repeat_frequency,
         transcription_enabled=transcription_enabled,
         audio_biomarkers_enabled=audio_biomarkers_enabled,
         video_biomarkers_enabled=video_biomarkers_enabled,
@@ -704,8 +736,8 @@ def _create_meeting_from_form(db, *, consultant_id: str, client_id: str, form_de
         title=form_defaults["title"] or default_title,
         invite_message=form_defaults["invite_message"],
         timezone_name=timezone_name,
-        scheduled_start_at=iso_utc(start_at),
-        scheduled_end_at=iso_utc(end_at),
+        scheduled_start_at=requested_start_at,
+        scheduled_end_at=requested_end_at,
         join_window_start_at=iso_utc(join_window_start_at),
         join_window_end_at=iso_utc(join_window_end_at),
         channel_name=get_pair_channel(consultant_id, client_id, meeting_type),
@@ -734,7 +766,8 @@ def _refresh_meeting_invite_for_immediate_use(
 ):
     timezone_name, start_at, end_at = _parse_meeting_schedule_form(form_defaults)
     meeting_type = (form_defaults.get("meeting_type") or "human").strip().lower()
-    default_title = f"{_brand_name()} AI session" if meeting_type == "ai" else f"{_brand_name()} session"
+    repeat_frequency = (form_defaults.get("repeat_frequency") or "none").strip().lower()
+    default_title = _default_meeting_title(meeting_type, repeat_frequency)
     access_token = new_access_token()
     access_link_id = create_client_access_link(
         db,
@@ -1333,12 +1366,14 @@ def _emotion_stat_label(source, field: str):
     }
 
 
-def _build_metric_row(source, key: str, label: str, *, window_sessions=None):
+def _build_metric_row(source, key: str, label: str, *, window_sessions=None, history_source=None):
     if key == "blood_pressure":
         avg_sys = _metric_value(source, "systolic_bp", "avg")
         avg_dia = _metric_value(source, "diastolic_bp", "avg")
         max_sys = _metric_value(source, "systolic_bp", "max")
         max_dia = _metric_value(source, "diastolic_bp", "max")
+        hist_sys = _metric_value(history_source, "systolic_bp", "avg")
+        hist_dia = _metric_value(history_source, "diastolic_bp", "avg")
         if avg_sys is None and avg_dia is None:
             return None
         average = f"{round(avg_sys) if avg_sys is not None else '—'}/{round(avg_dia) if avg_dia is not None else '—'}"
@@ -1347,22 +1382,30 @@ def _build_metric_row(source, key: str, label: str, *, window_sessions=None):
             if max_sys is not None or max_dia is not None
             else None
         )
+        history_average = (
+            f"{round(hist_sys) if hist_sys is not None else '—'}/{round(hist_dia) if hist_dia is not None else '—'}"
+            if hist_sys is not None or hist_dia is not None
+            else None
+        )
         return {
             "label": label,
             "average": average,
             "max": maximum,
+            "history_average": history_average,
             "window_sessions": window_sessions,
             "unit": "mmHg",
         }
 
     average_value = _metric_value(source, key, "avg")
     max_value = _metric_value(source, key, "max")
+    history_average_value = _metric_value(history_source, key, "avg")
     if average_value is None and max_value is None:
         return None
     return {
         "label": label,
         "average": _format_metric_number(key, average_value) if average_value is not None else None,
         "max": _format_metric_number(key, max_value) if max_value is not None else None,
+        "history_average": _format_metric_number(key, history_average_value) if history_average_value is not None else None,
         "window_sessions": window_sessions,
         "unit": _metric_detail_suffix(key),
     }
@@ -1385,6 +1428,7 @@ def _placeholder_metric_row(label: str, *, unit: str = "", window_sessions=None)
         "label": label,
         "average": None,
         "max": None,
+        "history_average": None,
         "window_sessions": window_sessions,
         "unit": unit,
     }
@@ -1415,6 +1459,63 @@ def _placeholder_session_biomarker_view():
     }
 
 
+def _compute_session_history_snapshot(storage: EncryptedStorage, db, *, client_id: str, session_id: str, session_at: str):
+    rows = db.execute(
+        """
+        SELECT biomarker_storage_key
+        FROM sessions
+        WHERE client_id = ?
+          AND biomarker_storage_key IS NOT NULL
+          AND id != ?
+          AND COALESCE(ended_at, started_at, created_at) <= ?
+        ORDER BY COALESCE(ended_at, started_at, created_at) DESC
+        LIMIT 10
+        """,
+        (client_id, session_id, session_at),
+    ).fetchall()
+    metrics = {}
+    successful_payloads = 0
+    for row in rows:
+        payload = storage.get_json(row["biomarker_storage_key"], client_id)
+        if not payload:
+            continue
+        successful_payloads += 1
+        saw_group_metrics = False
+        for group_name in ("voice", "vitals"):
+            group = payload.get(group_name) or {}
+            for key, metric in group.items():
+                if not isinstance(metric, dict):
+                    continue
+                saw_group_metrics = True
+                avg_value = metric.get("avg")
+                if isinstance(avg_value, (int, float)):
+                    metrics.setdefault(key, []).append(float(avg_value))
+        if not saw_group_metrics:
+            for key, metric in (payload.get("averages") or {}).items():
+                if isinstance(metric, (int, float)):
+                    metrics.setdefault(key, []).append(float(metric))
+                    continue
+                if not isinstance(metric, dict):
+                    continue
+                avg_value = metric.get("avg")
+                if isinstance(avg_value, (int, float)):
+                    metrics.setdefault(key, []).append(float(avg_value))
+        safety = payload.get("safety") or {}
+        level_stats = safety.get("level_stats") if isinstance(safety, dict) else None
+        if isinstance(level_stats, dict):
+            avg_value = level_stats.get("avg")
+            if isinstance(avg_value, (int, float)):
+                metrics.setdefault("safety_level", []).append(float(avg_value))
+    return {
+        "window_sessions": successful_payloads,
+        "averages": {
+            key: round(sum(values) / len(values), 4)
+            for key, values in metrics.items()
+            if values
+        },
+    }
+
+
 def _build_session_biomarker_view(biomarkers, *, audio_enabled: bool, video_enabled: bool):
     if not isinstance(biomarkers, dict):
         return _placeholder_session_biomarker_view()
@@ -1422,6 +1523,10 @@ def _build_session_biomarker_view(biomarkers, *, audio_enabled: bool, video_enab
     voice = biomarkers.get("voice") or {}
     vitals = biomarkers.get("vitals") or {}
     safety = biomarkers.get("safety") or {}
+    history_source = {}
+    for key, value in (biomarkers.get("history_averages") or {}).items():
+        if isinstance(value, (int, float)):
+            history_source[key] = {"avg": float(value)}
     if isinstance(safety.get("level_stats"), dict):
       voice = dict(voice)
       voice["safety_level"] = safety.get("level_stats")
@@ -1468,10 +1573,10 @@ def _build_session_biomarker_view(biomarkers, *, audio_enabled: bool, video_enab
     })
 
     voice_rows = []
-    if (safety_row := _build_metric_row(voice, "safety_level", "Safety Level")):
+    if (safety_row := _build_metric_row(voice, "safety_level", "Safety Level", history_source=history_source)):
         voice_rows.append(safety_row)
-    voice_rows.extend([row for key, label in VOICE_TILE_KEYS if (row := _build_metric_row(voice, key, label))])
-    video_rows = [row for key, label in VIDEO_TILE_KEYS if (row := _build_metric_row(vitals, key, label))]
+    voice_rows.extend([row for key, label in VOICE_TILE_KEYS if (row := _build_metric_row(voice, key, label, history_source=history_source))])
+    video_rows = [row for key, label in VIDEO_TILE_KEYS if (row := _build_metric_row(vitals, key, label, history_source=history_source))]
 
     safety_view = None
     if highest_level is not None or safety.get("highest_concerns") or safety.get("highest_recommended_actions"):
@@ -1592,6 +1697,80 @@ def _build_client_biomarker_view(baseline):
     }
 
 
+def _backfill_session_safety_from_escalation_event(biomarkers, escalation_event):
+    if not isinstance(biomarkers, dict) or not escalation_event:
+        return biomarkers
+    safety_level = escalation_event["safety_level"] if "safety_level" in escalation_event.keys() else None
+    if safety_level is None:
+        return biomarkers
+
+    result = dict(biomarkers)
+    safety = dict(result.get("safety") or {})
+    voice = dict(result.get("voice") or {})
+    averages = dict(result.get("averages") or {})
+
+    level_stats = safety.get("level_stats")
+    if not isinstance(level_stats, dict):
+        level_stats = {
+            "avg": float(safety_level),
+            "count": 1,
+            "min": float(safety_level),
+            "max": float(safety_level),
+        }
+    else:
+        level_stats = dict(level_stats)
+        level_stats["avg"] = float(level_stats.get("avg", safety_level))
+        level_stats["count"] = int(level_stats.get("count", 1) or 1)
+        level_stats["min"] = min(float(level_stats.get("min", safety_level)), float(safety_level))
+        level_stats["max"] = max(float(level_stats.get("max", safety_level)), float(safety_level))
+    safety["level_stats"] = level_stats
+    highest_level = safety.get("highest_level")
+    safety["highest_level"] = (
+        float(safety_level)
+        if highest_level is None
+        else max(float(highest_level), float(safety_level))
+    )
+    safety["highest_alert"] = safety.get("highest_alert") or escalation_event["alert"] or None
+
+    voice_stats = voice.get("safety_level")
+    if not isinstance(voice_stats, dict):
+        voice_stats = {
+            "avg": float(level_stats["avg"]),
+            "count": int(level_stats["count"]),
+            "min": float(level_stats["min"]),
+            "max": float(level_stats["max"]),
+        }
+    else:
+        voice_stats = dict(voice_stats)
+        voice_stats["avg"] = float(voice_stats.get("avg", level_stats["avg"]))
+        voice_stats["count"] = int(voice_stats.get("count", level_stats["count"]) or 1)
+        voice_stats["min"] = min(float(voice_stats.get("min", safety_level)), float(safety_level))
+        voice_stats["max"] = max(float(voice_stats.get("max", safety_level)), float(safety_level))
+    voice["safety_level"] = voice_stats
+    averages.setdefault("safety_level", float(level_stats["avg"]))
+
+    result["safety"] = safety
+    result["voice"] = voice
+    result["averages"] = averages
+    return result
+
+
+def _session_escalation_summary_line(escalation_event):
+    if not escalation_event:
+        return ""
+    status = (escalation_event["status"] or "").strip().lower()
+    provider_result = (escalation_event["provider_result"] or "").strip().lower()
+    if status in {"answered", "completed"} or provider_result in {"ok", "answered", "session_ended"}:
+        return "Escalation call connected successfully."
+    if status == "failed":
+        return "Escalation call was attempted but did not connect successfully."
+    if status == "skipped":
+        return "Escalation was assessed but no call was placed."
+    if status in {"dialing", "initialised"}:
+        return "Escalation call was started during the session."
+    return ""
+
+
 def _send_client_message(db, *, consultant_id: str, client, client_id: str, message_body: str):
     token = new_access_token()
     access_link_id = create_client_access_link(
@@ -1661,7 +1840,7 @@ def _send_client_message(db, *, consultant_id: str, client, client_id: str, mess
 def _refresh_client_derived_state(db, storage: EncryptedStorage, client_id: str) -> None:
     latest = get_latest_session_artifacts(db, client_id)
     latest_summary_key = latest["summary_storage_key"] if latest else None
-    biomarker_rows = list_recent_biomarker_keys(db, client_id, limit=5)
+    biomarker_rows = list_recent_biomarker_keys(db, client_id, limit=10)
 
     baseline_key = None
     average_metrics = {}
@@ -3170,6 +3349,21 @@ def consultant_session_detail(session_id: str):
             transcript_text = transcript.strip()
     if session_row["biomarker_storage_key"]:
         biomarkers = storage.get_json(session_row["biomarker_storage_key"], session_row["client_id"])
+    session_at = session_row["ended_at"] or session_row["started_at"] or session_row["created_at"]
+    if isinstance(biomarkers, dict) and "history_averages" not in biomarkers:
+        history_snapshot = _compute_session_history_snapshot(
+            storage,
+            db,
+            client_id=session_row["client_id"],
+            session_id=session_id,
+            session_at=session_at,
+        )
+        biomarkers = dict(biomarkers)
+        biomarkers["history_averages"] = history_snapshot.get("averages") or {}
+        biomarkers["history_window_sessions"] = int(history_snapshot.get("window_sessions") or 0)
+    escalation_event = get_latest_escalation_event(db, session_id=session_id)
+    biomarkers = _backfill_session_safety_from_escalation_event(biomarkers, escalation_event)
+    escalation_summary_line = _session_escalation_summary_line(escalation_event)
     session_biomarkers = _build_session_biomarker_view(
         biomarkers,
         audio_enabled=bool(session_row["audio_biomarkers_enabled"]),
@@ -3202,8 +3396,11 @@ def consultant_session_detail(session_id: str):
         biomarker_headlines=session_biomarkers["headlines"],
         biomarker_groups=session_biomarkers["groups"],
         biomarker_safety=session_biomarkers["safety"],
+        biomarker_show_history_average=True,
+        biomarker_show_safety_details=False,
         biomarker_empty_message=session_biomarkers["empty_message"],
         alerts=alerts,
+        escalation_summary_line=escalation_summary_line,
     )
 
 

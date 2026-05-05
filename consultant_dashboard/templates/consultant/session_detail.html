@@ -44,10 +44,15 @@
             <h3>Session Key Point Summary</h3>
             {% if summary %}
               {% set session_kps = summary.key_point_summary or {} %}
-              {% if session_kps.headline or summary.brief_overview or summary.overview %}
-                <div class="meta-primary">{{ session_kps.headline or summary.brief_overview or summary.overview }}</div>
-              {% endif %}
-              <div class="summary-copy summary-fill">{{ session_kps.body or summary.full_summary or summary.overview or "No session key point summary stored." }}</div>
+              <div class="summary-fill">
+                {% if session_kps.headline or summary.brief_overview or summary.overview %}
+                  <div class="meta-primary" style="margin-bottom: 8px;">{{ session_kps.headline or summary.brief_overview or summary.overview }}</div>
+                {% endif %}
+                <div class="summary-copy">{{ session_kps.body or summary.full_summary or summary.overview or "No session key point summary stored." }}</div>
+                {% if escalation_summary_line %}
+                  <div class="summary-copy muted" style="margin-top: 10px;">{{ escalation_summary_line }}</div>
+                {% endif %}
+              </div>
             {% else %}
               <div class="summary-copy summary-fill">No transcript summary is stored for this session.</div>
             {% endif %}

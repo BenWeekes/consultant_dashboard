@@ -992,7 +992,7 @@ def get_latest_session_artifacts(db: sqlite3.Connection, client_id: str):
     ).fetchone()
 
 
-def list_recent_biomarker_keys(db: sqlite3.Connection, client_id: str, limit: int = 5):
+def list_recent_biomarker_keys(db: sqlite3.Connection, client_id: str, limit: int = 10):
     return db.execute(
         """
         SELECT biomarker_storage_key
