@@ -2425,13 +2425,15 @@ def claim_pending_session_feedback(
     db: sqlite3.Connection,
     session_id: str,
     *,
-    client_id: str | None = None,
+    client_id: str,
 ):
     pending = get_pending_session_feedback(db, session_id)
     if not pending:
         return None
+    # Always evict the pending row to prevent replay across future sessions;
+    # only return it when the completed session belongs to the same client.
     db.execute("DELETE FROM pending_session_feedback WHERE session_id = ?", (session_id,))
-    if client_id and str(pending["client_id"] or "") != str(client_id):
+    if str(pending["client_id"] or "") != str(client_id):
         return None
     return pending
 

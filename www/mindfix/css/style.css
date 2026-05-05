@@ -527,7 +527,7 @@ a:hover {
 @media (max-width: 575.98px) {
   .hero-section {
     min-height: 90vh;
-    padding-top: calc(124px + env(safe-area-inset-top, 0px));
+    padding-top: calc(110px + env(safe-area-inset-top, 0px));
   }
 
   .hero-title {
@@ -539,7 +539,7 @@ a:hover {
   .hero-section {
     min-height: auto;
     align-items: flex-start !important;
-    padding-top: calc(136px + env(safe-area-inset-top, 0px));
+    padding-top: calc(118px + env(safe-area-inset-top, 0px));
     padding-bottom: 56px;
   }
 }

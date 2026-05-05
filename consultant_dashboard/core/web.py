@@ -249,9 +249,9 @@ def _require_client_link_session(expected_client_id: str):
 @web_bp.post("/session-feedback")
 def client_session_feedback():
     payload = request.get_json(force=True, silent=True) or {}
-    session_id = (payload.get("session_id") or "").strip()
-    avatar_id = (payload.get("avatar_id") or "").strip()
-    comment = str(payload.get("comment") or "").strip()
+    session_id = (payload.get("session_id") or "").strip()[:64]
+    avatar_id = (payload.get("avatar_id") or "").strip()[:64]
+    comment = str(payload.get("comment") or "").strip()[:4000]
     try:
         rating = int(payload.get("rating") or 0)
     except (TypeError, ValueError):
