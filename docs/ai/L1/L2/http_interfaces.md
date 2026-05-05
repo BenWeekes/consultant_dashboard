@@ -37,6 +37,7 @@ Shared routes:
 - `GET/POST /meetings/respond/<token>`
 - `GET/POST /client/messages/<token>`
 - `GET /client/messages/<token>/thread`
+- `POST /session-feedback`
 - `POST /logout`
 - `GET /health`
 
@@ -237,6 +238,27 @@ Current behavior:
   - biomarker baseline
   - latest safety snapshot
 - dashboard does not re-author AI/human client summaries locally during normal ingestion
+
+### `POST /session-feedback`
+
+Client-authenticated public route.
+
+Required JSON body:
+
+- `session_id`
+- `rating` (`1..5`)
+
+Optional JSON body:
+
+- `comment`
+- `avatar_id`
+
+Current behavior:
+
+- if the session row already exists, dashboard writes directly to `session_feedback`
+- if the session row does not exist yet, dashboard stages the row in `pending_session_feedback`
+- `/internal/session-complete` later claims and merges that pending row onto the real session
+- staged feedback is discarded when the pending `client_id` does not match the completed session `client_id`
 
 ### `POST /internal/crisis-escalate-init`
 

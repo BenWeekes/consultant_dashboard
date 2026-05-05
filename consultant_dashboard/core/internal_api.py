@@ -905,7 +905,7 @@ def session_complete():
         urgent_escalation=1 if inferred_urgent_escalation else 0,
         escalation_reason=payload.get("escalation_reason", ""),
     )
-    pending_feedback = claim_pending_session_feedback(db, session_id)
+    pending_feedback = claim_pending_session_feedback(db, session_id, client_id=client_id)
     if pending_feedback:
         upsert_session_feedback(
             db,

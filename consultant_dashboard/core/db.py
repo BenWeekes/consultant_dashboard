@@ -245,6 +245,13 @@ def _ensure_migrations(db: sqlite3.Connection, config: Optional[dict] = None) ->
         db.execute("ALTER TABLE scheduled_meetings ADD COLUMN repeat_weekly INTEGER NOT NULL DEFAULT 0")
     if "repeat_frequency" not in meeting_columns:
         db.execute("ALTER TABLE scheduled_meetings ADD COLUMN repeat_frequency TEXT NOT NULL DEFAULT 'none'")
+        db.execute(
+            """
+            UPDATE scheduled_meetings
+            SET repeat_frequency = 'weekly'
+            WHERE repeat_weekly = 1 AND repeat_frequency = 'none'
+            """
+        )
     if "pending_session_feedback" not in existing_tables:
         db.execute(
             """
@@ -258,16 +265,6 @@ def _ensure_migrations(db: sqlite3.Connection, config: Optional[dict] = None) ->
                 submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
             )
-            """
-        )
-        db.execute(
-            """
-            UPDATE scheduled_meetings
-            SET repeat_frequency = CASE
-                WHEN repeat_weekly = 1 THEN 'weekly'
-                ELSE 'none'
-            END
-            WHERE repeat_frequency IS NULL OR repeat_frequency = ''
             """
         )
     if "transcription_enabled" not in meeting_columns:
@@ -2424,11 +2421,18 @@ def upsert_pending_session_feedback(
     )
 
 
-def claim_pending_session_feedback(db: sqlite3.Connection, session_id: str):
+def claim_pending_session_feedback(
+    db: sqlite3.Connection,
+    session_id: str,
+    *,
+    client_id: str | None = None,
+):
     pending = get_pending_session_feedback(db, session_id)
     if not pending:
         return None
     db.execute("DELETE FROM pending_session_feedback WHERE session_id = ?", (session_id,))
+    if client_id and str(pending["client_id"] or "") != str(client_id):
+        return None
     return pending
 
 

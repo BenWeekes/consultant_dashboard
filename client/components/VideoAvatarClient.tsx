@@ -1835,7 +1835,7 @@ export function VideoAvatarClient() {
                     content: (
                       <div className="flex flex-col h-full gap-2 p-2">
                         {/* Remote video - primary on mobile */}
-                        <div className="flex-[3] rounded-lg border bg-card shadow-lg overflow-hidden min-h-0">
+                        <div className="flex-1 rounded-lg border bg-card shadow-lg overflow-hidden min-h-0">
                           <AvatarVideoDisplay
                             videoTrack={avatarVideoTrack}
                             state={
@@ -1851,12 +1851,12 @@ export function VideoAvatarClient() {
                           <div
                             key="mobile-shen-on"
                             id="shen-container-mobile"
-                            className="relative flex-[2] rounded-lg border bg-black shadow-lg overflow-hidden min-h-[120px]"
+                            className="relative aspect-video w-full flex-none rounded-lg border bg-black shadow-lg overflow-hidden"
                           />
                         ) : isLocalVideoActive ? (
                           <div
                             key="mobile-preview-on"
-                            className="flex-[2] rounded-lg border bg-card shadow-lg overflow-hidden min-h-[120px]"
+                            className="aspect-video w-full flex-none rounded-lg border bg-card shadow-lg overflow-hidden"
                           >
                             <LocalVideoPreview
                               videoTrack={localVideoTrack}
@@ -1867,7 +1867,7 @@ export function VideoAvatarClient() {
                         ) : (
                           <div
                             key="mobile-preview-off"
-                            className="flex-[2] rounded-lg border bg-card shadow-lg overflow-hidden min-h-[120px]"
+                            className="aspect-video w-full flex-none rounded-lg border bg-card shadow-lg overflow-hidden"
                           >
                             <CameraOffPlaceholder />
                           </div>

@@ -112,6 +112,14 @@ Ownership rule:
 6. Service refreshes AI/human session counts, stores session alerts, and writes an audit log row.
 7. If crisis escalation occurred, the linked `escalation_events` row shares the same `session_id`.
 
+Client feedback path:
+
+- when the client ends an AI or human session, the React client posts `rating`, optional `comment`, and `avatar_id` to `POST /v/<vendor>/session-feedback`
+- if the session row already exists, feedback is written directly to `session_feedback`
+- if the session row does not exist yet, feedback is staged in `pending_session_feedback`
+- during `/internal/session-complete`, matching pending feedback is claimed and merged onto the final session row
+- staged feedback is only attached when the pending row `client_id` matches the completed session `client_id`
+
 Additional current behavior:
 
 - per-session biomarker artifacts also persist:

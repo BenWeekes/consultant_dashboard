@@ -11,6 +11,7 @@ from consultant_dashboard.core import realtime
 from tests.support import ConsultantDashboardTestCase
 from consultant_dashboard.core.auth import _load_admin_users
 from consultant_dashboard.core.db import (
+    create_client,
     create_client_access_link,
     get_consultant_by_email,
     get_db,
@@ -733,6 +734,75 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertEqual(final_row["comment"], "Decent session.")
         self.assertEqual(final_row["avatar_id"], "avatar-pending")
         self.assertIsNone(pending_after)
+
+    def test_pending_client_feedback_is_discarded_for_other_client_session(self):
+        self.authenticate_client_session()
+        response = self.client.post(
+            "/v/mindfix/session-feedback",
+            json={
+                "session_id": "sess_feedback_cross_client_001",
+                "rating": 2,
+                "comment": "Should not attach elsewhere.",
+                "avatar_id": "avatar-cross-client",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+
+        db = get_db(self.app.config)
+        other_client_id = create_client(
+            db,
+            consultant_id=self.consultant_id,
+            first_name="Jamie",
+            last_name="Other",
+            email="jamie.other@example.com",
+            password_hash="",
+            phone_number="+447700900222",
+            notification_email="consultant@example.com",
+            escalation_phone_number="+447700900000",
+            year_of_birth=1985,
+            sex="female",
+            notes="Other client notes.",
+            direction="Other client direction.",
+        )
+        db.commit()
+        db.close()
+
+        payload = {
+            "client_id": other_client_id,
+            "consultant_id": self.consultant_id,
+            "session_id": "sess_feedback_cross_client_001",
+            "profile": "therapy",
+            "channel": "smoke-channel-other",
+            "started_at": "2026-04-13T18:00:00Z",
+            "ended_at": "2026-04-13T18:05:00Z",
+            "duration_seconds": 300,
+            "status": "completed",
+            "summary": {"overview": "Generalized summary."},
+            "biomarkers": {"averages": {"stress_index": 12.5}},
+        }
+        body = json.dumps(payload, separators=(",", ":"))
+        response = self.client.post(
+            "/internal/session-complete",
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                **self.internal_headers("POST", "/internal/session-complete", body),
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+
+        db = get_db(self.app.config)
+        feedback_row = db.execute(
+            "SELECT session_id FROM session_feedback WHERE session_id = ?",
+            ("sess_feedback_cross_client_001",),
+        ).fetchone()
+        pending_row = db.execute(
+            "SELECT session_id FROM pending_session_feedback WHERE session_id = ?",
+            ("sess_feedback_cross_client_001",),
+        ).fetchone()
+        db.close()
+        self.assertIsNone(feedback_row)
+        self.assertIsNone(pending_row)
 
     def test_consultant_can_delete_client_from_detail_page(self):
         self.consultant_login()

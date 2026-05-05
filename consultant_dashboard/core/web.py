@@ -299,7 +299,7 @@ def client_session_feedback():
         target_type="session",
         target_id=session_id,
         session_id=session_id,
-        ip_address=request.headers.get("X-Forwarded-For", request.remote_addr or "")[:255],
+        ip_address=(request.remote_addr or "")[:255],
         user_agent=(request.headers.get("User-Agent") or "")[:255],
         details={"rating": rating, "has_comment": bool(comment), "avatar_id": avatar_id, "pending": not bool(session_row)},
     )
