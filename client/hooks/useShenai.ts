@@ -140,8 +140,30 @@ export function useShenai(
       clearInterval(pollRef.current);
       pollRef.current = null;
     }
+    try {
+      sdkRef.current?.stopMeasurement?.();
+    } catch {}
+    try {
+      if (typeof window !== "undefined") {
+        // Shen's runtime uses this global flag to drive its internal camera loop.
+        // Clearing it stops the canvas/video updates without doing a full runtime teardown.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as any).MxCaptureRunning = false;
+      }
+    } catch {}
+    try {
+      const proxyVideo = document.getElementById("shen-camera-proxy");
+      proxyVideo?.parentElement?.removeChild(proxyVideo);
+    } catch {}
+    try {
+      const canvas = document.getElementById(canvasId) as HTMLCanvasElement | null;
+      if (canvas) {
+        const ctx = canvas.getContext("2d");
+        ctx?.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    } catch {}
     sdkRef.current = null;
-  }, []);
+  }, [canvasId]);
 
   // Load the SDK
   useEffect(() => {

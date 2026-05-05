@@ -15,7 +15,7 @@ const bodyFont = Open_Sans({
 
 export const metadata: Metadata = {
   title: "MindFix",
-  description: "AI mental wellness, guided by a human therapist.",
+  description: "MindFix",
 }
 
 export default function RootLayout({

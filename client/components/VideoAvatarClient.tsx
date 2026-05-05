@@ -57,6 +57,35 @@ const SHEN_API_KEY = process.env.NEXT_PUBLIC_SHEN_API_KEY || "";
 const DEVICE_COOKIE_MAX_AGE = 60 * 60 * 24 * 180;
 const MEETING_BOOTSTRAP_STORAGE_KEY = "mindfix_meeting_join_bootstrap";
 const MEETING_ACCESS_TOKEN_STORAGE_KEY = "mindfix_meeting_access_token";
+const FEEDBACK_FACES = [
+  { rating: 1, emoji: "😞", label: "Very unhappy" },
+  { rating: 2, emoji: "🙁", label: "Unhappy" },
+  { rating: 3, emoji: "😐", label: "Neutral" },
+  { rating: 4, emoji: "🙂", label: "Happy" },
+  { rating: 5, emoji: "😄", label: "Very happy" },
+];
+
+function CameraOffPlaceholder({
+  className = "",
+}: {
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex h-full w-full items-center justify-center rounded-lg bg-gradient-to-br from-slate-700 to-slate-800 text-muted-foreground",
+        className,
+      )}
+    >
+      <div className="flex flex-col items-center gap-2">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-600/50">
+          <VideoOff className="h-6 w-6" />
+        </div>
+        <p className="text-xs">Camera off</p>
+      </div>
+    </div>
+  );
+}
 
 const SENSITIVE_KEYS = [
   "api_key",
@@ -150,8 +179,6 @@ export function VideoAvatarClient() {
   const [profile, setProfile] = useState("");
   const [selectedAvatarId, setSelectedAvatarId] = useState("");
   const [selectedVoiceId, setSelectedVoiceId] = useState("");
-  const [prompt, setPrompt] = useState("");
-  const [greeting, setGreeting] = useState("");
   const [activeTab, setActiveTab] = useState("video");
   const _conversationRef = useRef<HTMLDivElement>(null);
   const [autoConnect, setAutoConnect] = useState(false);
@@ -163,7 +190,9 @@ export function VideoAvatarClient() {
       : "",
   );
   const [sessionAgentId, setSessionAgentId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionPayload, setSessionPayload] = useState<object | null>(null);
+  const [vendorSlug, setVendorSlug] = useState("mindfix");
   const [authChecked, setAuthChecked] = useState(false);
   const [authUser, setAuthUser] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -176,6 +205,10 @@ export function VideoAvatarClient() {
   const [meetingVideoBiomarkersEnabled, setMeetingVideoBiomarkersEnabled] = useState(true);
   const [meetingInitError, setMeetingInitError] = useState<string | null>(null);
   const [meetingJoinReady, setMeetingJoinReady] = useState(true);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackRating, setFeedbackRating] = useState<number | null>(null);
+  const [feedbackComment, setFeedbackComment] = useState("");
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [availableMics, setAvailableMics] = useState<MediaDeviceInfo[]>([]);
   const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([]);
   const [meetingPreviewStream, setMeetingPreviewStream] = useState<MediaStream | null>(null);
@@ -337,6 +370,9 @@ export function VideoAvatarClient() {
           if (data.authenticated) {
             setAuthUser(data.user_name || "User");
             setAuthError(null);
+          }
+          if (data.vendor_slug) {
+            setVendorSlug(String(data.vendor_slug).trim().toLowerCase());
           }
           setAuthChecked(true);
         })
@@ -658,6 +694,11 @@ export function VideoAvatarClient() {
     thymiaSafety,
   ]);
 
+  // Local video state - managed directly via AgoraRTC
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [localVideoTrack, setLocalVideoTrack] = useState<any>(null);
+  const [isLocalVideoActive, setIsLocalVideoActive] = useState(false);
+
   // Shen.AI camera vitals (opt-in via NEXT_PUBLIC_ENABLE_SHEN)
   // RTM publish function for Shen to push vitals to server
   const shenRtmPublish = useMemo(() => {
@@ -683,6 +724,7 @@ export function VideoAvatarClient() {
   const shenState = useShenai(
     SHEN_ENABLED &&
       isConnected &&
+      isLocalVideoActive &&
       (!meetingMode || meetingVideoBiomarkersEnabled),
     SHEN_API_KEY,
     shenRtmPublish,
@@ -694,6 +736,7 @@ export function VideoAvatarClient() {
     if (
       !SHEN_ENABLED ||
       !isConnected ||
+      !isLocalVideoActive ||
       (meetingMode && !meetingVideoBiomarkersEnabled)
     ) return;
 
@@ -721,12 +764,7 @@ export function VideoAvatarClient() {
     const mql = window.matchMedia("(max-width: 767px)");
     mql.addEventListener("change", moveCanvas);
     return () => mql.removeEventListener("change", moveCanvas);
-  }, [isConnected]);
-
-  // Local video state - managed directly via AgoraRTC
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [localVideoTrack, setLocalVideoTrack] = useState<any>(null);
-  const [isLocalVideoActive, setIsLocalVideoActive] = useState(false);
+  }, [isConnected, isLocalVideoActive, meetingMode, meetingVideoBiomarkersEnabled]);
 
   const handleStart = async () => {
     if (authError) {
@@ -759,6 +797,9 @@ export function VideoAvatarClient() {
         setMeetingTranscriptionEnabled(Boolean(meetingData.transcription_enabled));
         setMeetingAudioBiomarkersEnabled(Boolean(meetingData.audio_biomarkers_enabled ?? true));
         setMeetingVideoBiomarkersEnabled(Boolean(meetingData.video_biomarkers_enabled ?? true));
+        if (meetingData.session_id) {
+          setSessionId(String(meetingData.session_id));
+        }
         await joinChannel({
           appId: meetingData.appid,
           channel: meetingData.channel,
@@ -797,6 +838,10 @@ export function VideoAvatarClient() {
 
       // Build query params for backend
       const params = new URLSearchParams();
+      const plannedSessionId =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `sess-${Date.now()}`;
 
       // Add profile override if provided, otherwise use default "VIDEO" profile
       if (profile.trim()) {
@@ -809,19 +854,13 @@ export function VideoAvatarClient() {
       params.append("enable_aivad", enableAivad.toString());
       params.append("asr_language", language);
 
-      // Add prompt and greeting if provided
-      if (prompt.trim()) {
-        params.append("prompt", prompt.trim());
-      }
-      if (greeting.trim()) {
-        params.append("greeting", greeting.trim());
-      }
       if (selectedAvatarId.trim()) {
         params.append("avatar_id", selectedAvatarId.trim());
       }
       if (selectedVoiceId.trim()) {
         params.append("voice_id", selectedVoiceId.trim());
       }
+      params.append("session_id", plannedSessionId);
 
       // Phase 1: Get tokens only (don't start agent yet)
       params.append("connect", "false");
@@ -833,6 +872,7 @@ export function VideoAvatarClient() {
       }
 
       const data = await tokenResponse.json();
+      setSessionId(String(data.session_id || plannedSessionId));
       setMeetingTranscriptionEnabled(Boolean(data.transcription_enabled));
       setMeetingAudioBiomarkersEnabled(Boolean(data.audio_biomarkers_enabled ?? true));
       setMeetingVideoBiomarkersEnabled(Boolean(data.video_biomarkers_enabled ?? true));
@@ -875,6 +915,9 @@ export function VideoAvatarClient() {
       }
 
       const agentData = await agentResponse.json();
+      if (agentData.session_id) {
+        setSessionId(String(agentData.session_id));
+      }
 
       // Store agent_id from the actual agent response
       if (agentData.agent_response?.response) {
@@ -918,7 +961,62 @@ export function VideoAvatarClient() {
     }
   }, [autoConnect, authChecked, authError]);
 
-  const handleStop = async () => {
+  const postSessionFeedback = ({
+    sessionId,
+    rating,
+    comment,
+    avatarId,
+  }: {
+    sessionId: string;
+    rating: number;
+    comment: string;
+    avatarId: string;
+  }) => {
+    if (typeof window === "undefined") return;
+    const feedbackUrl = `${window.location.origin}/v/${vendorSlug}/session-feedback`;
+    const body = JSON.stringify({
+      session_id: sessionId,
+      rating,
+      comment,
+      avatar_id: avatarId,
+    });
+    try {
+      if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
+        const blob = new Blob([body], { type: "application/json" });
+        const queued = navigator.sendBeacon(feedbackUrl, blob);
+        if (queued) {
+          return;
+        }
+      }
+      void fetch(feedbackUrl, {
+        method: "POST",
+        credentials: "include",
+        keepalive: true,
+        headers: { "Content-Type": "application/json" },
+        body,
+      }).then((response) => {
+        if (!response.ok) {
+          console.error("Session feedback submission failed:", response.status);
+        }
+      }).catch((error) => {
+        console.error(
+          "Session feedback submission failed:",
+          error instanceof Error ? error.message : "feedback failed",
+        );
+      });
+    } catch (error) {
+      console.error(
+        "Session feedback submission failed:",
+        error instanceof Error ? error.message : "feedback failed",
+      );
+    }
+  };
+
+  const performStop = async ({
+    redirectAfter = true,
+  }: {
+    redirectAfter?: boolean;
+  } = {}) => {
     const isHostMeetingParticipant =
       meetingMode && meetingParticipantRole === "host";
 
@@ -973,6 +1071,7 @@ export function VideoAvatarClient() {
 
     await leaveChannel();
     setSessionAgentId(null);
+    setSessionId(null);
     setSessionPayload(null);
     if (meetingMode) {
       if (isHostMeetingParticipant) {
@@ -989,12 +1088,59 @@ export function VideoAvatarClient() {
       );
     }
     if (isHostMeetingParticipant) {
-      window.location.href = returnUrl || fallbackConsultantDashboardUrl();
-      return;
+      const nextUrl = returnUrl || fallbackConsultantDashboardUrl();
+      if (redirectAfter) {
+        window.location.href = nextUrl;
+      }
+      return nextUrl;
     }
     if (returnUrl) {
-      window.location.href = returnUrl;
+      if (redirectAfter) {
+        window.location.href = returnUrl;
+      }
+      return returnUrl;
+    }
+    return null;
+  };
+
+  const handleStop = async () => {
+    await performStop();
+  };
+
+  const handleEndCallClick = () => {
+    const isHostMeetingParticipant =
+      meetingMode && meetingParticipantRole === "host";
+    if (isHostMeetingParticipant) {
+      void handleStop();
       return;
+    }
+    setFeedbackOpen(true);
+  };
+
+  const finalizeEndCall = async (submitFeedback: boolean) => {
+    const currentSessionId = sessionId;
+    const currentAvatarId = selectedAvatarId.trim();
+    const rating = feedbackRating;
+    const comment = feedbackComment.trim();
+    setFeedbackSubmitting(true);
+    try {
+      if (submitFeedback && currentSessionId && rating) {
+        postSessionFeedback({
+          sessionId: currentSessionId,
+          rating,
+          comment,
+          avatarId: currentAvatarId,
+        });
+      }
+      const nextUrl = await performStop({ redirectAfter: false });
+      setFeedbackOpen(false);
+      setFeedbackRating(null);
+      setFeedbackComment("");
+      if (nextUrl) {
+        window.location.href = nextUrl;
+      }
+    } finally {
+      setFeedbackSubmitting(false);
     }
   };
 
@@ -1023,6 +1169,13 @@ export function VideoAvatarClient() {
       }
       localVideoTrack.stop();
       localVideoTrack.close();
+      try {
+        document.getElementById("shen-canvas")?.remove();
+        const mobileShen = document.getElementById("shen-container-mobile");
+        if (mobileShen) mobileShen.innerHTML = "";
+        const desktopShen = document.getElementById("shen-container-desktop");
+        if (desktopShen) desktopShen.innerHTML = "";
+      } catch {}
       setLocalVideoTrack(null);
       setIsLocalVideoActive(false);
     } else if (!isLocalVideoActive && rtcClientRef.current) {
@@ -1076,7 +1229,9 @@ export function VideoAvatarClient() {
 
   const showThymiaPanel = meetingAudioBiomarkersEnabled;
   const showShenPanel =
-    SHEN_ENABLED && (!meetingMode || meetingVideoBiomarkersEnabled);
+    SHEN_ENABLED &&
+    isLocalVideoActive &&
+    (!meetingMode || meetingVideoBiomarkersEnabled);
   const showBiomarkersPanel =
     meetingAudioBiomarkersEnabled || meetingVideoBiomarkersEnabled;
 
@@ -1121,10 +1276,15 @@ export function VideoAvatarClient() {
       </header>
 
       {/* Main Content */}
-      <main className="flex flex-1 px-4 py-1 md:py-6 min-h-0 overflow-hidden min-w-0">
+      <main
+        className={cn(
+          "flex flex-1 px-4 py-1 md:py-6 min-w-0",
+          !isConnected ? "overflow-y-auto overflow-x-hidden" : "min-h-0 overflow-hidden",
+        )}
+      >
         {!isConnected ? (
           /* Connection Form / Meeting Prejoin */
-          <div className="flex flex-1 items-center justify-center">
+          <div className="flex flex-1 items-start justify-center py-3 md:items-center">
             {!authChecked && !authError ? (
               <p className="text-lg text-muted-foreground animate-pulse">
                 Checking access...
@@ -1384,7 +1544,7 @@ export function VideoAvatarClient() {
                         </div>
                       </div>
 
-                      <div className="space-y-2 rounded-2xl border border-white/8 bg-white/4 px-4 py-4">
+                      <div className="hidden space-y-2 rounded-2xl border border-white/8 bg-white/4 px-4 py-4 md:block">
                         <label className="flex items-center gap-3 cursor-pointer">
                           <input
                             type="checkbox"
@@ -1633,7 +1793,7 @@ export function VideoAvatarClient() {
                         )}
                       </IconButton>
                       <button
-                        onClick={handleStop}
+                        onClick={handleEndCallClick}
                         className="cursor-pointer flex items-center gap-2 rounded-lg bg-destructive px-5 py-2.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90"
                       >
                         <PhoneOff className="h-4 w-4" />
@@ -1645,17 +1805,19 @@ export function VideoAvatarClient() {
               }
               localVideo={
                 <div className="h-full flex items-center justify-center p-2">
-                  {showShenPanel ? (
+                  {isLocalVideoActive && showShenPanel ? (
                     <div
                       id="shen-container-desktop"
                       className="relative h-full w-full rounded-lg overflow-hidden bg-black"
                     />
-                  ) : (
+                  ) : isLocalVideoActive ? (
                     <LocalVideoPreview
-                      videoTrack={isLocalVideoActive ? localVideoTrack : null}
+                      videoTrack={localVideoTrack}
                       className="h-full w-full"
                       useMediaStream={true}
                     />
+                  ) : (
+                    <CameraOffPlaceholder />
                   )}
                 </div>
               }
@@ -1672,8 +1834,8 @@ export function VideoAvatarClient() {
                     label: "Video",
                     content: (
                       <div className="flex flex-col h-full gap-2 p-2">
-                        {/* Avatar - 50% */}
-                        <div className="flex-1 rounded-lg border bg-card shadow-lg overflow-hidden">
+                        {/* Remote video - primary on mobile */}
+                        <div className="flex-[3] rounded-lg border bg-card shadow-lg overflow-hidden min-h-0">
                           <AvatarVideoDisplay
                             videoTrack={avatarVideoTrack}
                             state={
@@ -1684,21 +1846,30 @@ export function VideoAvatarClient() {
                           />
                         </div>
 
-                        {/* Local Video - 50% */}
-                        {showShenPanel ? (
+                        {/* Local video/Shen - secondary on mobile */}
+                        {isLocalVideoActive && showShenPanel ? (
                           <div
+                            key="mobile-shen-on"
                             id="shen-container-mobile"
-                            className="relative flex-1 rounded-lg border bg-black shadow-lg overflow-hidden"
+                            className="relative flex-[2] rounded-lg border bg-black shadow-lg overflow-hidden min-h-[120px]"
                           />
-                        ) : (
-                          <div className="flex-1 rounded-lg border bg-card shadow-lg overflow-hidden">
+                        ) : isLocalVideoActive ? (
+                          <div
+                            key="mobile-preview-on"
+                            className="flex-[2] rounded-lg border bg-card shadow-lg overflow-hidden min-h-[120px]"
+                          >
                             <LocalVideoPreview
-                              videoTrack={
-                                isLocalVideoActive ? localVideoTrack : null
-                              }
+                              videoTrack={localVideoTrack}
                               className="h-full w-full"
                               useMediaStream={true}
                             />
+                          </div>
+                        ) : (
+                          <div
+                            key="mobile-preview-off"
+                            className="flex-[2] rounded-lg border bg-card shadow-lg overflow-hidden min-h-[120px]"
+                          >
+                            <CameraOffPlaceholder />
                           </div>
                         )}
                       </div>
@@ -1827,17 +1998,19 @@ export function VideoAvatarClient() {
                           id: "biomarkers",
                           label: "Biomarkers",
                           content: (
-                            <CombinedBiomarkersPanel
-                              biomarkers={biomarkers}
-                              wellness={wellness}
-                              clinical={clinical}
-                              progress={thymiaProgress}
-                              safety={thymiaSafety}
-                              shenState={shenState}
-                              isConnected={isConnected}
-                              voiceEnabled={meetingAudioBiomarkersEnabled}
-                              videoEnabled={meetingVideoBiomarkersEnabled}
-                            />
+                            <div className="h-full overflow-y-auto overscroll-contain p-2">
+                              <CombinedBiomarkersPanel
+                                biomarkers={biomarkers}
+                                wellness={wellness}
+                                clinical={clinical}
+                                progress={thymiaProgress}
+                                safety={thymiaSafety}
+                                shenState={shenState}
+                                isConnected={isConnected}
+                                voiceEnabled={meetingAudioBiomarkersEnabled}
+                                videoEnabled={meetingVideoBiomarkersEnabled}
+                              />
+                            </div>
                           ),
                         },
                       ]
@@ -1882,7 +2055,7 @@ export function VideoAvatarClient() {
                   )}
                 </IconButton>
                 <button
-                  onClick={handleStop}
+                  onClick={handleEndCallClick}
                   className="cursor-pointer flex items-center gap-2 rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 min-h-[44px]"
                 >
                   <PhoneOff className="h-4 w-4" />
@@ -1902,16 +2075,76 @@ export function VideoAvatarClient() {
         onEnableAivadChange={setEnableAivad}
         language={language}
         onLanguageChange={setLanguage}
-        prompt={prompt}
-        onPromptChange={setPrompt}
-        greeting={greeting}
-        onGreetingChange={setGreeting}
         disabled={isConnected}
         selectedMicId={selectedMic}
         onMicChange={handleMicChange}
       >
         {!meetingMode && <SessionPanel agentId={sessionAgentId} payload={sessionPayload} />}
       </SettingsDialog>
+
+      {feedbackOpen && (
+        <div className="fixed inset-0 z-[90] overflow-y-auto bg-black/55 px-4 py-4 sm:flex sm:items-center sm:justify-center">
+          <div className="my-auto w-full max-w-xl rounded-2xl border bg-card p-4 shadow-2xl sm:p-6">
+            <div className="space-y-2">
+              <h2 className="text-xl font-semibold">How was this session?</h2>
+              <p className="text-sm text-muted-foreground">
+                Choose a face and add a comment if you want. Then the call will end.
+              </p>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5">
+              {FEEDBACK_FACES.map((face) => {
+                const selected = feedbackRating === face.rating;
+                return (
+                  <button
+                    key={face.rating}
+                    type="button"
+                    onClick={() => setFeedbackRating(face.rating)}
+                    className={cn(
+                      "flex min-h-[72px] flex-col items-center justify-center rounded-xl border px-2 py-2 text-center transition sm:min-h-[80px] sm:py-3",
+                      selected
+                        ? "border-primary bg-primary/10 text-foreground"
+                        : "border-border bg-background hover:border-primary/50 hover:bg-muted/50",
+                    )}
+                    disabled={feedbackSubmitting}
+                  >
+                    <span className="text-xl sm:text-2xl">{face.emoji}</span>
+                    <span className="mt-1 text-[11px] leading-4 sm:mt-2 sm:text-xs">{face.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-4">
+              <label className="mb-2 block text-sm font-medium">Comments</label>
+              <textarea
+                value={feedbackComment}
+                onChange={(e) => setFeedbackComment(e.target.value)}
+                rows={3}
+                placeholder="Anything you'd like us to know?"
+                className="min-h-[88px] w-full resize-none rounded-xl border border-input bg-background px-3 py-2 text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-ring sm:min-h-[108px]"
+                disabled={feedbackSubmitting}
+              />
+            </div>
+            <div className="mt-4 flex flex-wrap items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => void finalizeEndCall(false)}
+                disabled={feedbackSubmitting}
+                className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-60"
+              >
+                Skip and End
+              </button>
+              <button
+                type="button"
+                onClick={() => void finalizeEndCall(true)}
+                disabled={feedbackSubmitting || feedbackRating === null}
+                className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+              >
+                {feedbackSubmitting ? "Ending..." : "Send and End"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

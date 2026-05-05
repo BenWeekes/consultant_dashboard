@@ -124,6 +124,7 @@ a:hover {
   background: linear-gradient(135deg, var(--mf-dark) 0%, var(--mf-dark-lighter) 50%, #1a3a4a 100%);
   color: #fff;
   overflow: hidden;
+  padding-top: calc(104px + env(safe-area-inset-top, 0px));
 }
 
 .hero-overlay {
@@ -431,9 +432,55 @@ a:hover {
 /* ======================== RESPONSIVE ======================== */
 
 @media (max-width: 991.98px) {
-  .navbar-buttons {
+  #mainNav .navbar-collapse {
     margin-top: 12px;
-    justify-content: center;
+    padding: 16px 18px;
+    border-radius: 14px;
+    background: rgba(27, 40, 56, 0.96);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.24);
+    backdrop-filter: blur(6px);
+  }
+
+  #mainNav .navbar-nav {
+    gap: 2px;
+  }
+
+  #mainNav .nav-link {
+    display: block;
+    padding: 10px 0;
+    color: rgba(255, 255, 255, 0.88);
+  }
+
+  #mainNav .nav-link:hover,
+  #mainNav .nav-link.active {
+    color: #fff;
+  }
+
+  .navbar-buttons {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+
+  .navbar-buttons .btn {
+    padding: 10px 0;
+    border: none;
+    background: transparent;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.88);
+    font-size: 0.95rem;
+    font-weight: 500;
+  }
+
+  .navbar-buttons .btn:hover,
+  .navbar-buttons .btn:focus,
+  .navbar-buttons .btn:active {
+    background: transparent;
+    color: #fff;
+    box-shadow: none;
   }
 
   .hero-title {
@@ -480,9 +527,19 @@ a:hover {
 @media (max-width: 575.98px) {
   .hero-section {
     min-height: 90vh;
+    padding-top: calc(124px + env(safe-area-inset-top, 0px));
   }
 
   .hero-title {
     font-size: 1.5rem;
+  }
+}
+
+@media (max-width: 575.98px) and (max-height: 760px) {
+  .hero-section {
+    min-height: auto;
+    align-items: flex-start !important;
+    padding-top: calc(136px + env(safe-area-inset-top, 0px));
+    padding-bottom: 56px;
   }
 }

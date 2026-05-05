@@ -5,19 +5,27 @@
     <div class="label">{{ brand }}</div>
     <h1>Check your messages</h1>
     <p class="muted">We sent a 6-digit code to your phone.</p>
-    <form method="post" id="verify-form">
+    <form method="post" action="{{ tenant_url_for('auth.consultant_verify') }}" id="verify-form">
       <input id="code" type="text" inputmode="numeric" maxlength="6" name="code" placeholder="123456" required>
-      <button type="submit">Verify</button>
+      <button type="submit" id="verify-submit">Verify</button>
     </form>
     <script>
       const code = document.getElementById("code");
       const form = document.getElementById("verify-form");
-      let attempted = false;
-      code.addEventListener("input", () => {
-        if (!attempted && code.value.length === 6) {
-          attempted = true;
-          form.requestSubmit();
+      const submit = document.getElementById("verify-submit");
+      form.addEventListener("submit", (event) => {
+        code.value = code.value.replace(/\D+/g, "").slice(0, 6);
+        if (code.value.length !== 6) {
+          event.preventDefault();
+          code.focus();
+          return;
         }
+        if (submit.disabled) {
+          event.preventDefault();
+          return;
+        }
+        submit.disabled = true;
+        submit.textContent = "Verifying...";
       });
     </script>
   </div>

@@ -641,6 +641,99 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
             "Recurring AI-session themes include stress, burnout, and the need for steady routines.",
         )
 
+    def test_client_can_submit_session_feedback(self):
+        self.ingest_session(session_id="sess_feedback_001", urgent_escalation=False)
+        self.authenticate_client_session()
+        response = self.client.post(
+            "/v/mindfix/session-feedback",
+            json={
+                "session_id": "sess_feedback_001",
+                "rating": 4,
+                "comment": "Helpful and easy to talk to.",
+                "avatar_id": "avatar-123",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json, {"ok": True})
+
+        db = get_db(self.app.config)
+        row = db.execute(
+            "SELECT rating, comment, avatar_id FROM session_feedback WHERE session_id = ?",
+            ("sess_feedback_001",),
+        ).fetchone()
+        db.close()
+        self.assertEqual(row["rating"], 4)
+        self.assertEqual(row["comment"], "Helpful and easy to talk to.")
+        self.assertEqual(row["avatar_id"], "avatar-123")
+
+    def test_session_detail_shows_client_feedback(self):
+        self.ingest_session(session_id="sess_feedback_002", urgent_escalation=False)
+        db = get_db(self.app.config)
+        db.execute(
+            """
+            INSERT INTO session_feedback (
+                session_id, vendor_id, client_id, avatar_id, rating, comment, submitted_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "sess_feedback_002",
+                self.vendor_id,
+                self.client_id,
+                "avatar-234",
+                5,
+                "Really useful check-in.",
+                "2026-04-13T18:06:00Z",
+            ),
+        )
+        db.commit()
+        db.close()
+
+        self.consultant_login()
+        response = self.client.get("/v/mindfix/consultant/sessions/sess_feedback_002")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Client Feedback", response.data)
+        self.assertIn(b"5/5", response.data)
+        self.assertIn(b"Really useful check-in.", response.data)
+
+    def test_pending_client_feedback_attaches_when_session_completes(self):
+        self.authenticate_client_session()
+        response = self.client.post(
+            "/v/mindfix/session-feedback",
+            json={
+                "session_id": "sess_feedback_pending_001",
+                "rating": 3,
+                "comment": "Decent session.",
+                "avatar_id": "avatar-pending",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+
+        db = get_db(self.app.config)
+        pending = db.execute(
+            "SELECT rating, comment FROM pending_session_feedback WHERE session_id = ?",
+            ("sess_feedback_pending_001",),
+        ).fetchone()
+        db.close()
+        self.assertEqual(pending["rating"], 3)
+        self.assertEqual(pending["comment"], "Decent session.")
+
+        self.ingest_session(session_id="sess_feedback_pending_001", urgent_escalation=False)
+
+        db = get_db(self.app.config)
+        final_row = db.execute(
+            "SELECT rating, comment, avatar_id FROM session_feedback WHERE session_id = ?",
+            ("sess_feedback_pending_001",),
+        ).fetchone()
+        pending_after = db.execute(
+            "SELECT session_id FROM pending_session_feedback WHERE session_id = ?",
+            ("sess_feedback_pending_001",),
+        ).fetchone()
+        db.close()
+        self.assertEqual(final_row["rating"], 3)
+        self.assertEqual(final_row["comment"], "Decent session.")
+        self.assertEqual(final_row["avatar_id"], "avatar-pending")
+        self.assertIsNone(pending_after)
+
     def test_consultant_can_delete_client_from_detail_page(self):
         self.consultant_login()
         response = self.client.post(

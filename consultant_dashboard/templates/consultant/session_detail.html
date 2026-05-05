@@ -59,6 +59,20 @@
           </div>
         </div>
 
+        {% if feedback %}
+          <div class="session-side-section">
+            <div class="summary-card">
+              <h3>Client Feedback</h3>
+              <div class="summary-fill section-stack compact">
+                <div class="summary-copy"><strong>Rating</strong><br>{{ feedback_face }} · {{ feedback.rating }}/5</div>
+                {% if feedback.comment %}
+                  <div class="summary-copy"><strong>Comment</strong><br>{{ feedback.comment }}</div>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        {% endif %}
+
         {% if is_human_session %}
           <div class="session-side-section transcript-section">
             <div class="summary-card">

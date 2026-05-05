@@ -110,13 +110,21 @@ def _is_twilio_verify_enabled() -> bool:
 def _verify_code(phone_number: str, code: str) -> bool:
     if _is_twilio_verify_enabled():
         from twilio.rest import Client
+        from twilio.base.exceptions import TwilioRestException
 
         cfg = current_app.config
         client = Client(cfg["TWILIO_ACCOUNT_SID"], cfg["TWILIO_AUTH_TOKEN"])
-        result = client.verify.v2.services(cfg["TWILIO_VERIFY_SERVICE_SID"]).verification_checks.create(
-            to=phone_number,
-            code=code,
-        )
+        try:
+            result = client.verify.v2.services(cfg["TWILIO_VERIFY_SERVICE_SID"]).verification_checks.create(
+                to=phone_number,
+                code=code,
+            )
+        except TwilioRestException as exc:
+            print(
+                f"[consultant-dashboard] Twilio Verify check failed for {phone_number}: "
+                f"status={getattr(exc, 'status', 'unknown')} code={getattr(exc, 'code', 'unknown')} msg={exc}"
+            )
+            return False
         print(
             f"[consultant-dashboard] Twilio Verify check status={result.status} "
             f"to={phone_number}"

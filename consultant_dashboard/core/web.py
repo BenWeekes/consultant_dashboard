@@ -40,6 +40,8 @@ from .db import (
     get_scheduled_meeting_detail,
     get_scheduled_meeting,
     get_session_detail,
+    get_session_feedback,
+    get_vendor_by_slug,
     get_latest_escalation_event,
     get_vendor_by_id,
     find_open_meeting_for_pair,
@@ -71,6 +73,8 @@ from .db import (
     update_consultant,
     update_consultant_password,
     update_vendor,
+    upsert_pending_session_feedback,
+    upsert_session_feedback,
     upsert_client_auth_identity,
     has_overlapping_meeting,
 )
@@ -242,11 +246,83 @@ def _require_client_link_session(expected_client_id: str):
     return claims, None
 
 
+@web_bp.post("/session-feedback")
+def client_session_feedback():
+    payload = request.get_json(force=True, silent=True) or {}
+    session_id = (payload.get("session_id") or "").strip()
+    avatar_id = (payload.get("avatar_id") or "").strip()
+    comment = str(payload.get("comment") or "").strip()
+    try:
+        rating = int(payload.get("rating") or 0)
+    except (TypeError, ValueError):
+        rating = 0
+    if not session_id or rating < 1 or rating > 5:
+        return jsonify({"error": "session_id and rating 1-5 are required"}), 400
+
+    claims = _current_client_claims()
+    if not claims:
+        return jsonify({"error": "authentication_required"}), 401
+
+    db = get_db(current_app.config)
+    session_row = get_session_detail(db, session_id)
+    expected_client_id = session_row["client_id"] if session_row else str(claims.get("client_id") or "").strip()
+    _claims, auth_redirect = _require_client_link_session(expected_client_id)
+    if auth_redirect:
+        db.close()
+        return jsonify({"error": "authentication_required"}), 401
+
+    if session_row:
+        upsert_session_feedback(
+            db,
+            session_id=session_id,
+            client_id=session_row["client_id"],
+            avatar_id=avatar_id,
+            rating=rating,
+            comment=comment,
+        )
+    else:
+        vendor = get_vendor_by_slug(db, current_vendor_slug()) or get_vendor_by_slug(db, "mindfix")
+        upsert_pending_session_feedback(
+            db,
+            session_id=session_id,
+            vendor_id=(vendor["id"] if vendor else ""),
+            client_id=expected_client_id,
+            avatar_id=avatar_id,
+            rating=rating,
+            comment=comment,
+        )
+    log_audit(
+        db,
+        actor_type="client",
+        actor_id=expected_client_id,
+        action="session_feedback_submitted",
+        target_type="session",
+        target_id=session_id,
+        session_id=session_id,
+        ip_address=request.headers.get("X-Forwarded-For", request.remote_addr or "")[:255],
+        user_agent=(request.headers.get("User-Agent") or "")[:255],
+        details={"rating": rating, "has_comment": bool(comment), "avatar_id": avatar_id, "pending": not bool(session_row)},
+    )
+    db.commit()
+    db.close()
+    return jsonify({"ok": True})
+
+
 def _phone_form_value(phone_number: str):
     return {
         "country_code": infer_country_code(phone_number),
         "local_number": local_display_number(phone_number),
     }
+
+
+def _feedback_face(rating: int) -> str:
+    return {
+        1: "Very unhappy",
+        2: "Unhappy",
+        3: "Neutral",
+        4: "Happy",
+        5: "Very happy",
+    }.get(int(rating or 0), "")
 
 
 def _parse_iso_utc(value: Optional[str]) -> Optional[datetime]:
@@ -3275,6 +3351,7 @@ def consultant_session_detail(session_id: str):
     transcript = None
     transcript_text = ""
     biomarkers = None
+    feedback = None
     if session_row["summary_storage_key"]:
         summary = storage.get_json(session_row["summary_storage_key"], session_row["client_id"])
     if session_row["transcript_storage_key"]:
@@ -3322,6 +3399,7 @@ def consultant_session_detail(session_id: str):
         """,
         (session_id,),
     ).fetchall()
+    feedback = get_session_feedback(db, session_id)
     db.close()
     return render_template(
         "consultant/session_detail.html",
@@ -3345,6 +3423,8 @@ def consultant_session_detail(session_id: str):
         biomarker_empty_message=session_biomarkers["empty_message"],
         alerts=alerts,
         escalation_summary_line=escalation_summary_line,
+        feedback=feedback,
+        feedback_face=_feedback_face(int(feedback["rating"])) if feedback else "",
     )
 
 

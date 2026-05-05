@@ -9,6 +9,7 @@ from werkzeug.security import check_password_hash
 
 from .biomarkers import compute_biomarker_history_snapshot
 from .db import (
+    claim_pending_session_feedback,
     complete_scheduled_meeting,
     create_escalation_event,
     create_session_alert,
@@ -29,6 +30,7 @@ from .db import (
     record_meeting_event,
     update_escalation_event,
     upsert_session,
+    upsert_session_feedback,
 )
 from .agora_tokens import build_rtc_token
 from .meetings import utc_now
@@ -903,6 +905,16 @@ def session_complete():
         urgent_escalation=1 if inferred_urgent_escalation else 0,
         escalation_reason=payload.get("escalation_reason", ""),
     )
+    pending_feedback = claim_pending_session_feedback(db, session_id)
+    if pending_feedback:
+        upsert_session_feedback(
+            db,
+            session_id=session_id,
+            client_id=client_id,
+            avatar_id=pending_feedback["avatar_id"],
+            rating=int(pending_feedback["rating"]),
+            comment=str(pending_feedback["comment"] or ""),
+        )
     if meeting_id:
         completed = complete_scheduled_meeting(
             db,

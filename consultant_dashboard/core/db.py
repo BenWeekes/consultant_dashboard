@@ -49,6 +49,10 @@ def is_gmail_address(email: str) -> bool:
 
 
 def _ensure_migrations(db: sqlite3.Connection, config: Optional[dict] = None) -> None:
+    existing_tables = {
+        row["name"]
+        for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+    }
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS vendors (
@@ -241,6 +245,21 @@ def _ensure_migrations(db: sqlite3.Connection, config: Optional[dict] = None) ->
         db.execute("ALTER TABLE scheduled_meetings ADD COLUMN repeat_weekly INTEGER NOT NULL DEFAULT 0")
     if "repeat_frequency" not in meeting_columns:
         db.execute("ALTER TABLE scheduled_meetings ADD COLUMN repeat_frequency TEXT NOT NULL DEFAULT 'none'")
+    if "pending_session_feedback" not in existing_tables:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pending_session_feedback (
+                session_id TEXT PRIMARY KEY,
+                vendor_id TEXT NOT NULL,
+                client_id TEXT NOT NULL,
+                avatar_id TEXT NOT NULL DEFAULT '',
+                rating INTEGER NOT NULL,
+                comment TEXT NOT NULL DEFAULT '',
+                submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+            )
+            """
+        )
         db.execute(
             """
             UPDATE scheduled_meetings
@@ -2312,6 +2331,105 @@ def get_session_detail(db: sqlite3.Connection, session_id: str, consultant_id: O
         """,
         params,
     ).fetchone()
+
+
+def get_session_feedback(db: sqlite3.Connection, session_id: str):
+    return db.execute(
+        """
+        SELECT *
+        FROM session_feedback
+        WHERE session_id = ?
+        LIMIT 1
+        """,
+        (session_id,),
+    ).fetchone()
+
+
+def get_pending_session_feedback(db: sqlite3.Connection, session_id: str):
+    return db.execute(
+        """
+        SELECT *
+        FROM pending_session_feedback
+        WHERE session_id = ?
+        LIMIT 1
+        """,
+        (session_id,),
+    ).fetchone()
+
+
+def upsert_session_feedback(
+    db: sqlite3.Connection,
+    *,
+    session_id: str,
+    client_id: str,
+    avatar_id: str,
+    rating: int,
+    comment: str,
+) -> None:
+    db.execute(
+        """
+        INSERT INTO session_feedback (
+            session_id, vendor_id, client_id, avatar_id, rating, comment, submitted_at
+        ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(session_id) DO UPDATE SET
+            vendor_id=excluded.vendor_id,
+            client_id=excluded.client_id,
+            avatar_id=excluded.avatar_id,
+            rating=excluded.rating,
+            comment=excluded.comment,
+            submitted_at=CURRENT_TIMESTAMP
+        """,
+        (
+            session_id,
+            _vendor_id_for_client(db, client_id),
+            client_id,
+            avatar_id or "",
+            rating,
+            comment,
+        ),
+    )
+
+
+def upsert_pending_session_feedback(
+    db: sqlite3.Connection,
+    *,
+    session_id: str,
+    vendor_id: str,
+    client_id: str,
+    avatar_id: str,
+    rating: int,
+    comment: str,
+) -> None:
+    db.execute(
+        """
+        INSERT INTO pending_session_feedback (
+            session_id, vendor_id, client_id, avatar_id, rating, comment, submitted_at
+        ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(session_id) DO UPDATE SET
+            vendor_id=excluded.vendor_id,
+            client_id=excluded.client_id,
+            avatar_id=excluded.avatar_id,
+            rating=excluded.rating,
+            comment=excluded.comment,
+            submitted_at=CURRENT_TIMESTAMP
+        """,
+        (
+            session_id,
+            vendor_id,
+            client_id,
+            avatar_id or "",
+            rating,
+            comment,
+        ),
+    )
+
+
+def claim_pending_session_feedback(db: sqlite3.Connection, session_id: str):
+    pending = get_pending_session_feedback(db, session_id)
+    if not pending:
+        return None
+    db.execute("DELETE FROM pending_session_feedback WHERE session_id = ?", (session_id,))
+    return pending
 
 
 def create_session_alert(

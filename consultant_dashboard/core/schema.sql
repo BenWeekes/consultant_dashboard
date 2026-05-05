@@ -132,6 +132,17 @@ CREATE TABLE IF NOT EXISTS session_feedback (
     FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS pending_session_feedback (
+    session_id TEXT PRIMARY KEY,
+    vendor_id TEXT NOT NULL,
+    client_id TEXT NOT NULL,
+    avatar_id TEXT NOT NULL DEFAULT '',
+    rating INTEGER NOT NULL,
+    comment TEXT NOT NULL DEFAULT '',
+    submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS scheduled_meetings (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
     vendor_id TEXT NOT NULL,
