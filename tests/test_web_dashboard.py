@@ -2538,6 +2538,33 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"already exists", response.data)
 
+    def test_admin_can_create_gmail_consultant_without_password(self):
+        self.admin_login()
+        response = self.client.post(
+            "/admin/consultants/new",
+            data={
+                "vendor_id": self.vendor_id,
+                "name": "Gmail Consultant",
+                "email": "gmail.consultant@gmail.com",
+                "phone_country_code": "UK",
+                "phone_number": "07700900333",
+                "password": "",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Gmail Consultant", response.data)
+
+        db = get_db(self.app.config)
+        row = db.execute(
+            "SELECT email, password_hash FROM consultants WHERE email = ?",
+            ("gmail.consultant@gmail.com",),
+        ).fetchone()
+        db.close()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["email"], "gmail.consultant@gmail.com")
+        self.assertEqual(row["password_hash"], "")
+
     def test_logout_clears_dashboard_access(self):
         self.consultant_login()
         response = self.client.post("/consultant/logout", follow_redirects=False)

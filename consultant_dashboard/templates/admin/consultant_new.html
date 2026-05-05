@@ -57,8 +57,11 @@
         </div>
       </div>
 
-      <label class="field-label">Password <span class="tooltip" tabindex="0" data-tooltip="Initial password for the consultant. They can change it later from their account page.">?</span></label>
-      <input name="password" type="password" placeholder="Password" value="{{ form_defaults.password or '' }}" required>
+      <div id="consultant-password-group">
+        <label class="field-label">Password <span class="tooltip" tabindex="0" data-tooltip="Initial password for the consultant. They can change it later from their account page. Gmail consultants can sign in with Google and do not need a password here.">?</span></label>
+        <input id="consultant-password" name="password" type="password" placeholder="Password" value="{{ form_defaults.password or '' }}" required>
+        <div id="consultant-password-help" class="muted" style="margin-top: 6px;">Required unless the consultant uses a Gmail address.</div>
+      </div>
 
       <div class="actions">
         <button type="submit">Create Consultant</button>
@@ -66,4 +69,29 @@
       </div>
     </form>
   </div>
+  <script>
+    (() => {
+      const emailInput = document.querySelector('input[name="email"]');
+      const passwordInput = document.getElementById('consultant-password');
+      const passwordGroup = document.getElementById('consultant-password-group');
+      const passwordHelp = document.getElementById('consultant-password-help');
+      if (!emailInput || !passwordInput || !passwordGroup || !passwordHelp) return;
+
+      function syncPasswordState() {
+        const gmail = (emailInput.value || '').trim().toLowerCase().endsWith('@gmail.com');
+        passwordInput.disabled = gmail;
+        passwordInput.required = !gmail;
+        if (gmail) {
+          passwordInput.value = '';
+        }
+        passwordGroup.classList.toggle('field-disabled', gmail);
+        passwordHelp.textContent = gmail
+          ? 'Gmail consultants can sign in with Google, so no password is needed here.'
+          : 'Required unless the consultant uses a Gmail address.';
+      }
+
+      emailInput.addEventListener('input', syncPasswordState);
+      syncPasswordState();
+    })();
+  </script>
 {% endblock %}

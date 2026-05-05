@@ -3585,12 +3585,13 @@ def admin_consultant_new():
     if request.method == "POST":
         vendor_id = request.form.get("vendor_id", "").strip() or default_vendor
         email = request.form.get("email", "").strip().lower()
+        gmail_email = is_gmail_address(email)
         name = request.form.get("name", "").strip()
         phone_country_code = request.form.get("phone_country_code", "US").strip().upper()
         escalation_phone_country_code = request.form.get("escalation_phone_country_code", phone_country_code).strip().upper()
         raw_phone_number = request.form.get("phone_number", "").strip()
         raw_escalation_phone = request.form.get("escalation_phone_number", "").strip()
-        password = request.form.get("password", "").strip()
+        password = "" if gmail_email else request.form.get("password", "").strip()
         form_defaults = {
             "vendor_id": vendor_id,
             "name": name,
@@ -3602,8 +3603,11 @@ def admin_consultant_new():
             "escalation_phone_country_code": escalation_phone_country_code,
             "password": password,
         }
-        if not email or not name or not raw_phone_number or not password:
-            flash("Email, name, phone number, and password are required", "error")
+        if not email or not name or not raw_phone_number or (not gmail_email and not password):
+            flash(
+                "Email, name, phone number, and password are required unless the consultant uses a Gmail address",
+                "error",
+            )
         else:
             try:
                 phone_number = normalize_phone(raw_phone_number, phone_country_code)
@@ -3618,7 +3622,7 @@ def admin_consultant_new():
                     email=email,
                     name=name,
                     phone_number=phone_number,
-                    password_hash=generate_password_hash(password, method="pbkdf2:sha256"),
+                    password_hash=generate_password_hash(password, method="pbkdf2:sha256") if password else "",
                     notification_email=request.form.get("notification_email", "").strip() or email,
                     escalation_phone_number=escalation_phone_number,
                 )
