@@ -218,6 +218,14 @@ Client key point summary shape (`ai_personal_summary` / `human_personal_summary`
   - `body`
 - `brief_overview`
 - `full_summary`
+
+Persisted biomarker artifact notes:
+
+- dashboard stores the posted biomarker payload under `clients/{client_id}/sessions/{session_id}/biomarkers.json.enc`
+- during ingestion it may add dashboard-derived fields before encrypting:
+  - `history_averages`
+  - `history_window_sessions`
+- these snapshot the client’s prior-session biomarker averages at the time the session ended so old session pages do not drift when newer sessions are added
 - `source`
 
 Current behavior:

@@ -4,6 +4,10 @@
 
 This repo owns the product and admin layer: consultants, clients, meetings, reminders, and encrypted session artifacts. Client RTC boot, Agora transports, Shen, and Thymia live primarily in the therapy-profile sample stack outside this repo.
 
+Demo data note:
+
+- `scripts/seed_demo_practice.py` can populate a consultant with realistic demo clients, meetings, sessions, biomarker artifacts, and key point summaries for recording or review environments.
+
 ## Quick Start
 
 ```bash

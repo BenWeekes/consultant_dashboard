@@ -3,7 +3,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
-from consultant_dashboard.core.db import get_db
+from consultant_dashboard.core.db import create_escalation_event, get_db
 from consultant_dashboard.core.meetings import build_join_window, generate_meeting_channel, get_pair_channel, iso_utc
 
 from tests.support import ConsultantDashboardTestCase
@@ -625,6 +625,96 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
         ).fetchone()["c"]
         self.assertEqual(audit_count, 1)
         conn.close()
+
+    def test_session_complete_infers_urgent_escalation_from_safety_level_max(self):
+        payload = {
+            "client_id": self.client_id,
+            "consultant_id": self.consultant_id,
+            "session_id": "sess_internal_urgent_from_safety",
+            "profile": "therapy",
+            "channel": "safety-urgent-channel",
+            "started_at": "2026-04-13T18:00:00Z",
+            "ended_at": "2026-04-13T18:05:00Z",
+            "duration_seconds": 300,
+            "status": "completed",
+            "summary": {"overview": "Safety-triggered urgent session."},
+            "urgent_escalation": False,
+            "biomarkers": {
+                "voice": {"stress": {"avg": 0.42, "max": 0.67, "count": 4, "min": 0.21}},
+                "vitals": {"stress_index": {"avg": 52.5, "max": 64.2, "count": 4, "min": 44.8}},
+                "safety": {
+                    "level_stats": {"avg": 1.25, "max": 3.0, "count": 4, "min": 0.0},
+                    "highest_level": 3,
+                    "highest_alert": "crisis",
+                },
+            },
+            "alerts": [],
+        }
+        body = json.dumps(payload, separators=(",", ":"))
+        response = self.client.post(
+            "/internal/session-complete",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/session-complete", body),
+        )
+        self.assertEqual(response.status_code, 200)
+
+        conn = get_db(self.app.config)
+        session_row = conn.execute(
+            "SELECT urgent_escalation FROM sessions WHERE id = ?",
+            ("sess_internal_urgent_from_safety",),
+        ).fetchone()
+        conn.close()
+        self.assertEqual(session_row["urgent_escalation"], 1)
+
+    def test_session_complete_infers_urgent_escalation_from_escalation_event(self):
+        conn = get_db(self.app.config)
+        create_escalation_event(
+            conn,
+            meeting_id="",
+            session_id="sess_internal_urgent_from_event",
+            client_id=self.client_id,
+            source="thymia",
+            safety_level=3,
+            alert="crisis",
+            status="dialing",
+            reason="Escalation test",
+            escalation_phone_number="+447700900000",
+        )
+        conn.commit()
+        conn.close()
+
+        payload = {
+            "client_id": self.client_id,
+            "consultant_id": self.consultant_id,
+            "session_id": "sess_internal_urgent_from_event",
+            "profile": "therapy",
+            "channel": "event-urgent-channel",
+            "started_at": "2026-04-13T18:00:00Z",
+            "ended_at": "2026-04-13T18:05:00Z",
+            "duration_seconds": 300,
+            "status": "completed",
+            "summary": {"overview": "Escalation-event urgent session."},
+            "urgent_escalation": False,
+            "biomarkers": {"averages": {"stress_index": 41.0}},
+            "alerts": [],
+        }
+        body = json.dumps(payload, separators=(",", ":"))
+        response = self.client.post(
+            "/internal/session-complete",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/session-complete", body),
+        )
+        self.assertEqual(response.status_code, 200)
+
+        conn = get_db(self.app.config)
+        session_row = conn.execute(
+            "SELECT urgent_escalation FROM sessions WHERE id = ?",
+            ("sess_internal_urgent_from_event",),
+        ).fetchone()
+        conn.close()
+        self.assertEqual(session_row["urgent_escalation"], 1)
 
     def test_session_complete_is_idempotent_for_session_row(self):
         response_one = self.ingest_session(session_id="sess_internal_003", urgent_escalation=False)

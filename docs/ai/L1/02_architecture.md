@@ -108,9 +108,17 @@ Ownership rule:
 4. Service stores the LLM-provided client key point summary for the relevant session type:
    - AI-human session -> `ai_summary_storage_key`
    - human-human session -> `human_summary_storage_key`
-5. Service recomputes the rolling biomarker baseline from the latest five stored biomarker snapshots.
+5. Service recomputes the rolling biomarker baseline from the latest ten stored biomarker snapshots.
 6. Service refreshes AI/human session counts, stores session alerts, and writes an audit log row.
 7. If crisis escalation occurred, the linked `escalation_events` row shares the same `session_id`.
+
+Additional current behavior:
+
+- per-session biomarker artifacts also persist:
+  - `history_averages`
+  - `history_window_sessions`
+- those values represent the prior-session biomarker baseline as it existed when that session ended, not the client baseline today
+- `urgent_escalation` is inferred from explicit payloads, crisis-level safety stats, or linked escalation events if the sender omits it
 
 The dashboard summary is intended to stay consultant-facing and generalized. Richer runtime continuity memory remains the responsibility of `server-custom-llm` and should not be treated as the same artifact.
 
@@ -173,6 +181,7 @@ Phase-1 meeting behavior:
 - consultant and client both see the client's biomarkers
 - consultant biomarkers are not captured
 - meetings remain first-class records and also create linked `sessions` rows on completion
+- future meetings only clash when their scheduled times overlap; multiple weekly/monthly meetings for the same client are allowed when times do not overlap
 
 ## Storage Model
 
@@ -194,6 +203,15 @@ Artifacts live under a shared storage root, with keys such as:
 - `clients/{client_id}/sessions/{session_id}/biomarkers.json.enc`
 - `clients/{client_id}/sessions/{session_id}/alerts/{n}.json.enc`
 - `clients/{client_id}/baseline.json.enc`
+
+Recurring meeting notes:
+
+- `scheduled_meetings.repeat_frequency` is the canonical recurrence field
+- current values are:
+  - `none`
+  - `weekly`
+  - `monthly`
+- legacy `repeat_weekly` still exists for backward compatibility but should not be treated as the primary field in new code
 
 ## Current Boundaries
 

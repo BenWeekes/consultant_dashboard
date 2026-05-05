@@ -10,7 +10,7 @@
 | Language | `Python 3 + Flask + SQLite` |
 | Deploy Target | Separate service process; local dev uses Flask on port `8090` |
 | Owner | `Ben Weekes / consultant-dashboard` |
-| Last Reviewed | `2026-04-28` |
+| Last Reviewed | `2026-05-05` |
 
 ## L1 — Summaries
 

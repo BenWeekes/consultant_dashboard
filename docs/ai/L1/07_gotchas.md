@@ -39,6 +39,19 @@
   - it requires `CONSULTANT_LOCAL_SUPPORT_LOGIN_SECRET`
   - it logs in as a real consultant account and writes an audit event
   - do not turn it into a generic remote bypass or a fake consultant identity
+- **Meeting creation no longer blocks on “one active meeting per pair.”**
+  - current behavior is overlap-based, not pair-based
+  - the scheduler allows multiple weekly/monthly meetings for the same consultant/client when the actual time windows do not clash
+  - if a future test or UI assumption still expects “one human + one AI meeting at the same timestamp,” that assumption is stale
+- **The client biomarker baseline window is now 10 sessions.**
+  - older docs and assumptions that say “latest 5 biomarker snapshots” are stale
+  - session pages can also show `History Avg` from the session’s own stored biomarker artifact, which is frozen at session end rather than recomputed later
+- **`urgent_escalation` can be inferred even when the sender omits it.**
+  - dashboard ingestion now marks the session urgent when:
+    - the payload explicitly says so, or
+    - biomarker safety max reaches crisis threshold, or
+    - a linked `escalation_events` row already shows crisis-level escalation
+  - do not assume the sender is the only source of truth for this flag
 - **Server-rendered tests can miss layout bugs.**
   - the consultant client page needed a browser-level measurement pass because equal-height outer grid rows did not guarantee equal-height inner cards
   - when spacing or panel heights matter, inspect live `getBoundingClientRect()` and computed styles instead of trusting only HTML assertions
@@ -79,7 +92,7 @@
 
 - internal callers are trusted services on a shared network, but still must sign requests
 - consultant/client/session pages expect small-to-moderate result sets; pagination is not implemented yet
-- baseline calculation is “latest 5 biomarker snapshots,” computed on ingestion
+- baseline calculation is “latest 10 biomarker snapshots,” computed on ingestion
 
 ## Update Triggers
 

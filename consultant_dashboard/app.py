@@ -48,16 +48,6 @@ def create_app() -> Flask:
         __name__,
         template_folder="templates",
     )
-    raw_wsgi_app = app.wsgi_app
-
-    def _capture_orig_remote_addr(environ, start_response):
-        environ.setdefault(
-            "werkzeug.proxy_fix.orig_remote_addr",
-            environ.get("REMOTE_ADDR", ""),
-        )
-        return raw_wsgi_app(environ, start_response)
-
-    app.wsgi_app = _capture_orig_remote_addr
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     app.wsgi_app = TenantPrefixMiddleware(app.wsgi_app)
     config = load_config()
