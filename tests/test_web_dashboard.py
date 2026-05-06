@@ -387,6 +387,33 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertEqual(row["year_of_birth"], 1985)
         self.assertEqual(row["sex"], "female")
 
+    @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
+    def test_client_creation_sends_welcome_email(self, mocked_deliver_email):
+        self.consultant_login()
+        response = self.client.post(
+            "/consultant/clients/new",
+            data={
+                "first_name": "Jamie",
+                "last_name": "Demo",
+                "year_of_birth": "1985",
+                "sex": "female",
+                "email": "jamie@example.com",
+                "password": "jamiepass123",
+                "phone_country_code": "UK",
+                "phone_number": "07700900333",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        mocked_deliver_email.assert_called_once()
+        kwargs = mocked_deliver_email.call_args.kwargs
+        self.assertEqual(kwargs["to_email"], "jamie@example.com")
+        self.assertEqual(kwargs["subject"], "Welcome to MindFix")
+        self.assertEqual(kwargs["kind"], "welcome_client")
+        self.assertEqual(kwargs["reply_link"], "https://mindfix.me")
+        self.assertIn("connect with an AI therapist whenever you like", kwargs["plain_text_override"])
+        self.assertIn("share your thoughts and access support", kwargs["plain_text_override"])
+
     def test_clients_table_uses_text_link_for_new_meeting_action(self):
         self.consultant_login()
         response = self.client.get("/consultant/clients")
@@ -2700,6 +2727,31 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"already exists", response.data)
+
+    @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
+    def test_admin_consultant_creation_sends_welcome_email(self, mocked_deliver_email):
+        self.admin_login()
+        response = self.client.post(
+            "/admin/consultants/new",
+            data={
+                "vendor_id": self.vendor_id,
+                "name": "Second Consultant",
+                "email": "second@example.com",
+                "phone_country_code": "UK",
+                "phone_number": "07700900222",
+                "password": "changeme123",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        mocked_deliver_email.assert_called_once()
+        kwargs = mocked_deliver_email.call_args.kwargs
+        self.assertEqual(kwargs["to_email"], "second@example.com")
+        self.assertEqual(kwargs["subject"], "Welcome to MindFix")
+        self.assertEqual(kwargs["kind"], "welcome_consultant")
+        self.assertEqual(kwargs["reply_link"], "https://mindfix.me/v/mindfix/consultant/login")
+        self.assertIn("schedule AI and face-to-face meetings", kwargs["plain_text_override"])
+        self.assertIn("connect with an AI therapist whenever they like", kwargs["plain_text_override"])
 
     def test_admin_can_create_gmail_consultant_without_password(self):
         self.admin_login()

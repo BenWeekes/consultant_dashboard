@@ -8,6 +8,7 @@ import sqlite3
 import time
 import urllib.parse
 from datetime import datetime, timedelta, timezone
+from html import escape as html_escape
 from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -113,6 +114,137 @@ CLIENT_AUTH_COOKIE_NAME = "mindfix_client_auth"
 
 def _brand_name() -> str:
     return current_branding().get("name") or current_app.config["BRAND_NAME"]
+
+
+def _vendor_field(vendor: Optional[dict], key: str, default: str = "") -> str:
+    if not vendor:
+        return default
+    if isinstance(vendor, dict):
+        return str(vendor.get(key) or default)
+    try:
+        return str(vendor[key] or default)
+    except Exception:
+        return default
+
+
+def _vendor_base_url(vendor: Optional[dict]) -> str:
+    base = (_vendor_field(vendor, "primary_host") or current_app.config.get("PUBLIC_BASE_URL") or "").rstrip("/")
+    if base:
+        return base
+    slug = (_vendor_field(vendor, "slug") or current_vendor_slug() or "").strip().lower()
+    return tenant_public_url("/", slug=slug).rstrip("/")
+
+
+def _vendor_connect_url(vendor: Optional[dict]) -> str:
+    return _vendor_base_url(vendor)
+
+
+def _vendor_consultant_login_url(vendor: Optional[dict]) -> str:
+    slug = (_vendor_field(vendor, "slug") or current_vendor_slug() or "").strip().lower()
+    base = (_vendor_field(vendor, "primary_host") or current_app.config.get("PUBLIC_BASE_URL") or "").rstrip("/")
+    if base:
+        return f"{base}{tenant_path('/consultant/login', slug)}"
+    return tenant_public_url("/consultant/login", slug=slug)
+
+
+def _send_client_welcome_email(
+    *,
+    to_email: str,
+    first_name: str,
+    consultant_name: str,
+    vendor: Optional[dict],
+) -> None:
+    if not to_email:
+        return
+    connect_url = _vendor_connect_url(vendor)
+    subject = f"Welcome to {_brand_name()}"
+    plain_text = (
+        f"Hi {first_name},\n\n"
+        f"Welcome to {_brand_name()}.\n\n"
+        f"Your account was created by {consultant_name}.\n\n"
+        f"You can now connect with an AI therapist whenever you like at:\n"
+        f"{connect_url}\n\n"
+        f"{_brand_name()} gives you a private space to share your thoughts securely and access safe support from the latest AI models.\n\n"
+        f"{consultant_name} can also schedule face-to-face video meetings with you on the platform.\n\n"
+        f"Your historical session data is securely encrypted at rest.\n\n"
+        f"If you have trouble accessing your account, please contact {consultant_name}.\n\n"
+        f"{_brand_name()}"
+    )
+    html_body = (
+        f"<p>Hi {html_escape(first_name)},</p>"
+        f"<p>Welcome to {html_escape(_brand_name())}.</p>"
+        f"<p>Your account was created by {html_escape(consultant_name)}.</p>"
+        f"<p>You can now connect with an AI therapist whenever you like at:<br>"
+        f"<a href=\"{html_escape(connect_url)}\">{html_escape(connect_url)}</a></p>"
+        f"<p>{html_escape(_brand_name())} gives you a private space to share your thoughts securely and access safe support from the latest AI models.</p>"
+        f"<p>{html_escape(consultant_name)} can also schedule face-to-face video meetings with you on the platform.</p>"
+        f"<p>Your historical session data is securely encrypted at rest.</p>"
+        f"<p>If you have trouble accessing your account, please contact {html_escape(consultant_name)}.</p>"
+        f"<p>{html_escape(_brand_name())}</p>"
+    )
+    delivery_status, delivery_error = deliver_email(
+        current_app.config,
+        to_email=to_email,
+        subject=subject,
+        body="",
+        reply_link=connect_url,
+        kind="welcome_client",
+        plain_text_override=plain_text,
+        html_override=html_body,
+    )
+    if delivery_status != "sent":
+        current_app.logger.warning(
+            "welcome_client_email_failed to=%s status=%s error=%s",
+            to_email,
+            delivery_status,
+            delivery_error,
+        )
+
+
+def _send_consultant_welcome_email(*, to_email: str, first_name: str, vendor: Optional[dict]) -> None:
+    if not to_email:
+        return
+    login_url = _vendor_connect_url(vendor)
+    subject = f"Welcome to {_brand_name()}"
+    plain_text = (
+        f"Hi {first_name},\n\n"
+        f"Welcome to {_brand_name()}.\n\n"
+        f"Your consultant account is ready. You can sign in here:\n"
+        f"{login_url}\n\n"
+        f"From your dashboard you can add and manage clients, review session summaries and biomarker insights, and schedule AI and face-to-face meetings.\n\n"
+        f"Your clients can connect with an AI therapist whenever they like, in addition to any scheduled meetings.\n\n"
+        f"All historical data is securely encrypted at rest.\n\n"
+        f"If you have any trouble signing in, just reply to this email.\n\n"
+        f"{_brand_name()}"
+    )
+    html_body = (
+        f"<p>Hi {html_escape(first_name)},</p>"
+        f"<p>Welcome to {html_escape(_brand_name())}.</p>"
+        f"<p>Your consultant account is ready. You can sign in here:<br>"
+        f"<a href=\"{html_escape(login_url)}\">{html_escape(login_url)}</a></p>"
+        f"<p>From your dashboard you can add and manage clients, review session summaries and biomarker insights, and schedule AI and face-to-face meetings.</p>"
+        f"<p>Your clients can connect with an AI therapist whenever they like, in addition to any scheduled meetings.</p>"
+        f"<p>All historical data is securely encrypted at rest.</p>"
+        f"<p>If you have any trouble signing in, just reply to this email.</p>"
+        f"<p>{html_escape(_brand_name())}</p>"
+    )
+    delivery_status, delivery_error = deliver_email(
+        current_app.config,
+        to_email=to_email,
+        subject=subject,
+        body="",
+        reply_link=login_url,
+        kind="welcome_consultant",
+        plain_text_override=plain_text,
+        html_override=html_body,
+    )
+    if delivery_status != "sent":
+        current_app.logger.warning(
+            "welcome_consultant_email_failed to=%s status=%s error=%s",
+            to_email,
+            delivery_status,
+            delivery_error,
+        )
 
 
 def _normalize_summary_edit_payload(summary):
@@ -2229,6 +2361,13 @@ def consultant_client_new():
                 user_agent=request.headers.get("User-Agent", ""),
             )
             db.commit()
+            vendor = get_current_vendor()
+            _send_client_welcome_email(
+                to_email=email,
+                first_name=first_name,
+                consultant_name=session.get("consultant_name") or "your consultant",
+                vendor=vendor,
+            )
             db.close()
             flash("Client created", "muted")
             return redirect(tenant_url_for("web.consultant_client_detail", client_id=client_id))
@@ -3717,6 +3856,12 @@ def admin_consultant_new():
                     user_agent=request.headers.get("User-Agent", ""),
                 )
                 db.commit()
+                vendor = get_vendor_by_id(db, vendor_id)
+                _send_consultant_welcome_email(
+                    to_email=email,
+                    first_name=name.split(" ", 1)[0].strip() or name,
+                    vendor=vendor,
+                )
                 flash("Consultant created", "muted")
                 db.close()
                 return redirect(tenant_url_for("web.admin_consultants"))
