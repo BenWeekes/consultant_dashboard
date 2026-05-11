@@ -64,11 +64,23 @@ def _target_api_key() -> str:
     return (os.environ.get("MINDFIX_INSPECT_TARGET_API_KEY") or _default_target_api_key()).strip()
 
 
+def target_connection_settings() -> Dict[str, str]:
+    provider_model = _model_name("MINDFIX_INSPECT_TARGET_MODEL", "openai-api/mindfix/gpt-5.4-mini")
+    return {
+        "base_url": _target_base_url(),
+        "api_key": _target_api_key(),
+        "provider_model": provider_model,
+        "model": provider_model.rsplit("/", 1)[-1],
+        "reasoning_effort": (os.environ.get("MINDFIX_INSPECT_REASONING_EFFORT") or "medium").strip(),
+    }
+
+
 def build_target_model(*, context_path: str | Path):
+    settings = target_connection_settings()
     return get_model(
-        _model_name("MINDFIX_INSPECT_TARGET_MODEL", "openai-api/mindfix/gpt-5.4-mini"),
-        api_key=_target_api_key(),
-        base_url=_target_base_url(),
+        settings["provider_model"],
+        api_key=settings["api_key"],
+        base_url=settings["base_url"],
         config=_base_generate_config(system_message=effective_target_prompt(context_path)),
         responses_api=False,
     )

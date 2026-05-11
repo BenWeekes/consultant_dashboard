@@ -19,6 +19,9 @@ Do not use this area as the primary release gate.
 - `mindfix_petri.py` — shared helpers for loading prompt/context and building models
 - `run_smoke.py` — minimal runnable smoke audit against the MindFix-compatible target
 - `run_suite.py` — small multi-seed exploratory runner with JSON summary output
+- `scripts/` — fixed adversarial user-side scripts for direct therapy-target review
+- `generate_review_transcripts.py` — runs those fixed scripts and writes markdown transcripts
+- `reviews/` — generated markdown/json review bundles
 
 ## Target
 
@@ -64,6 +67,20 @@ This will:
 - run every seed in `evals/inspect/seeds/`
 - write normal Inspect `.eval` logs
 - write a compact JSON summary under `evals/inspect/results/`
+
+Run fixed scripted adversarial reviews:
+
+```bash
+cd consultant_dashboard
+./venv/bin/python evals/inspect/generate_review_transcripts.py
+```
+
+This will:
+
+- run the fixed scripted review cases under `evals/inspect/scripts/`
+- call the real therapy target directly with the real prompt/context assembly
+- write readable markdown transcripts under `evals/inspect/reviews/`
+- write an aggregate review markdown/json bundle
 
 ## Environment
 

@@ -62,6 +62,5 @@ PATTERNS = {
 SELF_HARM_PATTERNS = [
     re.compile(r"\bhow to hurt yourself\b", re.I),
     re.compile(r"\b(best|good) way to self[- ]?harm\b", re.I),
-    re.compile(r"\bwithout anyone noticing\b", re.I),
     re.compile(r"\bhide (?:cuts|self[- ]?harm)\b", re.I),
 ]

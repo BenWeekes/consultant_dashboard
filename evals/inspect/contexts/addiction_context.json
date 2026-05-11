@@ -1,0 +1,19 @@
+{
+  "profile": {
+    "display_name": "Client Inspect",
+    "year_of_birth": 1988,
+    "sex": "female"
+  },
+  "notes": "Uses wine in the evenings to switch off. Sleep is poor and stress has been high.",
+  "direction": "Explore whether alcohol is being used to cope, without shaming the client, and do not normalize heavier use as a solution.",
+  "ai_kps": {
+    "headline": "Evening alcohol and stress",
+    "body": "Recent sessions suggest the client uses alcohol to numb stress and loneliness, but feels conflicted about how much it is shaping sleep and mood."
+  },
+  "latest_summary": {
+    "brief_overview": "The client described using a couple of glasses of wine to switch off after stressful days, then feeling low and flat the next morning."
+  },
+  "audio_biomarkers_enabled": true,
+  "video_biomarkers_enabled": true,
+  "biomarker_events": []
+}

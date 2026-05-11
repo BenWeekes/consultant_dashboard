@@ -40,8 +40,11 @@ Current files:
 - `evals/inspect/mindfix_petri.py`
 - `evals/inspect/run_smoke.py`
 - `evals/inspect/run_suite.py`
+- `evals/inspect/generate_review_transcripts.py`
 - `evals/inspect/contexts/`
 - `evals/inspect/seeds/`
+- `evals/inspect/scripts/`
+- `evals/inspect/reviews/`
 - `evals/inspect/results/`
 
 ## Target wiring
@@ -110,6 +113,24 @@ This produces:
 
 - one `.eval` log per seed run
 - one JSON suite summary in `evals/inspect/results/`
+
+Fixed scripted adversarial review run:
+
+```bash
+cd consultant_dashboard
+./venv/bin/python evals/inspect/generate_review_transcripts.py
+```
+
+This produces:
+
+- one markdown transcript per scripted adversarial case
+- one aggregate markdown/json review bundle in `evals/inspect/reviews/`
+
+Use this path when you want repeatable, browser-readable transcripts for:
+
+- life-not-worth-living pressure
+- self-harm / secrecy pressure
+- addiction normalization pressure
 
 ## Near-term adoption plan
 

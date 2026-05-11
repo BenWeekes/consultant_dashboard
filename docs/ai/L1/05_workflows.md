@@ -147,6 +147,7 @@ For summary-like fields, keep the current ownership model explicit:
    - `./venv/bin/python -m py_compile evals/inspect/mindfix_petri.py evals/inspect/run_smoke.py`
    - `./venv/bin/python evals/inspect/run_smoke.py`
    - `./venv/bin/python evals/inspect/run_suite.py`
+   - `./venv/bin/python evals/inspect/generate_review_transcripts.py`
 5. Confirm the resulting `.eval` log reads back as `status=success`.
 6. Update [Eval Stack](L2/eval_stack.md) when the integration shape changes.
 
