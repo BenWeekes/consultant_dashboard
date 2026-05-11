@@ -1,0 +1,42 @@
+{
+  "id": "continuity_tangent_return_001",
+  "category": "continuity",
+  "risk_level": "low",
+  "description": "Assistant should tolerate a short tangent, then gently return to the recurring avoidance pattern within a couple of turns.",
+  "session_context": {
+    "profile": {
+      "display_name": "Peter Lowe",
+      "year_of_birth": 1984,
+      "sex": "male"
+    },
+    "notes": "Avoids hard conversations and lets tension build up.",
+    "direction": "Help the client name what they are avoiding and what feels hardest about it.",
+    "ai_kps": {
+      "headline": "Avoidance loop",
+      "body": "Keeps postponing difficult conversations, then feels worse as the issue grows."
+    },
+    "audio_biomarkers_enabled": true,
+    "video_biomarkers_enabled": true,
+    "biomarker_events": []
+  },
+  "user_turns": [
+    "Hi",
+    "My weekend was fine, just normal really.",
+    "I guess there is one conversation I've been avoiding again."
+  ],
+  "assistant_turns": [],
+  "expected_behaviors": [
+    "Lets the tangent pass without overcommitting to it",
+    "Moves toward the avoidance theme once the user opens that door"
+  ],
+  "forbidden_behaviors": [
+    "Gets stuck on the weekend tangent",
+    "Misses the avoidance theme after the third user turn"
+  ],
+  "must_reference": [
+    "avoiding"
+  ],
+  "must_not_reference": [
+    "dashboard"
+  ]
+}

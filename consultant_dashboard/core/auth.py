@@ -5,6 +5,7 @@ import hmac
 import json
 import os
 import random
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -20,6 +21,19 @@ from .db import get_consultant_by_email, get_consultant_by_id, get_db, get_vendo
 from .vendors import current_branding, current_vendor_slug, tenant_url_for
 
 auth_bp = Blueprint("auth", __name__)
+VERIFY_RESEND_COOLDOWN_SECONDS = 30
+VERIFY_MAX_RESENDS_PER_SESSION = 1
+VERIFY_MAX_CHECK_ATTEMPTS_PER_SESSION = 5
+VERIFY_SEND_WINDOW_SECONDS = 1800
+VERIFY_SEND_MAX_PER_IP = 5
+VERIFY_SEND_MAX_PER_PHONE = 3
+VERIFY_SEND_MAX_PER_ACCOUNT = 3
+VERIFY_CHECK_WINDOW_SECONDS = 900
+VERIFY_CHECK_MAX_PER_IP = 10
+VERIFY_CHECK_MAX_PER_PHONE = 7
+_SEND_RATE_LIMITS = {}
+_CHECK_RATE_LIMITS = {}
+_VERIFY_RATE_LOCK = threading.Lock()
 
 
 def _brand_name() -> str:
@@ -97,6 +111,76 @@ def _send_or_store_code(phone_number: str, code: str) -> None:
     print(f"[consultant-dashboard] OTP for {phone_number}: {code}")
 
 
+def _now_ts() -> int:
+    return int(time.time())
+
+
+def _rate_limit_consume(store: Dict[str, list], key: str, window_seconds: int, limit: int) -> bool:
+    now = _now_ts()
+    with _VERIFY_RATE_LOCK:
+        active = [ts for ts in store.get(key, []) if now - ts < window_seconds]
+        if len(active) >= limit:
+            store[key] = active
+            return False
+        active.append(now)
+        store[key] = active
+        return True
+
+
+def _record_send_attempt(phone_number: str, consultant_id: str = "") -> bool:
+    remote_ip = (request.remote_addr or "").strip() or "unknown"
+    keys = [
+        ("ip", remote_ip, VERIFY_SEND_WINDOW_SECONDS, VERIFY_SEND_MAX_PER_IP),
+        ("phone", phone_number, VERIFY_SEND_WINDOW_SECONDS, VERIFY_SEND_MAX_PER_PHONE),
+    ]
+    if consultant_id:
+        keys.append(("consultant", consultant_id, VERIFY_SEND_WINDOW_SECONDS, VERIFY_SEND_MAX_PER_ACCOUNT))
+    for prefix, value, window, limit in keys:
+        if value and not _rate_limit_consume(_SEND_RATE_LIMITS, f"{prefix}:{value}", window, limit):
+            return False
+    return True
+
+
+def _record_check_attempt(phone_number: str) -> bool:
+    remote_ip = (request.remote_addr or "").strip() or "unknown"
+    keys = [
+        ("ip", remote_ip, VERIFY_CHECK_WINDOW_SECONDS, VERIFY_CHECK_MAX_PER_IP),
+        ("phone", phone_number, VERIFY_CHECK_WINDOW_SECONDS, VERIFY_CHECK_MAX_PER_PHONE),
+    ]
+    for prefix, value, window, limit in keys:
+        if value and not _rate_limit_consume(_CHECK_RATE_LIMITS, f"{prefix}:{value}", window, limit):
+            return False
+    return True
+
+
+def _init_consultant_verify_state() -> None:
+    session["pending_resend_count"] = 0
+    session["pending_code_sent_at"] = _now_ts()
+    session["pending_verify_attempts"] = 0
+    session["pending_allow_resend"] = False
+
+
+def _verify_page_context() -> Dict[str, int | str]:
+    return {
+        "brand": _brand_name(),
+        "theme": "consultant",
+        "resend_count": int(session.get("pending_resend_count") or 0),
+        "max_resends": VERIFY_MAX_RESENDS_PER_SESSION,
+        "allow_resend": bool(session.get("pending_allow_resend")),
+    }
+
+
+def _verification_failure_message(reason: str) -> tuple[str, int]:
+    mapping = {
+        "expired": ("This code has expired. Request a new code.", 403),
+        "max_attempts": ("Too many verification attempts. Please start again.", 429),
+        "rate_limited": ("Too many verification attempts. Please wait and try again.", 429),
+        "invalid": ("That code was incorrect. Please try again.", 403),
+        "unavailable": ("Verification failed. Please try again.", 500),
+    }
+    return mapping.get(reason, ("Verification failed. Please try again.", 500))
+
+
 def _is_twilio_verify_enabled() -> bool:
     cfg = current_app.config
     return bool(
@@ -124,20 +208,30 @@ def _verify_code(phone_number: str, code: str) -> bool:
                 f"[consultant-dashboard] Twilio Verify check failed for {phone_number}: "
                 f"status={getattr(exc, 'status', 'unknown')} code={getattr(exc, 'code', 'unknown')} msg={exc}"
             )
-            return False
+            if getattr(exc, "status", None) == 404:
+                return {"ok": False, "reason": "expired"}
+            return {"ok": False, "reason": "unavailable"}
         print(
             f"[consultant-dashboard] Twilio Verify check status={result.status} "
             f"to={phone_number}"
         )
-        return result.status == "approved"
-    return (
-        int(time.time()) <= session.get("pending_code_exp", 0)
-        and code == session.get("pending_code")
-    )
+        status = (result.status or "").strip().lower()
+        if status == "approved":
+            return {"ok": True, "reason": "approved"}
+        if status == "expired":
+            return {"ok": False, "reason": "expired"}
+        if status == "max_attempts_reached":
+            return {"ok": False, "reason": "max_attempts"}
+        return {"ok": False, "reason": "invalid", "status": status}
+    if int(time.time()) <= session.get("pending_code_exp", 0) and code == session.get("pending_code"):
+        return {"ok": True, "reason": "approved"}
+    if int(time.time()) > session.get("pending_code_exp", 0):
+        return {"ok": False, "reason": "expired"}
+    return {"ok": False, "reason": "invalid"}
 
 
 def _clear_consultant_pending_session() -> None:
-    for key in ("pending_role", "pending_consultant_id", "pending_phone", "pending_code", "pending_code_exp"):
+    for key in ("pending_role", "pending_consultant_id", "pending_phone", "pending_code", "pending_code_exp", "pending_resend_count", "pending_code_sent_at", "pending_verify_attempts", "pending_allow_resend"):
         session.pop(key, None)
 
 
@@ -309,8 +403,18 @@ def consultant_login():
     session["pending_phone"] = consultant["phone_number"]
     session["pending_code"] = code
     session["pending_code_exp"] = int(time.time()) + 300
+    if not _record_send_attempt(consultant["phone_number"], consultant["id"]):
+        flash("Too many verification code requests. Please wait before trying again.", "error")
+        db.close()
+        return render_template(
+            "consultant/login.html",
+            brand=_brand_name(),
+            theme="consultant",
+            show_google_login=_google_oauth_enabled() or current_app.config["AUTH_DEV_MODE"],
+        ), 429
     try:
         _send_or_store_code(consultant["phone_number"], code)
+        _init_consultant_verify_state()
     except Exception as exc:
         print(f"[consultant-dashboard] Failed to send OTP to {consultant['phone_number']}: {exc}")
         flash("Failed to send verification code. Please check the phone number and Twilio setup.", "error")
@@ -413,8 +517,13 @@ def consultant_google_callback():
     session["pending_phone"] = consultant["phone_number"]
     session["pending_code"] = code
     session["pending_code_exp"] = int(time.time()) + 300
+    if not _record_send_attempt(consultant["phone_number"], consultant["id"]):
+        flash("Too many verification code requests. Please wait before trying again.", "error")
+        db.close()
+        return redirect(tenant_url_for("auth.consultant_login"))
     try:
         _send_or_store_code(consultant["phone_number"], code)
+        _init_consultant_verify_state()
     except Exception as exc:
         print(f"[consultant-dashboard] Failed to send Google OTP to {consultant['phone_number']}: {exc}")
         flash("Failed to send verification code.", "error")
@@ -430,13 +539,31 @@ def consultant_verify():
     if session.get("pending_role") != "consultant":
         return redirect(tenant_url_for("auth.consultant_login"))
     if request.method == "GET":
-        return render_template("consultant/verify.html", brand=_brand_name(), theme="consultant")
+        return render_template("consultant/verify.html", **_verify_page_context())
 
     code = request.form.get("code", "").strip()
-    if not _verify_code(session.get("pending_phone", ""), code):
-        flash("Invalid or expired code", "error")
+    phone_number = session.get("pending_phone", "")
+    if not _record_check_attempt(phone_number):
+        flash("Too many verification attempts. Please wait and try again.", "error")
+        return render_template("consultant/verify.html", **_verify_page_context()), 429
+
+    verify_attempts = int(session.get("pending_verify_attempts") or 0) + 1
+    session["pending_verify_attempts"] = verify_attempts
+    if verify_attempts > VERIFY_MAX_CHECK_ATTEMPTS_PER_SESSION:
+        flash("Too many verification attempts. Please start again.", "error")
+        _clear_consultant_pending_session()
+        return redirect(tenant_url_for("auth.consultant_login"))
+
+    verify_result = _verify_code(phone_number, code)
+    if not verify_result.get("ok"):
+        message, status_code = _verification_failure_message(verify_result.get("reason", "unavailable"))
+        session["pending_allow_resend"] = verify_result.get("reason") == "expired"
+        flash(message, "error")
         _record_audit("consultant", session.get("pending_consultant_id", "unknown"), "login_otp_failed")
-        return render_template("consultant/verify.html", brand=_brand_name(), theme="consultant"), 401
+        if verify_result.get("reason") == "max_attempts":
+            _clear_consultant_pending_session()
+            return redirect(tenant_url_for("auth.consultant_login"))
+        return render_template("consultant/verify.html", **_verify_page_context()), status_code
 
     consultant_id = session["pending_consultant_id"]
     _clear_consultant_pending_session()
@@ -444,6 +571,45 @@ def consultant_verify():
     session.permanent = True
     _record_audit("consultant", consultant_id, "login_success")
     return redirect(tenant_url_for("web.consultant_dashboard"))
+
+
+@auth_bp.route("/consultant/verify/resend", methods=["POST"])
+def consultant_verify_resend():
+    if session.get("pending_role") != "consultant":
+        return redirect(tenant_url_for("auth.consultant_login"))
+
+    resend_count = int(session.get("pending_resend_count") or 0)
+    if resend_count >= VERIFY_MAX_RESENDS_PER_SESSION:
+        flash("You have already requested a new code. Please start again.", "error")
+        _clear_consultant_pending_session()
+        return redirect(tenant_url_for("auth.consultant_login"))
+
+    if not session.get("pending_allow_resend"):
+        return redirect(tenant_url_for("auth.consultant_verify"))
+
+    now = _now_ts()
+    phone_number = session.get("pending_phone", "")
+    consultant_id = session.get("pending_consultant_id", "")
+    if not _record_send_attempt(phone_number, consultant_id):
+        flash("Too many verification code requests. Please wait before trying again.", "error")
+        return render_template("consultant/verify.html", **_verify_page_context()), 429
+
+    code = "000000" if current_app.config["AUTH_DEV_MODE"] else f"{random.randint(0, 999999):06d}"
+    session["pending_code"] = code
+    session["pending_code_exp"] = int(time.time()) + 300
+    session["pending_resend_count"] = resend_count + 1
+    session["pending_code_sent_at"] = now
+    session["pending_verify_attempts"] = 0
+    session["pending_allow_resend"] = False
+    try:
+        _send_or_store_code(phone_number, code)
+    except Exception as exc:
+        print(f"[consultant-dashboard] Failed to resend OTP to {phone_number}: {exc}")
+        flash("Failed to send a new verification code. Please try again.", "error")
+        return render_template("consultant/verify.html", **_verify_page_context()), 500
+
+    flash("A new verification code has been sent.", "muted")
+    return redirect(tenant_url_for("auth.consultant_verify"))
 
 
 @auth_bp.route("/consultant/local-support-login", methods=["GET", "POST"])

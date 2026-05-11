@@ -61,6 +61,7 @@ consultant-dashboard
 3. OTP is sent through Twilio Verify if configured; otherwise dev mode stores/logs a local code.
 4. `/consultant/verify` validates the code and creates the authenticated session.
 5. Admins can replace a consultant password from the consultant detail page by setting a new temporary password.
+6. New consultant creation can also trigger a short welcome email with a sign-in link when outbound email is configured.
 
 ### Admin login
 
@@ -85,6 +86,7 @@ Normal production expectation:
 - if the session-launch profile enables required dashboard authorization, `simple-backend` should deny access when no dashboard client record matches
 - only US and UK phone numbers are accepted in the dashboard and in the client auth form for now
 - clients can use dashboard-managed email/password + SMS, and Google + SMS remains optional for matching email accounts
+- new client creation can also trigger a short welcome email with the public site link when outbound email is configured
 
 This is how the consultant influences the next AI session:
 

@@ -412,7 +412,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertEqual(kwargs["kind"], "welcome_client")
         self.assertEqual(kwargs["reply_link"], "https://mindfix.me")
         self.assertIn("connect with an AI therapist whenever you like", kwargs["plain_text_override"])
-        self.assertIn("share your thoughts and access support", kwargs["plain_text_override"])
+        self.assertIn("share your thoughts securely and access safe support", kwargs["plain_text_override"])
 
     def test_clients_table_uses_text_link_for_new_meeting_action(self):
         self.consultant_login()

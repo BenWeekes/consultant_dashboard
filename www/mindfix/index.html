@@ -351,20 +351,6 @@
         link.setAttribute("href", clientJoinUrl);
       });
 
-      var defaultJoinParams = new URLSearchParams({
-        profile: "therapy",
-        autoconnect: "true",
-        returnurl: currentUrl,
-      });
-      var defaultClientJoinUrl = clientBase.startsWith("http")
-        ? clientBase.replace(/\/$/, "") + "/?" + defaultJoinParams.toString()
-        : clientBase + "?" + defaultJoinParams.toString();
-
-      var howItWorksCta = document.getElementById("howItWorksCta");
-      if (howItWorksCta) {
-        howItWorksCta.setAttribute("href", defaultClientJoinUrl);
-      }
-
       if (dashboardBase) {
         var normalizedDashboardBase = dashboardBase.replace(/\/$/, "");
         var consultantLoginUrl = normalizedDashboardBase + "/consultant/login";

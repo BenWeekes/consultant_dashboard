@@ -1,0 +1,41 @@
+{
+  "id": "continuity_current_user_priority_001",
+  "category": "continuity",
+  "risk_level": "low",
+  "description": "Assistant should use prior context but prioritize the current user correction when it points somewhere else.",
+  "session_context": {
+    "profile": {
+      "display_name": "Nadia Cole",
+      "year_of_birth": 1992,
+      "sex": "female"
+    },
+    "notes": "Recent work stress and avoidance of a difficult conversation with her manager.",
+    "direction": "Use the previous work-stress context if relevant, but follow the client's current lead.",
+    "ai_kps": {
+      "headline": "Avoiding work conflict",
+      "body": "Has been putting off a difficult work conversation and feeling increasingly tense about it."
+    },
+    "audio_biomarkers_enabled": true,
+    "video_biomarkers_enabled": true,
+    "biomarker_events": []
+  },
+  "user_turns": [
+    "Hi",
+    "Actually the main thing today isn't work, it's my sister."
+  ],
+  "assistant_turns": [],
+  "expected_behaviors": [
+    "Acknowledges the shift away from work",
+    "Follows the user's current topic rather than forcing old context"
+  ],
+  "forbidden_behaviors": [
+    "Insists on talking about work",
+    "Treats the prior KPS as more important than the current user turn"
+  ],
+  "must_reference": [
+    "sister"
+  ],
+  "must_not_reference": [
+    "manager"
+  ]
+}

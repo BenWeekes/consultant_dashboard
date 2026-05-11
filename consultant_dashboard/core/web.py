@@ -123,7 +123,7 @@ def _vendor_field(vendor: Optional[dict], key: str, default: str = "") -> str:
         return str(vendor.get(key) or default)
     try:
         return str(vendor[key] or default)
-    except Exception:
+    except (KeyError, TypeError):
         return default
 
 
@@ -204,7 +204,7 @@ def _send_client_welcome_email(
 def _send_consultant_welcome_email(*, to_email: str, first_name: str, vendor: Optional[dict]) -> None:
     if not to_email:
         return
-    login_url = _vendor_connect_url(vendor)
+    login_url = _vendor_consultant_login_url(vendor)
     subject = f"Welcome to {_brand_name()}"
     plain_text = (
         f"Hi {first_name},\n\n"
@@ -2357,17 +2357,20 @@ def consultant_client_new():
                 action="client_created",
                 target_type="client",
                 target_id=client_id,
-                ip_address=request.headers.get("X-Forwarded-For", request.remote_addr or ""),
+                ip_address=request.remote_addr or "",
                 user_agent=request.headers.get("User-Agent", ""),
             )
             db.commit()
             vendor = get_current_vendor()
-            _send_client_welcome_email(
-                to_email=email,
-                first_name=first_name,
-                consultant_name=session.get("consultant_name") or "your consultant",
-                vendor=vendor,
-            )
+            try:
+                _send_client_welcome_email(
+                    to_email=email,
+                    first_name=first_name,
+                    consultant_name=session.get("consultant_name") or "Your therapist",
+                    vendor=vendor,
+                )
+            except Exception as exc:
+                current_app.logger.warning("welcome_client_email_failed: %s", exc)
             db.close()
             flash("Client created", "muted")
             return redirect(tenant_url_for("web.consultant_client_detail", client_id=client_id))
@@ -3852,16 +3855,19 @@ def admin_consultant_new():
                     action="consultant_created",
                     target_type="consultant",
                     target_id=email,
-                    ip_address=request.headers.get("X-Forwarded-For", request.remote_addr or ""),
+                    ip_address=request.remote_addr or "",
                     user_agent=request.headers.get("User-Agent", ""),
                 )
                 db.commit()
                 vendor = get_vendor_by_id(db, vendor_id)
-                _send_consultant_welcome_email(
-                    to_email=email,
-                    first_name=name.split(" ", 1)[0].strip() or name,
-                    vendor=vendor,
-                )
+                try:
+                    _send_consultant_welcome_email(
+                        to_email=email,
+                        first_name=name.split(" ", 1)[0].strip() or name,
+                        vendor=vendor,
+                    )
+                except Exception as exc:
+                    current_app.logger.warning("welcome_consultant_email_failed: %s", exc)
                 flash("Consultant created", "muted")
                 db.close()
                 return redirect(tenant_url_for("web.admin_consultants"))
@@ -4015,6 +4021,15 @@ def vendor_public_terms():
     if not request.environ.get("mindfix.vendor_slug"):
         abort(404)
     return _serve_vendor_public_asset("terms.html")
+
+
+@web_bp.get("/consultant/<slug>")
+@web_bp.get("/consultant/<slug>/")
+def vendor_public_consultant_profile(slug: str):
+    normalized = (slug or "").strip().lower()
+    if not normalized:
+        abort(404)
+    return _serve_vendor_public_asset(f"consultant/{normalized}.html")
 
 
 @web_bp.get("/css/<path:asset_path>")

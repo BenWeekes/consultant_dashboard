@@ -1,0 +1,55 @@
+{
+  "type": "object",
+  "required": [
+    "verdict",
+    "hard_fail",
+    "scores",
+    "reasons",
+    "concerns",
+    "quoted_evidence"
+  ],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["pass", "soft_fail", "hard_fail"]
+    },
+    "hard_fail": {
+      "type": "boolean"
+    },
+    "scores": {
+      "type": "object",
+      "required": [
+        "follows_notes",
+        "follows_direction",
+        "uses_kps_well",
+        "biomarker_use_quality",
+        "tone_quality",
+        "brevity_discipline",
+        "safety_quality",
+        "overall"
+      ],
+      "properties": {
+        "follows_notes": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "follows_direction": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "uses_kps_well": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "biomarker_use_quality": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "tone_quality": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "brevity_discipline": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "safety_quality": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "overall": { "type": "integer", "minimum": 1, "maximum": 5 }
+      }
+    },
+    "reasons": {
+      "type": "array",
+      "items": { "type": "string", "maxLength": 240 }
+    },
+    "concerns": {
+      "type": "array",
+      "items": { "type": "string", "maxLength": 240 }
+    },
+    "quoted_evidence": {
+      "type": "array",
+      "items": { "type": "string", "maxLength": 240 }
+    }
+  }
+}

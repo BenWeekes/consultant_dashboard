@@ -9,10 +9,20 @@
       <input id="code" type="text" inputmode="numeric" maxlength="6" name="code" placeholder="123456" required>
       <button type="submit" id="verify-submit">Verify</button>
     </form>
+    <form method="post" action="{{ tenant_url_for('auth.consultant_verify_resend') }}" id="resend-form" style="margin-top:16px;">
+      <button type="submit" id="resend-submit" {% if not allow_resend or resend_count >= max_resends %}style="display:none;"{% endif %}>Request a new code</button>
+      <p class="muted" id="resend-note" style="margin-top:8px;">{% if allow_resend and resend_count < max_resends %}This code has expired. You can request one new code.{% endif %}</p>
+    </form>
     <script>
       const code = document.getElementById("code");
       const form = document.getElementById("verify-form");
       const submit = document.getElementById("verify-submit");
+      const resendSubmit = document.getElementById("resend-submit");
+      const resendForm = document.getElementById("resend-form");
+      const resendNote = document.getElementById("resend-note");
+      let resendCount = {{ resend_count|int }};
+      const maxResends = {{ max_resends|int }};
+      let allowResend = {{ 'true' if allow_resend else 'false' }};
       form.addEventListener("submit", (event) => {
         code.value = code.value.replace(/\D+/g, "").slice(0, 6);
         if (code.value.length !== 6) {
@@ -27,6 +37,17 @@
         submit.disabled = true;
         submit.textContent = "Verifying...";
       });
+      resendForm.addEventListener("submit", (event) => {
+        if (resendSubmit.disabled) {
+          event.preventDefault();
+          return;
+        }
+        resendSubmit.disabled = true;
+        resendSubmit.textContent = "Sending...";
+      });
+      if (!allowResend || resendCount >= maxResends) {
+        resendSubmit.disabled = true;
+      }
     </script>
   </div>
   </div>

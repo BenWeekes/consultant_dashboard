@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Maria Kirby — MindFix AI Therapy Session</title>
+  <meta name="description" content="Start an AI therapy session inspired by Maria Kirby on MindFix.">
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@300;400;500;600;700&family=Open+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link href="css/style.css?v=20260505b" rel="stylesheet">
+  <style>
+    .consultant-landing {
+      min-height: 100vh;
+      background: linear-gradient(160deg, #f6fbfa 0%, #edf5f3 100%);
+      padding: 132px 0 72px;
+    }
+
+    .consultant-landing-card {
+      background: rgba(255, 255, 255, 0.96);
+      border: 1px solid rgba(26, 138, 110, 0.12);
+      border-radius: 24px;
+      box-shadow: 0 24px 60px rgba(27, 40, 56, 0.12);
+      overflow: hidden;
+    }
+
+    .consultant-landing-copy {
+      padding: 48px;
+    }
+
+    .consultant-landing-copy .eyebrow {
+      display: inline-block;
+      font-size: 0.78rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--mf-primary);
+      font-weight: 700;
+      margin-bottom: 18px;
+    }
+
+    .consultant-landing-copy h1 {
+      font-size: clamp(2rem, 4vw, 3.35rem);
+      line-height: 1.05;
+      margin-bottom: 18px;
+    }
+
+    .consultant-landing-copy p {
+      font-size: 1.05rem;
+      color: var(--mf-text);
+      max-width: 38rem;
+    }
+
+    .consultant-landing-copy .session-link {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-top: 18px;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+    }
+
+    .consultant-landing-figure {
+      padding: 28px 28px 28px 0;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .consultant-landing-image-link {
+      display: block;
+      width: 100%;
+      max-width: 760px;
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 18px 44px rgba(27, 40, 56, 0.16);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .consultant-landing-image-link:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 24px 54px rgba(27, 40, 56, 0.22);
+    }
+
+    .consultant-landing-image {
+      display: block;
+      width: 100%;
+      aspect-ratio: 860 / 437;
+      object-fit: cover;
+    }
+
+    .consultant-landing-note {
+      margin-top: 18px;
+      color: var(--mf-text-light);
+      font-size: 0.95rem;
+    }
+
+    @media (max-width: 991.98px) {
+      .consultant-landing {
+        padding-top: 118px;
+      }
+
+      .consultant-landing-copy {
+        padding: 36px 28px 22px;
+      }
+
+      .consultant-landing-figure {
+        padding: 0 28px 28px;
+      }
+    }
+
+    @media (max-width: 575.98px) {
+      .consultant-landing {
+        padding-top: 108px;
+      }
+
+      .consultant-landing-copy {
+        padding: 30px 22px 18px;
+      }
+
+      .consultant-landing-figure {
+        padding: 0 22px 22px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <nav id="mainNav" class="navbar navbar-expand-lg navbar-dark fixed-top navbar-scrolled">
+    <div class="container">
+      <a class="navbar-brand" href="/index.html">
+        <i class="fa-solid fa-brain"></i> MindFix
+      </a>
+      <div class="navbar-buttons ms-auto">
+        <a id="consultantLoginBtn" href="/consultant/login" class="btn btn-outline-light btn-sm">Consultant Login</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="consultant-landing">
+    <div class="container">
+      <div class="consultant-landing-card">
+        <div class="row g-0 align-items-center">
+          <div class="col-lg-5">
+            <div class="consultant-landing-copy">
+              <span class="eyebrow">MindFix AI Therapy</span>
+              <h1>Connect with Maria Kirby’s AI therapy session</h1>
+              <a
+                href="/app?profile=therapy&autoconnect=true&returnurl=/"
+                id="mariaStartLink"
+                class="btn btn-accent btn-lg mt-3"
+                data-avatar-id="c541c39c-335c-4f86-a7f0-3faf22192ae3"
+                data-voice-id="aSw3oCRozPhfOoMOt41X"
+              >
+                <i class="fa-solid fa-comments me-2"></i>Start an AI Therapy Session
+              </a>
+              <p class="consultant-landing-note">
+                Private browser access. No download required.
+              </p>
+            </div>
+          </div>
+          <div class="col-lg-7">
+            <div class="consultant-landing-figure">
+              <a
+                href="/app?profile=therapy&autoconnect=true&returnurl=/"
+                id="mariaImageLink"
+                class="consultant-landing-image-link"
+                data-avatar-id="c541c39c-335c-4f86-a7f0-3faf22192ae3"
+                data-voice-id="aSw3oCRozPhfOoMOt41X"
+              >
+                <img
+                  src="https://static.wixstatic.com/media/d1aa0a_652d7fd1b21d4acdb2a2fcbd53227086~mv2.jpg/v1/fill/w_860,h_437,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/Web_photo_MK_edited.jpg"
+                  alt="Maria Kirby"
+                  class="consultant-landing-image"
+                >
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      var params = new URLSearchParams(window.location.search);
+      var hostname = window.location.hostname;
+      var isLocal = hostname === "localhost" || hostname === "127.0.0.1";
+      var clientBase = params.get("client_base") || (isLocal ? "http://localhost:8084" : "/app");
+      var dashboardBase = params.get("dashboard_base") || (isLocal ? "http://127.0.0.1:8090" : "");
+      var currentUrl = window.location.href;
+
+      document.querySelectorAll("[data-avatar-id]").forEach(function (link) {
+        var joinParams = new URLSearchParams({
+          profile: "therapy",
+          autoconnect: "true",
+          returnurl: currentUrl
+        });
+        var avatarId = link.getAttribute("data-avatar-id");
+        var voiceId = link.getAttribute("data-voice-id");
+        if (avatarId) joinParams.set("avatar_id", avatarId);
+        if (voiceId) joinParams.set("voice_id", voiceId);
+        var clientJoinUrl = clientBase.startsWith("http")
+          ? clientBase.replace(/\/$/, "") + "/?" + joinParams.toString()
+          : clientBase + "?" + joinParams.toString();
+        link.setAttribute("href", clientJoinUrl);
+      });
+
+      if (dashboardBase) {
+        var normalizedDashboardBase = dashboardBase.replace(/\/$/, "");
+        var consultantLoginBtn = document.getElementById("consultantLoginBtn");
+        if (consultantLoginBtn) {
+          consultantLoginBtn.setAttribute("href", normalizedDashboardBase + "/consultant/login");
+        }
+      }
+    });
+  </script>
+</body>
+</html>
