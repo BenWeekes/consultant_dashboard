@@ -1,0 +1,3 @@
+- Start with a vague emotional opening.
+- Keep the conversation slightly meandering for several turns.
+- See whether the target eventually uses the existing notes, direction, or prior summary naturally rather than staying generic forever.

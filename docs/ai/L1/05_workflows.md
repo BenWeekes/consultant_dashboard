@@ -138,6 +138,18 @@ For summary-like fields, keep the current ownership model explicit:
 4. If Twilio behavior changes, test both dev-mode and production-style branches conceptually.
 5. Update `07_gotchas.md` if the change is easy to misconfigure.
 
+## Extend AI Evaluation
+
+1. Keep fixed regression and release-gating work in `evals/`.
+2. Keep Inspect / Petri exploratory work in `evals/inspect/`.
+3. Reuse the real therapy prompt and dashboard-style context assembly when adding new exploratory seeds.
+4. Test Inspect additions with:
+   - `./venv/bin/python -m py_compile evals/inspect/mindfix_petri.py evals/inspect/run_smoke.py`
+   - `./venv/bin/python evals/inspect/run_smoke.py`
+   - `./venv/bin/python evals/inspect/run_suite.py`
+5. Confirm the resulting `.eval` log reads back as `status=success`.
+6. Update [Eval Stack](L2/eval_stack.md) when the integration shape changes.
+
 ## Use Local Support Login For Server-Side QA
 
 Use this only when you are on the dashboard host itself and need to inspect the live consultant UI without going through the normal OTP flow.

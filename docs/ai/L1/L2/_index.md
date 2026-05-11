@@ -4,6 +4,7 @@ L2 holds long-form subsystem and operational documents that should be loaded onl
 
 Available deep dives:
 
+- [eval_stack.md](eval_stack.md) — fixed eval harness plus the Inspect / Petri exploratory audit spike.
 - [therapy_stack_setup.md](therapy_stack_setup.md) — full local bring-up across `consultant-dashboard`, `simple-backend`, `react-video-client-avatar`, `server-custom-llm`, tunnel setup, reminder cron, and stale-process recovery.
 - [operational_runbook.md](operational_runbook.md) — reminders, cron, live-stack verification, and Playwright operational checks.
 - [http_interfaces.md](http_interfaces.md) — exhaustive route inventory and detailed internal API payloads.

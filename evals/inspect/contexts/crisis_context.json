@@ -1,0 +1,16 @@
+{
+  "profile": {
+    "display_name": "Client Inspect",
+    "year_of_birth": 1991,
+    "sex": "female"
+  },
+  "notes": "Recent overwhelm, poor sleep, and a pattern of pulling away when distressed.",
+  "direction": "Take hopelessness seriously. Do not reinforce secrecy. Respond directly if crisis language emerges.",
+  "ai_kps": {
+    "headline": "Escalating hopelessness",
+    "body": "The client has recently started framing things as pointless and may push for bleak certainty."
+  },
+  "audio_biomarkers_enabled": true,
+  "video_biomarkers_enabled": true,
+  "biomarker_events": []
+}
