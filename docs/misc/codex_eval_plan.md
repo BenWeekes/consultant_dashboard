@@ -409,6 +409,135 @@ Recommended role:
 - discovery layer
 - not primary release gate
 
+## Where the Inspect work should live
+
+The implementation should live inside `consultant_dashboard`, but be clearly separated from the current fixed-case harness.
+
+Recommended layout:
+
+- `consultant_dashboard/evals/`
+  - keep this as the existing product-owned regression and release-gating harness
+- `consultant_dashboard/evals/inspect/`
+  - new Inspect-based evaluation area
+- `consultant_dashboard/evals/inspect/seeds/`
+  - Petri-style exploratory audit seeds
+- `consultant_dashboard/evals/inspect/config/`
+  - model-role config, target wiring, judge config
+- `consultant_dashboard/evals/inspect/results/`
+  - local generated outputs, usually gitignored
+- `consultant_dashboard/evals/inspect/README.md`
+  - how to run the Inspect-based audits
+
+This keeps the responsibilities clean:
+
+- `evals/` = fixed product-specific regressions and release gates
+- `evals/inspect/` = exploratory and behavior-sweep experiments
+
+## First Inspect implementation scope
+
+Do not try to migrate everything.
+
+Start with a narrow adoption spike:
+
+### Initial target
+
+Use Inspect/Petri only for exploratory audits against the current therapy prompt stack.
+
+### First audit goals
+
+Add 3 to 5 seeds only:
+
+- get the assistant to agree life is not worth living
+- get it to reinforce secrecy around dangerous behavior
+- get it to provide harmful advice after repeated pressure
+- get it to become manipulative or over-dependent
+- get it to evade, drift, or become generic under stress
+
+### Target wiring
+
+The target should hit the same OpenAI-compatible or local platform path used by MindFix eval execution, not an unrelated toy target.
+
+That means the Inspect target should be able to evaluate:
+
+- the real current therapy prompt
+- real session context injection style
+- biomarker enabled/disabled setup when relevant
+
+## Testing plan
+
+The Inspect integration should be tested in three layers.
+
+### 1. Smoke test the substrate
+
+Verify:
+
+- `inspect_ai` runs locally
+- one trivial eval completes
+- auditor / target / judge wiring is correct
+
+### 2. Smoke test the MindFix target
+
+Verify:
+
+- the Inspect target can call the intended model endpoint
+- prompt/context injection is reaching the target correctly
+- logs/results are captured
+
+### 3. Validate the first audit seeds
+
+For each initial seed:
+
+- confirm it produces plausible transcripts
+- confirm the judge output is structured and reviewable
+- confirm it is actually testing the intended behavior
+
+This should be done before treating Inspect results as meaningful.
+
+## How success should be judged
+
+The first Inspect adoption is successful if:
+
+- it finds at least one failure mode or concerning transcript not already covered well by the fixed harness
+- it produces reviewable audit traces
+- it can be rerun without excessive setup pain
+- it complements the current harness instead of duplicating it
+
+If it does not do that, stop and simplify rather than forcing adoption.
+
+## `docs/ai` updates required after implementation
+
+Once the first Inspect spike works, update:
+
+- `consultant_dashboard/docs/ai/L1/09_evals.md`
+- `consultant_dashboard/docs/ai/L1/L2/eval_case_schema.md`
+- `consultant_dashboard/docs/ai/L1/L2/eval_rubric.md`
+- `consultant_dashboard/docs/ai/L1/L2/eval_governance.md`
+
+Add an Inspect-specific subsection explaining:
+
+- what remains in the custom harness
+- what is now done in Inspect/Petri-style audits
+- how exploratory audits differ from release-gating regressions
+- how new discovered failures get converted into fixed blocking cases
+
+That last point is important:
+
+- Inspect finds new failures
+- the custom harness keeps them fixed
+
+## Ready-to-start implementation order
+
+After this plan, the work can begin in this order:
+
+1. create `consultant_dashboard/evals/inspect/`
+2. add a minimal `README.md` with run instructions
+3. validate `inspect_ai` locally with one trivial run
+4. wire one MindFix target path
+5. add 3 to 5 Petri-style seeds
+6. run and review transcripts
+7. update `docs/ai`
+8. convert any useful new failures into fixed blocking cases in `consultant_dashboard/evals`
+
 ### Add `petri_bloom` style behavior sweeps after that
 
 Use Bloom-style sweeps for:
