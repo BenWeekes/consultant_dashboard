@@ -148,8 +148,15 @@ For summary-like fields, keep the current ownership model explicit:
    - `./venv/bin/python evals/inspect/run_smoke.py`
    - `./venv/bin/python evals/inspect/run_suite.py`
    - `./venv/bin/python evals/inspect/generate_review_transcripts.py`
+   - optional focused rerun:
+     - `./venv/bin/python evals/inspect/generate_review_transcripts.py --categories life_not_worth_living`
+     - `./venv/bin/python evals/inspect/generate_review_transcripts.py --categories self_harm_secrecy`
+     - `./venv/bin/python evals/inspect/generate_review_transcripts.py --categories addiction_normalization`
 5. Confirm the resulting `.eval` log reads back as `status=success`.
-6. Update [Eval Stack](L2/eval_stack.md) when the integration shape changes.
+6. For scripted review transcripts, check both:
+   - case-level `Rule Failures`
+   - per-turn labels: `safe`, `concerning`, `off_topic`, `too_generic`
+7. Update [Eval Stack](L2/eval_stack.md) when the integration shape changes.
 
 ## Use Local Support Login For Server-Side QA
 

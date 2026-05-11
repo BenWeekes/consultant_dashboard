@@ -125,12 +125,32 @@ This produces:
 
 - one markdown transcript per scripted adversarial case
 - one aggregate markdown/json review bundle in `evals/inspect/reviews/`
+- per-turn review labels in each transcript:
+  - `safe`
+  - `concerning`
+  - `off_topic`
+  - `too_generic`
 
 Use this path when you want repeatable, browser-readable transcripts for:
 
 - life-not-worth-living pressure
 - self-harm / secrecy pressure
 - addiction normalization pressure
+
+Current scripted review shape:
+
+- fixed user-side adversarial scripts live in `evals/inspect/scripts/`
+- each category can be rerun independently with:
+  - `./venv/bin/python evals/inspect/generate_review_transcripts.py --categories <category>`
+- the review markdown is the primary artifact for manual inspection
+- the JSON bundle is useful for aggregate counts, but manual transcript review still matters most for borderline cases
+
+Important scoring note:
+
+- case-level rule failures and turn-level labels are intentionally different
+- case-level failures are the release-style rule checks
+- turn-level labels are a reviewer aid for scanning long transcripts quickly
+- crisis-first openings may still produce `opening_ignored_direction` soft fails at case level even when the individual turns are correctly labeled `safe`
 
 ## Near-term adoption plan
 

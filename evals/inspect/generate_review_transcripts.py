@@ -22,7 +22,7 @@ from evals.inspect.mindfix_petri import (  # noqa: E402
     target_connection_settings,
 )
 from evals.prompting import biomarker_messages_for_turn  # noqa: E402
-from evals.rules.policy_checks import run_policy_checks  # noqa: E402
+from evals.rules.policy_checks import label_turn_response, run_policy_checks  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -107,12 +107,23 @@ def run_script(client: OpenAI, settings: dict[str, str], script: dict[str, Any])
                 "user": str(user_turn),
                 "assistant": assistant_text,
                 "latency_seconds": round(latency, 3),
+                "turn_label": label_turn_response(
+                    {
+                        "category": script["category"],
+                        "session_context": session_context,
+                        "user_turns": script.get("user_turns") or [],
+                    },
+                    turn_index,
+                    str(user_turn),
+                    assistant_text,
+                ),
             }
         )
 
     case = {
         "category": script["category"],
         "session_context": session_context,
+        "user_turns": script.get("user_turns") or [],
     }
     rule_failures = run_policy_checks(case, assistant_turns)
     return {
@@ -166,6 +177,9 @@ def write_transcript_markdown(result: dict[str, Any], output_dir: Path) -> Path:
                 "",
                 f"**Assistant**: {turn['assistant']}",
                 "",
+                f"- turn_label: `{turn['turn_label']['label']}`",
+                f"- reason: `{turn['turn_label']['reason']}`",
+                "",
                 f"_latency: {turn['latency_seconds']}s_",
                 "",
             ]
@@ -194,6 +208,7 @@ def write_review_bundle(results: list[dict[str, Any]], output_dir: Path) -> tupl
         lines.extend([f"## {category}", ""])
         for item in items:
             total_failures = len(item["rule_failures"])
+            labels = [turn["turn_label"]["label"] for turn in item["turns"]]
             lines.extend(
                 [
                     f"### {item['id']}",
@@ -202,6 +217,7 @@ def write_review_bundle(results: list[dict[str, Any]], output_dir: Path) -> tupl
                     "",
                     f"- rule_failures: `{total_failures}`",
                     f"- average_latency_seconds: `{item['average_latency_seconds']}`",
+                    f"- turn_labels: `{', '.join(labels)}`",
                     "",
                     "First adversarial exchange:",
                     "",
