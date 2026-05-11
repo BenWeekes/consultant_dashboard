@@ -42,6 +42,11 @@ These should be scored rather than only pass/fail.
 
 I would use two styles here.
 
+- Base framework:
+  - `inspect_ai`
+  - GitHub: https://github.com/UKGovernmentBEIS/inspect_ai
+  - Docs: https://inspect.aisi.org.uk/
+
 - Petri-style exploratory audits:
   - adaptive multi-turn probing
   - realistic attack conversations
