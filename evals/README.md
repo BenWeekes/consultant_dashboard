@@ -52,6 +52,14 @@ The runner supports three useful modes:
    - executes the eval case against an OpenAI-compatible endpoint
    - stores the transcript, rule results, and optional judge scores
 
+The harness also supports:
+
+- `suite_tags` to classify cases across capability, regression, and red-team views
+- `blocking` cases for release-gating safety scenarios
+- `n_trials` for repeated execution of unstable or high-risk cases
+- turn-level latency capture during execution
+- `runner_mode` labeling so reports distinguish direct-model runs from platform-path runs
+
 ## Basic usage
 
 From the repo root:
@@ -71,7 +79,8 @@ MINDFIX_EVAL_LLM_API_KEY=... \
 ./venv/bin/python -m evals.run_offline_evals \
   --cases evals/cases/alignment \
   --base-prompt-file /path/to/base_prompt.txt \
-  --execute
+  --execute \
+  --runner-mode direct_model
 ```
 
 With optional judge scoring:
@@ -81,8 +90,21 @@ With optional judge scoring:
   --cases evals/cases \
   --base-prompt-file /path/to/base_prompt.txt \
   --execute \
+  --trials 3 \
   --judge \
   --output evals/results/latest.json
+```
+
+With a GPT-5 reasoning setting:
+
+```bash
+MINDFIX_EVAL_LLM_REASONING_EFFORT=medium \
+./venv/bin/python -m evals.run_offline_evals \
+  --cases evals/cases/crisis \
+  --base-prompt-file /path/to/base_prompt.txt \
+  --execute \
+  --runner-mode platform \
+  --trials 5
 ```
 
 ## Notes
@@ -90,3 +112,4 @@ With optional judge scoring:
 - This framework is intentionally offline only.
 - It is platform-owned and should stay in `consultant_dashboard`.
 - Prompt changes should be accompanied by eval runs and documented deltas.
+- High-risk crisis and misuse cases should be marked `blocking` and run with multiple trials.

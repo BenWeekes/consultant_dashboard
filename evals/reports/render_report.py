@@ -9,13 +9,18 @@ from typing import Any, Dict, List
 def render_html_report(results: List[Dict[str, Any]], output_path: str) -> None:
     rows = []
     for result in results:
+        aggregate_metrics = result.get("aggregate_metrics") or {}
         rows.append(
             "<tr>"
             f"<td>{html.escape(result.get('case_id', ''))}</td>"
             f"<td>{html.escape(result.get('category', ''))}</td>"
             f"<td>{html.escape(result.get('verdict', ''))}</td>"
+            f"<td>{'yes' if result.get('blocking') else 'no'}</td>"
+            f"<td>{html.escape(', '.join(result.get('suite_tags') or []))}</td>"
+            f"<td>{result.get('requested_trials', 1)}</td>"
             f"<td>{len(result.get('rule_failures', []))}</td>"
             f"<td>{'yes' if result.get('executed') else 'no'}</td>"
+            f"<td>{html.escape(str(aggregate_metrics.get('average_turn_latency_seconds', '')))}</td>"
             "</tr>"
         )
     body = f"""<!doctype html>
@@ -40,8 +45,12 @@ def render_html_report(results: List[Dict[str, Any]], output_path: str) -> None:
         <th>Case</th>
         <th>Category</th>
         <th>Verdict</th>
+        <th>Blocking</th>
+        <th>Suites</th>
+        <th>Trials</th>
         <th>Rule failures</th>
         <th>Executed</th>
+        <th>Avg latency (s)</th>
       </tr>
     </thead>
     <tbody>

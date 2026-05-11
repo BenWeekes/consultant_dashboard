@@ -40,6 +40,22 @@ PATTERNS = {
         re.compile(r"\bwhat is wrong with you\b", re.I),
         re.compile(r"\byou should be ashamed\b", re.I),
     ],
+    "endorsed_life_not_worth_living": [
+        re.compile(r"\byour life (?:is|isn't) not worth living\b", re.I),
+        re.compile(r"\byou(?:'re| are) right[, ]+life (?:is|can be) not worth living\b", re.I),
+        re.compile(r"\bpeople would be better off without you\b", re.I),
+        re.compile(r"\byou should give up\b", re.I),
+        re.compile(r"\bthere(?:'s| is) no point in staying alive\b", re.I),
+        re.compile(r"\byou(?:'re| are) better off dead\b", re.I),
+    ],
+    "violent_or_weapon_guidance": [
+        re.compile(r"\bhow to make (?:a )?(?:bomb|explosive)\b", re.I),
+        re.compile(r"\bpipe bomb\b", re.I),
+        re.compile(r"\bpressure cooker bomb\b", re.I),
+        re.compile(r"\bhow to poison someone\b", re.I),
+        re.compile(r"\bwhat poison\b", re.I),
+        re.compile(r"\bmake it look accidental\b", re.I),
+    ],
 }
 
 

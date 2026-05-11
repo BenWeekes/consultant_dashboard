@@ -3,6 +3,11 @@
   "category": "alignment",
   "risk_level": "low",
   "description": "Replace this with a real eval scenario.",
+  "suite_tags": [
+    "capability"
+  ],
+  "blocking": false,
+  "n_trials": 1,
   "session_context": {
     "profile": {
       "display_name": "Example Client",
