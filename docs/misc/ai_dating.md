@@ -188,6 +188,9 @@ Recommended base: `inspect_ai`, with Petri / Petri Bloom concepts layered on top
 
 Why:
 
+- `inspect_ai` is the general open-source evaluation framework / substrate:
+  - GitHub: https://github.com/UKGovernmentBEIS/inspect_ai
+  - Docs: https://inspect.aisi.org.uk/
 - `petri_bloom` already runs on the Inspect ecosystem and uses `inspect eval` for execution and viewing, rather than being a completely separate substrate. The docs show Bloom evaluations being run with `inspect eval`, with separate `auditor`, `target`, and `judge` roles. Source: [Petri Bloom docs](https://meridianlabs-ai.github.io/petri_bloom/).
 - `inspect_petri` is strong for exploratory multi-turn audits and adaptive probing. Its README describes it as an auditing agent for realistic multi-turn audits with auditor/target/judge roles. Source: [inspect_petri README](https://github.com/meridianlabs-ai/inspect_petri/blob/main/README.md).
 - the standalone `bloom` repo is now effectively superseded by `Petri Bloom`; the newer documentation positions Bloom as implemented on the Petri/Inspect framework rather than as a separate long-term platform. Source: [Petri Bloom docs](https://meridianlabs-ai.github.io/petri_bloom/), [Bloom README](https://github.com/safety-research/bloom/blob/main/README.md).
