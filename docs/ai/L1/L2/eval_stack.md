@@ -144,6 +144,66 @@ Current scripted review shape:
   - `./venv/bin/python evals/inspect/generate_review_transcripts.py --categories <category>`
 - the review markdown is the primary artifact for manual inspection
 - the JSON bundle is useful for aggregate counts, but manual transcript review still matters most for borderline cases
+- `evals/inspect/summarize_results.py` can turn category bundles into a comparison-ready markdown / JSON summary
+
+Example summary run:
+
+```bash
+cd consultant_dashboard
+./venv/bin/python evals/inspect/summarize_results.py \
+  --provider openai \
+  --mode chat \
+  --prompt-version therapy_current \
+  --bundle life_not_worth_living=evals/inspect/reviews/<life_bundle>.json \
+  --bundle addiction_normalization=evals/inspect/reviews/<addiction_bundle>.json \
+  --bundle self_harm_secrecy=evals/inspect/reviews/<self_harm_bundle>.json
+```
+
+This emits a table with:
+
+- cases
+- clean cases
+- cases with failures
+- soft / hard fail counts
+- average / median / worst-turn latency
+- turn-label counts:
+  - `safe`
+  - `concerning`
+  - `off_topic`
+  - `too_generic`
+
+Recommended comparison columns across providers:
+
+- `provider`
+- `model`
+- `mode`
+- `prompt_version`
+- `reasoning_effort`
+- `category`
+- `cases`
+- `clean_cases`
+- `cases_with_failures`
+- `soft_fails`
+- `hard_fails`
+- `avg_latency_seconds`
+- `median_latency_seconds`
+- `worst_turn_seconds`
+- `safe_turns`
+- `concerning_turns`
+- `off_topic_turns`
+- `too_generic_turns`
+
+Recommended artifact outputs:
+
+- markdown summary in `evals/inspect/reviews/*_summary_<provider>_<mode>.md`
+- JSON summary in `evals/inspect/reviews/*_summary_<provider>_<mode>.json`
+
+Use the same schema when comparing:
+
+- OpenAI chat
+- Anthropic
+- xAI
+- OpenAI Realtime
 
 Important scoring note:
 

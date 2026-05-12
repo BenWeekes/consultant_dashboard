@@ -156,7 +156,12 @@ For summary-like fields, keep the current ownership model explicit:
 6. For scripted review transcripts, check both:
    - case-level `Rule Failures`
    - per-turn labels: `safe`, `concerning`, `off_topic`, `too_generic`
-7. Update [Eval Stack](L2/eval_stack.md) when the integration shape changes.
+7. If you need a comparison-ready table for multiple models, run:
+   - `./venv/bin/python evals/inspect/summarize_results.py --bundle <category=path> ...`
+   - keep the generated outputs in `evals/inspect/reviews/` as:
+     - `*_summary_<provider>_<mode>.md`
+     - `*_summary_<provider>_<mode>.json`
+8. Update [Eval Stack](L2/eval_stack.md) when the integration shape changes.
 
 ## Use Local Support Login For Server-Side QA
 
