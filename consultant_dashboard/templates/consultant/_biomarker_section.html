@@ -20,6 +20,9 @@
     {% for group in biomarker_groups %}
       <div class="summary-card">
         <h3 class="biomarker-section-header">{{ group.title }}</h3>
+        {% if biomarker_show_history_average and group.rows and group.rows[0].window_sessions %}
+          <div class="biomarker-meta" style="margin-bottom: 10px;">History Avg based on last {{ group.rows[0].window_sessions }} sessions</div>
+        {% endif %}
         <div class="biomarker-grid">
           {% for row in group.rows %}
             <div class="biomarker-row">
@@ -55,9 +58,6 @@
                     {% endif %}
                   </span>
                 </div>
-              {% endif %}
-              {% if row.window_sessions %}
-                <div class="biomarker-meta">{{ row.window_sessions }} sessions</div>
               {% endif %}
             </div>
           {% endfor %}

@@ -308,7 +308,7 @@ Current defaults:
 
 - speech-to-text: on for the current product flow
 - audio biomarkers: on
-- video biomarkers: on
+- video biomarkers: on when `SHEN_AVAILABLE=true`; forcibly off for new sessions when `SHEN_AVAILABLE=false`
 
 Session pages should clearly distinguish:
 

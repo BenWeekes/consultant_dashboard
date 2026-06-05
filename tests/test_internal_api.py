@@ -1094,6 +1094,64 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
             f"{expected_app_id}:{expected_channel}:{meeting_id}",
         )
 
+    def test_authorize_meeting_join_forces_video_biomarkers_off_when_shen_unavailable(self):
+        self.app.config["SHEN_AVAILABLE"] = False
+        with self.client.application.app_context():
+            db = get_db(self.app.config)
+            from consultant_dashboard.core.db import create_client_access_link, create_scheduled_meeting
+            from consultant_dashboard.core.meetings import build_join_window, iso_utc
+            from consultant_dashboard.core.messaging import hash_access_token
+            from datetime import datetime, timedelta, timezone
+
+            start_at = datetime.now(timezone.utc)
+            end_at = start_at + timedelta(minutes=30)
+            join_start, join_end = build_join_window(start_at, end_at)
+            access_link_id = create_client_access_link(
+                db,
+                client_id=self.client_id,
+                created_by=self.consultant_id,
+                token_hash=hash_access_token("meeting-auth-token-shen-off"),
+                expires_at=iso_utc(end_at + timedelta(days=1)),
+            )
+            meeting_id = create_scheduled_meeting(
+                db,
+                client_id=self.client_id,
+                consultant_id=self.consultant_id,
+                title="Meeting Auth Test Shen Off",
+                invite_message="",
+                timezone_name="Europe/London",
+                scheduled_start_at=iso_utc(start_at),
+                scheduled_end_at=iso_utc(end_at),
+                join_window_start_at=iso_utc(join_start),
+                join_window_end_at=iso_utc(join_end),
+                channel_name=get_pair_channel(self.consultant_id, self.client_id),
+                response_access_link_id=access_link_id,
+                video_biomarkers_enabled=True,
+            )
+            db.execute(
+                "UPDATE scheduled_meetings SET status = 'accepted', accepted_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (meeting_id,),
+            )
+            db.commit()
+            db.close()
+
+        body = json.dumps(
+            {
+                "participant_role": "guest",
+                "meeting_id": meeting_id,
+                "response_access_link_id": access_link_id,
+            },
+            separators=(",", ":"),
+        )
+        response = self.client.post(
+            "/internal/authorize-meeting-join",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/authorize-meeting-join", body),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json["video_biomarkers_enabled"])
+
     def test_session_complete_baseline_uses_avg_from_structured_biomarkers(self):
         payload = {
             "client_id": self.client_id,

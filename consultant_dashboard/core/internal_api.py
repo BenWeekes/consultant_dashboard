@@ -42,6 +42,10 @@ from .web import _ensure_next_weekly_occurrence, _refresh_client_derived_state, 
 internal_bp = Blueprint("internal", __name__, url_prefix="/internal")
 
 
+def _shen_available() -> bool:
+    return bool(current_app.config.get("SHEN_AVAILABLE", True))
+
+
 def _verify_internal_request() -> None:
     if request.path == "/internal/health":
         return
@@ -188,7 +192,7 @@ def meeting_signals():
         "meeting_type": meeting["meeting_type"] or "",
         "transcription_enabled": bool(signal_flags["transcription_enabled"]),
         "audio_biomarkers_enabled": bool(signal_flags["audio_biomarkers_enabled"]),
-        "video_biomarkers_enabled": bool(signal_flags["video_biomarkers_enabled"]),
+        "video_biomarkers_enabled": bool(signal_flags["video_biomarkers_enabled"]) and _shen_available(),
     }
 
 
@@ -432,7 +436,7 @@ def _build_meeting_join_response(meeting, *, participant_role: str, participant_
         "join_window_end_at": meeting["join_window_end_at"],
         "transcription_enabled": bool(meeting["transcription_enabled"]),
         "audio_biomarkers_enabled": bool(meeting["audio_biomarkers_enabled"]),
-        "video_biomarkers_enabled": bool(meeting["video_biomarkers_enabled"]),
+        "video_biomarkers_enabled": bool(meeting["video_biomarkers_enabled"]) and _shen_available(),
         "transcription_provider": meeting["transcription_provider"] or "",
         "transcription_language": meeting["transcription_language"] or "",
         "ensure_meeting_services": ensure_services,

@@ -955,6 +955,46 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertIn("Repeats: Weekly", invite_plain_text)
         self.assertNotIn("Open meeting details:", invite_plain_text)
 
+    def test_meeting_form_disables_video_biomarkers_when_shen_unavailable(self):
+        self.app.config["SHEN_AVAILABLE"] = False
+        self.consultant_login()
+        response = self.client.get("/consultant/meetings/new")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'name="video_biomarkers_enabled"', response.data)
+        self.assertIn(b"Temporarily unavailable", response.data)
+        self.assertIn(b'disabled', response.data)
+
+    @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
+    def test_meeting_form_forces_video_biomarkers_off_when_shen_unavailable(self, mocked_deliver_email):
+        self.app.config["SHEN_AVAILABLE"] = False
+        self.consultant_login()
+        response = self.client.post(
+            "/consultant/meetings/new",
+            data={
+                "client_id": self.client_id,
+                "title": "Shen disabled",
+                "meeting_type": "human",
+                "audio_biomarkers_enabled": "1",
+                "video_biomarkers_enabled": "1",
+                "scheduled_start_at": self._future_local_time(days=1),
+                "duration_minutes": "30",
+                "timezone_name": "Europe/London",
+                "invite_message": "",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        db = get_db(self.app.config)
+        row = db.execute(
+            """
+            SELECT audio_biomarkers_enabled, video_biomarkers_enabled
+            FROM scheduled_meetings ORDER BY created_at DESC LIMIT 1
+            """
+        ).fetchone()
+        db.close()
+        self.assertEqual(row["audio_biomarkers_enabled"], 1)
+        self.assertEqual(row["video_biomarkers_enabled"], 0)
+
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_consultant_can_disable_biomarkers_on_meeting_form(self, mocked_deliver_email):
         self.consultant_login()
@@ -2451,6 +2491,10 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertIn(b"Client Key Point Summary - Human Sessions", response.data)
         self.assertIn(b"Average", response.data)
         self.assertIn(b"Max", response.data)
+        self.assertIn(b"History Avg", response.data)
+        self.assertIn(b"Crisis Level", response.data)
+        self.assertIn(b"Leading Emotion", response.data)
+        self.assertIn(b"Heart Rate", response.data)
         self.assertRegex(response.data, rb"\d+%")
         self.assertEqual(response.data.count(b'data-biomarker-section-root="1"'), 1)
         self.assertNotIn(b"Client Sign-In Match", response.data)
@@ -2465,6 +2509,10 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertIn(f'href="/v/mindfix/consultant/clients/{self.client_id}#notes"'.encode(), response.data)
         self.assertIn(b"Average", response.data)
         self.assertIn(b"Max", response.data)
+        self.assertIn(b"History Avg", response.data)
+        self.assertIn(b"Crisis Level", response.data)
+        self.assertIn(b"Leading Emotion", response.data)
+        self.assertIn(b"Heart Rate", response.data)
         self.assertIn(b"Session Key Point Summary", response.data)
         self.assertRegex(response.data, rb"\d+%")
         self.assertEqual(response.data.count(b'data-biomarker-section-root="1"'), 1)
@@ -2474,8 +2522,8 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertNotIn(b"Full summary", response.data)
         self.assertNotIn(f'action="/v/mindfix/consultant/clients/{self.client_id}/messages/send"'.encode(), response.data)
         self.assertNotIn(f'data-thread-endpoint="/v/mindfix/consultant/clients/{self.client_id}/messages/thread"'.encode(), response.data)
-        self.assertIn(b"Safety Level", response.data)
-        safety_block = response.data.split(b"<strong>Safety Level</strong>", 1)[1][:300]
+        self.assertIn(b"Crisis Level", response.data)
+        safety_block = response.data.split(b"<strong>Crisis Level</strong>", 1)[1][:300]
         self.assertNotIn(b"100%", safety_block)
 
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))

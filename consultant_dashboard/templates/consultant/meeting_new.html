@@ -96,8 +96,19 @@
         </label>
         <label class="toggle-option">
           <input type="hidden" name="video_biomarkers_enabled" value="0">
-          <input type="checkbox" name="video_biomarkers_enabled" value="1" {% if form_defaults.video_biomarkers_enabled %}checked{% endif %}>
-          <span>Enable Video Biomarkers</span>
+          <input
+            type="checkbox"
+            name="video_biomarkers_enabled"
+            value="1"
+            {% if form_defaults.video_biomarkers_enabled %}checked{% endif %}
+            {% if not video_biomarkers_available %}disabled{% endif %}
+          >
+          <span>
+            Enable Video Biomarkers
+            {% if not video_biomarkers_available %}
+              <span class="muted">(Temporarily unavailable)</span>
+            {% endif %}
+          </span>
         </label>
         <label class="toggle-option">
           <input id="transcription_enabled_hidden" type="hidden" name="transcription_enabled" value="{{ '1' if form_defaults.transcription_enabled else '0' }}">

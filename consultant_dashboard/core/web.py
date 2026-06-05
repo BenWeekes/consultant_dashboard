@@ -116,6 +116,10 @@ def _brand_name() -> str:
     return current_branding().get("name") or current_app.config["BRAND_NAME"]
 
 
+def _shen_available() -> bool:
+    return bool(current_app.config.get("SHEN_AVAILABLE", True))
+
+
 def _vendor_field(vendor: Optional[dict], key: str, default: str = "") -> str:
     if not vendor:
         return default
@@ -1483,6 +1487,7 @@ def _display_metric_label(key: str) -> str:
 
 
 VOICE_TILE_KEYS = [
+    ("safety_level", "Crisis Level"),
     ("stress", "Stress"),
     ("distress", "Distress"),
     ("burnout", "Burnout"),
@@ -1492,6 +1497,7 @@ VOICE_TILE_KEYS = [
 ]
 
 VIDEO_TILE_KEYS = [
+    ("heart_rate_bpm", "Heart Rate"),
     ("hrv_sdnn_ms", "HRV"),
     ("stress_index", "Cardiac Stress"),
     ("breathing_rate_bpm", "Breathing Rate"),
@@ -1620,6 +1626,22 @@ def _build_metric_row(source, key: str, label: str, *, window_sessions=None, his
     }
 
 
+def _build_emotion_row(source, *, window_sessions=None, history_source=None):
+    average = _emotion_stat_label(source, "avg")
+    maximum = _emotion_stat_label(source, "max")
+    history_average = _emotion_stat_label(history_source, "avg")
+    if not average and not maximum:
+        return None
+    return {
+        "label": "Leading Emotion",
+        "average": f"{average['label']} ({average['value']})" if average else None,
+        "max": f"{maximum['label']} ({maximum['value']})" if maximum else None,
+        "history_average": f"{history_average['label']} ({history_average['value']})" if history_average else None,
+        "window_sessions": window_sessions,
+        "unit": "",
+    }
+
+
 def _empty_biomarker_message(*, audio_enabled: bool, video_enabled: bool, has_any_rows: bool) -> str | None:
     if has_any_rows:
         return None
@@ -1645,8 +1667,8 @@ def _placeholder_metric_row(label: str, *, unit: str = "", window_sessions=None)
 
 def _placeholder_session_biomarker_view():
     voice_rows = [
-        _placeholder_metric_row("Safety Level"),
         *[_placeholder_metric_row(label, unit=_metric_detail_suffix(key)) for key, label in VOICE_TILE_KEYS],
+        _placeholder_metric_row("Leading Emotion"),
     ]
     video_rows = []
     for key, label in VIDEO_TILE_KEYS:
@@ -1724,10 +1746,9 @@ def _build_session_biomarker_view(biomarkers, *, audio_enabled: bool, video_enab
         "detail": highest_alert if highest_alert else None,
     })
 
-    voice_rows = []
-    if (safety_row := _build_metric_row(voice, "safety_level", "Safety Level", history_source=history_source)):
-        voice_rows.append(safety_row)
-    voice_rows.extend([row for key, label in VOICE_TILE_KEYS if (row := _build_metric_row(voice, key, label, history_source=history_source))])
+    voice_rows = [row for key, label in VOICE_TILE_KEYS if (row := _build_metric_row(voice, key, label, history_source=history_source))]
+    if (emotion_row := _build_emotion_row(voice, history_source=history_source)):
+        voice_rows.append(emotion_row)
     video_rows = [row for key, label in VIDEO_TILE_KEYS if (row := _build_metric_row(vitals, key, label, history_source=history_source))]
 
     safety_view = None
@@ -1818,11 +1839,11 @@ def _build_client_biomarker_view(baseline):
         "detail": latest_safety.get("highest_alert") or None,
     })
 
-    voice_rows = []
-    if (safety_row := _build_metric_row(source, "safety_level", "Safety Level", window_sessions=window_sessions)):
-        voice_rows.append(safety_row)
-    voice_rows.extend([row for key, label in VOICE_TILE_KEYS if (row := _build_metric_row(source, key, label, window_sessions=window_sessions))])
-    video_rows = [row for key, label in VIDEO_TILE_KEYS if (row := _build_metric_row(source, key, label, window_sessions=window_sessions))]
+    history_source = dict(source)
+    voice_rows = [row for key, label in VOICE_TILE_KEYS if (row := _build_metric_row(source, key, label, window_sessions=window_sessions, history_source=history_source))]
+    if (emotion_row := _build_emotion_row(source, window_sessions=window_sessions, history_source=history_source)):
+        voice_rows.append(emotion_row)
+    video_rows = [row for key, label in VIDEO_TILE_KEYS if (row := _build_metric_row(source, key, label, window_sessions=window_sessions, history_source=history_source))]
 
     safety_view = None
     if latest_safety.get("highest_level") is not None or latest_safety.get("highest_concerns") or latest_safety.get("highest_recommended_actions"):
@@ -2631,6 +2652,7 @@ def consultant_client_detail(client_id: str):
         biomarker_headlines=client_biomarkers["headlines"],
         biomarker_groups=client_biomarkers["groups"],
         biomarker_safety=client_biomarkers["safety"],
+        biomarker_show_history_average=True,
         biomarker_empty_message=client_biomarkers["empty_message"],
         ai_personal_summary=ai_personal_summary,
         human_personal_summary=human_personal_summary,
@@ -2659,7 +2681,7 @@ def _consultant_meeting_new_page(*, preselected_client_id: str = ""):
         "repeat_frequency": "none",
         "transcription_enabled": True,
         "audio_biomarkers_enabled": True,
-        "video_biomarkers_enabled": True,
+        "video_biomarkers_enabled": _shen_available(),
         "transcription_provider": _default_transcription_provider("human"),
         "transcription_language": _default_transcription_language(),
         "timezone_name": "Europe/London",
@@ -2676,8 +2698,10 @@ def _consultant_meeting_new_page(*, preselected_client_id: str = ""):
         video_biomarkers_enabled = (
             "1" in request.form.getlist("video_biomarkers_enabled")
             if "video_biomarkers_enabled" in request.form
-            else True
+            else _shen_available()
         )
+        if not _shen_available():
+            video_biomarkers_enabled = False
         transcription_enabled = (
             "1" in request.form.getlist("transcription_enabled")
             if "transcription_enabled" in request.form
@@ -2815,6 +2839,7 @@ def _consultant_meeting_new_page(*, preselected_client_id: str = ""):
         client=client,
         clients=clients,
         form_defaults=form_defaults,
+        video_biomarkers_available=_shen_available(),
     )
 
 

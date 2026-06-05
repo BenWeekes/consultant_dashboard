@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   Mic,
   MicOff,
@@ -699,45 +699,39 @@ export function VideoAvatarClient() {
   const [localVideoTrack, setLocalVideoTrack] = useState<any>(null);
   const [isLocalVideoActive, setIsLocalVideoActive] = useState(false);
 
+  const shenEnabledForSession =
+    SHEN_ENABLED && isLocalVideoActive && meetingVideoBiomarkersEnabled;
+
   // Shen.AI camera vitals (opt-in via NEXT_PUBLIC_ENABLE_SHEN)
   // RTM publish function for Shen to push vitals to server
-  const shenRtmPublish = useMemo(() => {
-    if (!SHEN_ENABLED || (meetingMode && !meetingVideoBiomarkersEnabled)) {
-      return null;
+  const shenRtmPublish = useCallback(async (message: string): Promise<boolean> => {
+    if (!shenEnabledForSession) {
+      return false;
     }
     const rtm = rtmClientRef.current;
-    if (!rtm) return null;
-    return async (message: string): Promise<boolean> => {
-      try {
-        const ch = channelRef.current;
-        if (!ch) return false;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (rtm as any).publish?.(ch, message);
-        return true;
-      } catch {
-        return false;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rtmClientRef.current]);
+    const ch = channelRef.current;
+    if (!rtm || !ch) return false;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (rtm as any).publish?.(ch, message);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [shenEnabledForSession, rtmClientRef]);
 
   const shenState = useShenai(
-    SHEN_ENABLED &&
-      isConnected &&
-      isLocalVideoActive &&
-      (!meetingMode || meetingVideoBiomarkersEnabled),
+    isConnected && shenEnabledForSession,
     SHEN_API_KEY,
-    shenRtmPublish,
+    shenEnabledForSession ? shenRtmPublish : null,
     "shen-canvas",
   );
 
   // Move the shen canvas between desktop/mobile containers based on screen size
   useEffect(() => {
     if (
-      !SHEN_ENABLED ||
       !isConnected ||
-      !isLocalVideoActive ||
-      (meetingMode && !meetingVideoBiomarkersEnabled)
+      !shenEnabledForSession
     ) return;
 
     // Create the canvas once
@@ -764,7 +758,7 @@ export function VideoAvatarClient() {
     const mql = window.matchMedia("(max-width: 767px)");
     mql.addEventListener("change", moveCanvas);
     return () => mql.removeEventListener("change", moveCanvas);
-  }, [isConnected, isLocalVideoActive, meetingMode, meetingVideoBiomarkersEnabled]);
+  }, [isConnected, shenEnabledForSession]);
 
   const handleStart = async () => {
     if (authError) {
@@ -1228,10 +1222,7 @@ export function VideoAvatarClient() {
   };
 
   const showThymiaPanel = meetingAudioBiomarkersEnabled;
-  const showShenPanel =
-    SHEN_ENABLED &&
-    isLocalVideoActive &&
-    (!meetingMode || meetingVideoBiomarkersEnabled);
+  const showShenPanel = shenEnabledForSession;
   const showBiomarkersPanel =
     meetingAudioBiomarkersEnabled || meetingVideoBiomarkersEnabled;
 
