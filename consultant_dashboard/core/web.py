@@ -2296,6 +2296,113 @@ def _client_demographics_from_form(req) -> tuple[Optional[int], str]:
     return year_of_birth, sex
 
 
+def _checkbox_enabled(req, name: str, default: bool = False) -> bool:
+    if name not in req.form:
+        return default
+    return "1" in req.form.getlist(name)
+
+
+def _load_session_detail_assets(db, session_row, session_id: str):
+    storage = _storage()
+    summary = None
+    transcript = None
+    transcript_text = ""
+    biomarkers = None
+    if session_row["summary_storage_key"]:
+        summary = storage.get_json(session_row["summary_storage_key"], session_row["client_id"])
+    if session_row["transcript_storage_key"]:
+        transcript = storage.get_json(session_row["transcript_storage_key"], session_row["client_id"])
+        if isinstance(transcript, dict):
+            text = transcript.get("text")
+            if isinstance(text, str):
+                transcript_text = text.strip()
+            elif isinstance(transcript.get("lines"), list):
+                transcript_text = "\n".join(
+                    str(line.get("text", "")).strip()
+                    for line in transcript["lines"]
+                    if isinstance(line, dict) and str(line.get("text", "")).strip()
+                ).strip()
+        elif isinstance(transcript, str):
+            transcript_text = transcript.strip()
+    if session_row["biomarker_storage_key"]:
+        biomarkers = storage.get_json(session_row["biomarker_storage_key"], session_row["client_id"])
+    session_at = session_row["ended_at"] or session_row["started_at"] or session_row["created_at"]
+    if isinstance(biomarkers, dict) and "history_averages" not in biomarkers:
+        history_snapshot = compute_biomarker_history_snapshot(
+            storage,
+            db,
+            client_id=session_row["client_id"],
+            session_id=session_id,
+            session_at=session_at,
+        )
+        biomarkers = dict(biomarkers)
+        biomarkers["history_averages"] = history_snapshot.get("averages") or {}
+        biomarkers["history_window_sessions"] = int(history_snapshot.get("window_sessions") or 0)
+    escalation_event = get_latest_escalation_event(db, session_id=session_id)
+    biomarkers = _backfill_session_safety_from_escalation_event(biomarkers, escalation_event)
+    escalation_summary_line = _session_escalation_summary_line(escalation_event)
+    session_biomarkers = _build_session_biomarker_view(
+        biomarkers,
+        audio_enabled=bool(session_row["audio_biomarkers_enabled"]),
+        video_enabled=bool(session_row["video_biomarkers_enabled"]),
+    )
+    alerts = db.execute(
+        """
+        SELECT *
+        FROM session_alerts
+        WHERE session_id = ?
+        ORDER BY created_at DESC
+        """,
+        (session_id,),
+    ).fetchall()
+    feedback = get_session_feedback(db, session_id)
+    return {
+        "summary": summary,
+        "transcript": transcript,
+        "transcript_text": transcript_text,
+        "biomarkers": biomarkers,
+        "biomarker_headlines": session_biomarkers["headlines"],
+        "biomarker_groups": session_biomarkers["groups"],
+        "biomarker_safety": session_biomarkers["safety"],
+        "biomarker_empty_message": session_biomarkers["empty_message"],
+        "alerts": alerts,
+        "feedback": feedback,
+        "escalation_summary_line": escalation_summary_line,
+    }
+
+
+def _render_session_detail_page(*, theme: str, session_row, session_id: str, db, delete_action: str, client_detail_href: str = "", client_notes_href: str = ""):
+    assets = _load_session_detail_assets(db, session_row, session_id)
+    return render_template(
+        "consultant/session_detail.html",
+        brand=_brand_name(),
+        theme=theme,
+        session_row=session_row,
+        session_kind_display=_session_kind_display(session_row["session_kind"]),
+        is_human_session=(session_row["session_kind"] == "consultant_live_session"),
+        summary=assets["summary"],
+        transcript=assets["transcript"],
+        transcript_text=assets["transcript_text"],
+        transcript_enabled=bool(session_row["transcription_enabled"]),
+        audio_biomarkers_enabled=bool(session_row["audio_biomarkers_enabled"]),
+        video_biomarkers_enabled=bool(session_row["video_biomarkers_enabled"]),
+        biomarkers=assets["biomarkers"],
+        biomarker_headlines=assets["biomarker_headlines"],
+        biomarker_groups=assets["biomarker_groups"],
+        biomarker_safety=assets["biomarker_safety"],
+        biomarker_show_history_average=True,
+        biomarker_show_safety_details=False,
+        biomarker_empty_message=assets["biomarker_empty_message"],
+        alerts=assets["alerts"],
+        escalation_summary_line=assets["escalation_summary_line"],
+        feedback=assets["feedback"],
+        feedback_face=_feedback_face(int(assets["feedback"]["rating"])) if assets["feedback"] else "",
+        delete_action=delete_action,
+        client_detail_href=client_detail_href,
+        client_notes_href=client_notes_href,
+    )
+
+
 @web_bp.route("/consultant/clients/new", methods=["GET", "POST"])
 @require_consultant
 def consultant_client_new():
@@ -2305,6 +2412,7 @@ def consultant_client_new():
         "phone_country_code": "US",
         "escalation_phone_country_code": "US",
         "sex": "",
+        "ai_escalation_enabled": True,
     }
     if request.method == "POST":
         first_name, last_name, display_name = _client_name_fields_from_form(request)
@@ -2330,6 +2438,7 @@ def consultant_client_new():
                 "escalation_phone_country_code": escalation_phone_country_code,
                 "year_of_birth": (request.form.get("year_of_birth") or "").strip(),
                 "sex": (request.form.get("sex") or "").strip().lower(),
+                "ai_escalation_enabled": _checkbox_enabled(request, "ai_escalation_enabled", default=False),
                 "notes": request.form.get("notes", "").strip(),
                 "direction": request.form.get("direction", "").strip(),
             }
@@ -2366,6 +2475,7 @@ def consultant_client_new():
                 phone_number=phone_number,
                 notification_email=notification_email,
                 escalation_phone_number=escalation_phone_number,
+                ai_escalation_enabled=_checkbox_enabled(request, "ai_escalation_enabled", default=False),
                 year_of_birth=year_of_birth,
                 sex=sex,
                 notes=notes,
@@ -2537,6 +2647,7 @@ def consultant_client_detail(client_id: str):
                         phone_number=phone_number,
                         notification_email=notification_email,
                         escalation_phone_number=escalation_phone_number,
+                        ai_escalation_enabled=_checkbox_enabled(request, "ai_escalation_enabled", default=False),
                         year_of_birth=year_of_birth,
                         sex=sex,
                         notes=notes,
@@ -3497,9 +3608,14 @@ def consultant_sessions():
         theme="consultant",
         sessions=decorated_sessions,
         clients=clients,
+        consultants=[],
+        vendors=[],
+        selected_vendor_id="",
+        selected_consultant_id="",
         selected_client_id=selected_client_id,
         selected_session_types=selected_session_types,
         search=search,
+        session_detail_path_prefix=tenant_path('/consultant/sessions/'),
     )
 
 
@@ -3513,86 +3629,17 @@ def consultant_session_detail(session_id: str):
         db.close()
         abort(404)
 
-    storage = _storage()
-    summary = None
-    transcript = None
-    transcript_text = ""
-    biomarkers = None
-    feedback = None
-    if session_row["summary_storage_key"]:
-        summary = storage.get_json(session_row["summary_storage_key"], session_row["client_id"])
-    if session_row["transcript_storage_key"]:
-        transcript = storage.get_json(session_row["transcript_storage_key"], session_row["client_id"])
-        if isinstance(transcript, dict):
-            text = transcript.get("text")
-            if isinstance(text, str):
-                transcript_text = text.strip()
-            elif isinstance(transcript.get("lines"), list):
-                transcript_text = "\n".join(
-                    str(line.get("text", "")).strip()
-                    for line in transcript["lines"]
-                    if isinstance(line, dict) and str(line.get("text", "")).strip()
-                ).strip()
-        elif isinstance(transcript, str):
-            transcript_text = transcript.strip()
-    if session_row["biomarker_storage_key"]:
-        biomarkers = storage.get_json(session_row["biomarker_storage_key"], session_row["client_id"])
-    session_at = session_row["ended_at"] or session_row["started_at"] or session_row["created_at"]
-    if isinstance(biomarkers, dict) and "history_averages" not in biomarkers:
-        history_snapshot = compute_biomarker_history_snapshot(
-            storage,
-            db,
-            client_id=session_row["client_id"],
-            session_id=session_id,
-            session_at=session_at,
-        )
-        biomarkers = dict(biomarkers)
-        biomarkers["history_averages"] = history_snapshot.get("averages") or {}
-        biomarkers["history_window_sessions"] = int(history_snapshot.get("window_sessions") or 0)
-    escalation_event = get_latest_escalation_event(db, session_id=session_id)
-    biomarkers = _backfill_session_safety_from_escalation_event(biomarkers, escalation_event)
-    escalation_summary_line = _session_escalation_summary_line(escalation_event)
-    session_biomarkers = _build_session_biomarker_view(
-        biomarkers,
-        audio_enabled=bool(session_row["audio_biomarkers_enabled"]),
-        video_enabled=bool(session_row["video_biomarkers_enabled"]),
-    )
-    alerts = db.execute(
-        """
-        SELECT *
-        FROM session_alerts
-        WHERE session_id = ?
-        ORDER BY created_at DESC
-        """,
-        (session_id,),
-    ).fetchall()
-    feedback = get_session_feedback(db, session_id)
-    db.close()
-    return render_template(
-        "consultant/session_detail.html",
-        brand=_brand_name(),
+    response = _render_session_detail_page(
         theme="consultant",
         session_row=session_row,
-        session_kind_display=_session_kind_display(session_row["session_kind"]),
-        is_human_session=(session_row["session_kind"] == "consultant_live_session"),
-        summary=summary,
-        transcript=transcript,
-        transcript_text=transcript_text,
-        transcript_enabled=bool(session_row["transcription_enabled"]),
-        audio_biomarkers_enabled=bool(session_row["audio_biomarkers_enabled"]),
-        video_biomarkers_enabled=bool(session_row["video_biomarkers_enabled"]),
-        biomarkers=biomarkers,
-        biomarker_headlines=session_biomarkers["headlines"],
-        biomarker_groups=session_biomarkers["groups"],
-        biomarker_safety=session_biomarkers["safety"],
-        biomarker_show_history_average=True,
-        biomarker_show_safety_details=False,
-        biomarker_empty_message=session_biomarkers["empty_message"],
-        alerts=alerts,
-        escalation_summary_line=escalation_summary_line,
-        feedback=feedback,
-        feedback_face=_feedback_face(int(feedback["rating"])) if feedback else "",
+        session_id=session_id,
+        db=db,
+        delete_action=tenant_path('/consultant/sessions/' + session_id + '/delete'),
+        client_detail_href=tenant_path('/consultant/clients/' + session_row["client_id"]),
+        client_notes_href=tenant_path('/consultant/clients/' + session_row["client_id"]) + '#notes',
     )
+    db.close()
+    return response
 
 
 @web_bp.post("/consultant/sessions/<session_id>/delete")
@@ -3930,6 +3977,7 @@ def admin_consultant_detail(consultant_id: str):
         notification_email = request.form.get("notification_email", "").strip() or email
         raw_escalation_phone = request.form.get("escalation_phone_number", "").strip()
         reset_password = request.form.get("reset_password", "").strip()
+        ai_testing_mode = _checkbox_enabled(request, "ai_testing_mode", default=False)
 
         if not email or not name or not raw_phone_number:
             flash("Email, name, and phone number are required", "error")
@@ -3949,6 +3997,7 @@ def admin_consultant_detail(consultant_id: str):
                     phone_number=phone_number,
                     notification_email=notification_email,
                     escalation_phone_number=escalation_phone_number,
+                    ai_testing_mode=ai_testing_mode,
                 )
                 if reset_password:
                     if len(reset_password) < 8:
@@ -3999,6 +4048,143 @@ def admin_consultant_detail(consultant_id: str):
         phone_form=_phone_form_value(consultant["phone_number"]),
         escalation_phone_form=_phone_form_value(consultant["escalation_phone_number"]),
     )
+
+
+@web_bp.get("/admin/sessions")
+@require_admin
+def admin_sessions():
+    db = get_db(current_app.config)
+    vendors = list_vendors(db)
+    selected_vendor_id = (request.args.get("vendor_id") or "").strip()
+    selected_consultant_id = (request.args.get("consultant_id") or "").strip()
+    selected_client_id = (request.args.get("client_id") or "").strip()
+    search = (request.args.get("q") or "").strip().lower()
+    selected_session_types = {
+        (value or "").strip().lower()
+        for value in request.args.getlist("type")
+        if (value or "").strip().lower() in {"human", "ai"}
+    }
+    if not selected_session_types:
+        selected_session_types = {"human", "ai"}
+
+    consultant_sql = "WHERE is_active = 1"
+    client_sql = "WHERE is_active = 1"
+    params = []
+    if selected_vendor_id:
+        consultant_sql += " AND vendor_id = ?"
+        client_sql += " AND vendor_id = ?"
+        params.append(selected_vendor_id)
+    consultants = db.execute(
+        f"SELECT id, name, vendor_id FROM consultants {consultant_sql} ORDER BY name ASC",
+        params,
+    ).fetchall()
+    clients = db.execute(
+        f"SELECT id, display_name, vendor_id FROM clients {client_sql} ORDER BY display_name ASC",
+        params,
+    ).fetchall()
+    sessions = list_sessions(db, limit=200)
+    storage = _storage()
+    decorated_sessions = []
+    for session_row in sessions:
+        row = dict(session_row)
+        if selected_vendor_id and row.get("vendor_id") != selected_vendor_id:
+            continue
+        if selected_consultant_id and row.get("consultant_id") != selected_consultant_id:
+            continue
+        if selected_client_id and row.get("client_id") != selected_client_id:
+            continue
+        row["session_kind_display"] = _session_kind_display(row.get("session_kind", ""))
+        session_type = "human" if row.get("session_kind") == "consultant_live_session" else "ai"
+        row["session_type"] = session_type
+        if session_type not in selected_session_types:
+            continue
+        summary_search_text = ""
+        if row.get("summary_storage_key"):
+            summary_payload = storage.get_json(row["summary_storage_key"], row["client_id"]) or {}
+            summary_search_text = " ".join(
+                part for part in [
+                    summary_payload.get("brief_overview", ""),
+                    summary_payload.get("overview", ""),
+                    summary_payload.get("full_summary", ""),
+                ] if part
+            ).strip()
+        row["summary_search_text"] = summary_search_text
+        haystack = " ".join(
+            [
+                str(row.get("display_name") or ""),
+                str(row.get("consultant_name") or ""),
+                summary_search_text,
+                str(row.get("status") or ""),
+            ]
+        ).lower()
+        if search and search not in haystack:
+            continue
+        decorated_sessions.append(row)
+    db.close()
+    return render_template(
+        "consultant/sessions.html",
+        brand=_brand_name(),
+        theme="admin",
+        sessions=decorated_sessions,
+        clients=clients,
+        consultants=consultants,
+        vendors=vendors,
+        selected_vendor_id=selected_vendor_id,
+        selected_consultant_id=selected_consultant_id,
+        selected_client_id=selected_client_id,
+        selected_session_types=selected_session_types,
+        search=search,
+        session_detail_path_prefix=tenant_path('/admin/sessions/'),
+    )
+
+
+@web_bp.get("/admin/sessions/<session_id>")
+@require_admin
+def admin_session_detail(session_id: str):
+    db = get_db(current_app.config)
+    session_row = get_session_detail(db, session_id)
+    if not session_row:
+        db.close()
+        abort(404)
+    response = _render_session_detail_page(
+        theme="admin",
+        session_row=session_row,
+        session_id=session_id,
+        db=db,
+        delete_action=tenant_path('/admin/sessions/' + session_id + '/delete'),
+    )
+    db.close()
+    return response
+
+
+@web_bp.post("/admin/sessions/<session_id>/delete")
+@require_admin
+def admin_session_delete(session_id: str):
+    db = get_db(current_app.config)
+    session_row = get_session_detail(db, session_id)
+    if not session_row:
+        db.close()
+        abort(404)
+    storage = _storage()
+    client_id = session_row["client_id"]
+    delete_session(db, session_id=session_id)
+    _refresh_client_derived_state(db, storage, client_id)
+    log_audit(
+        db,
+        actor_type="admin",
+        actor_id=session.get("admin_email", "unknown"),
+        action="session_deleted",
+        target_type="session",
+        target_id=session_id,
+        session_id=session_id,
+        ip_address=request.headers.get("X-Forwarded-For", request.remote_addr or ""),
+        user_agent=request.headers.get("User-Agent", ""),
+        details={"client_id": client_id},
+    )
+    db.commit()
+    db.close()
+    flash("Session deleted", "muted")
+    return redirect(tenant_url_for("web.admin_sessions"))
 
 
 @web_bp.post("/admin/consultants/<consultant_id>/delete")

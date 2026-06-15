@@ -40,6 +40,21 @@
 5. Avoid putting business logic in Jinja templates.
 6. Update `03_code_map.md` if the page adds a new stable area.
 
+## Configure AI Testing Mode / AI Escalation
+
+1. Admin enables `AI Testing Mode` from the consultant detail page.
+2. Consultant controls `AI escalation enabled` per client from the client create/edit form.
+3. Resulting behavior:
+   - consultant testing mode stores full AI transcripts for that consultant's AI sessions
+   - client escalation disabled suppresses live AI escalation actions for that client
+4. Verify in tests:
+   - `consultant_dashboard/tests/test_web_dashboard.py`
+   - `consultant_dashboard/tests/test_internal_api.py`
+5. Verify in the UI:
+   - admin consultant detail page shows the testing toggle
+   - consultant client form shows the escalation toggle
+   - admin sessions page can view and delete stored AI sessions
+
 For biomarker-heavy consultant pages, keep the overview page compact:
 
 - show only a few headline biomarker values by default

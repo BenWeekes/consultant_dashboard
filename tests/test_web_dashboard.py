@@ -2469,6 +2469,68 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Enter a valid UK phone number.", response.data)
 
+    def test_admin_can_enable_consultant_ai_testing_mode(self):
+        self.admin_login()
+        db = get_db(self.app.config)
+        consultant = get_consultant_by_email(db, "consultant@example.com", vendor_id=self.vendor_id)
+        db.close()
+
+        response = self.client.post(
+            f"/admin/consultants/{consultant['id']}",
+            data={
+                "name": consultant["name"],
+                "email": consultant["email"],
+                "phone_country_code": "UK",
+                "phone_number": "7700900000",
+                "notification_email": consultant["notification_email"],
+                "escalation_phone_country_code": "UK",
+                "escalation_phone_number": "7700900000",
+                "ai_testing_mode": "1",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Consultant updated", response.data)
+
+        db = get_db(self.app.config)
+        refreshed = db.execute(
+            "SELECT ai_testing_mode FROM consultants WHERE id = ?",
+            (consultant["id"],),
+        ).fetchone()
+        db.close()
+        self.assertEqual(refreshed["ai_testing_mode"], 1)
+
+    def test_consultant_can_disable_client_ai_escalation(self):
+        self.consultant_login()
+        response = self.client.post(
+            f"/consultant/clients/{self.client_id}",
+            data={
+                "first_name": "Alex",
+                "last_name": "Demo",
+                "email": "alex@example.com",
+                "phone_country_code": "UK",
+                "phone_number": "7700900111",
+                "notification_email": "alex@example.com",
+                "escalation_phone_country_code": "UK",
+                "escalation_phone_number": "7700900000",
+                "year_of_birth": "1974",
+                "sex": "male",
+                "notes": "Generalized notes only.",
+                "direction": "Check stress and routines.",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Client updated", response.data)
+
+        db = get_db(self.app.config)
+        row = db.execute(
+            "SELECT ai_escalation_enabled FROM clients WHERE id = ?",
+            (self.client_id,),
+        ).fetchone()
+        db.close()
+        self.assertEqual(row["ai_escalation_enabled"], 0)
+
     def test_consultant_client_list_and_session_detail_render(self):
         self.ingest_session(session_id="sess_web_001", urgent_escalation=True)
         self.consultant_login()
@@ -2525,6 +2587,49 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         self.assertIn(b"Crisis Level", response.data)
         safety_block = response.data.split(b"<strong>Crisis Level</strong>", 1)[1][:300]
         self.assertNotIn(b"100%", safety_block)
+
+    def test_ai_session_detail_renders_stored_transcript_for_consultant_and_admin(self):
+        self.ingest_session(
+            session_id="sess_ai_transcript_001",
+            urgent_escalation=False,
+            transcript={
+                "provider": "conversation_store",
+                "text": "Client: I feel overwhelmed.\nTherapist: Tell me more.",
+            },
+        )
+        self.consultant_login()
+        response = self.client.get("/consultant/sessions/sess_ai_transcript_001")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Transcript", response.data)
+        self.assertIn(b"Client: I feel overwhelmed.", response.data)
+
+        self.admin_login()
+        response = self.client.get("/admin/sessions/sess_ai_transcript_001")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Transcript", response.data)
+        self.assertIn(b"Client: I feel overwhelmed.", response.data)
+
+    def test_admin_sessions_list_filters_and_delete(self):
+        self.ingest_session(session_id="sess_admin_list_001", urgent_escalation=False)
+        self.admin_login()
+
+        response = self.client.get(f"/admin/sessions?consultant_id={self.consultant_id}&client_id={self.client_id}&type=ai")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"sess_admin_list_001", response.data)
+        self.assertIn(b"Test Consultant", response.data)
+        self.assertIn(b"Alex Demo", response.data)
+
+        response = self.client.post(
+            "/admin/sessions/sess_admin_list_001/delete",
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Session deleted", response.data)
+
+        db = get_db(self.app.config)
+        row = db.execute("SELECT id FROM sessions WHERE id = 'sess_admin_list_001'").fetchone()
+        db.close()
+        self.assertIsNone(row)
 
     @mock.patch("consultant_dashboard.core.web.deliver_email", return_value=("sent", ""))
     def test_consultant_can_send_email_message(self, mocked_deliver_email):

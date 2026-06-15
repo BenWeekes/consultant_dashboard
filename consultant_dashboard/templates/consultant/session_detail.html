@@ -1,12 +1,22 @@
 {% extends "shared/base.html" %}
 {% block body %}
-  {% include "consultant/_nav.html" %}
+  {% if theme == "admin" %}
+    {% include "admin/_nav.html" %}
+  {% else %}
+    {% include "consultant/_nav.html" %}
+  {% endif %}
 
   <div class="card client-header">
     <div>
       <h1>{{ session_kind_display }}</h1>
       <div class="client-contact-line">
-        <span><a href="{{ tenant_path('/consultant/clients/' ~ session_row.client_id) }}">{{ session_row.display_name }}</a></span>
+        <span>
+          {% if client_detail_href %}
+            <a href="{{ client_detail_href }}">{{ session_row.display_name }}</a>
+          {% else %}
+            {{ session_row.display_name }}
+          {% endif %}
+        </span>
         <span class="client-sep">·</span>
         <span>{{ (session_row.ended_at or session_row.started_at or session_row.created_at)|display_dt }}</span>
         <span class="client-sep">·</span>
@@ -18,8 +28,10 @@
       </div>
     </div>
     <div class="actions">
-      <a href="{{ tenant_path('/consultant/clients/' ~ session_row.client_id) }}#notes" class="titlebar-link-button">Client Notes</a>
-      <form method="post" action="{{ tenant_path('/consultant/sessions/' ~ session_row.id ~ '/delete') }}" onsubmit="return confirm('Delete this session?');">
+      {% if client_notes_href %}
+        <a href="{{ client_notes_href }}" class="titlebar-link-button">Client Notes</a>
+      {% endif %}
+      <form method="post" action="{{ delete_action }}" onsubmit="return confirm('Delete this session?');">
         <button type="submit" class="titlebar-link-button">Delete Session</button>
       </form>
     </div>
@@ -73,7 +85,7 @@
           </div>
         {% endif %}
 
-        {% if is_human_session %}
+        {% if transcript_enabled or transcript or transcript_text %}
           <div class="session-side-section transcript-section">
             <div class="summary-card">
               <h3>Transcript</h3>

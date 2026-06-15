@@ -76,7 +76,10 @@ consultant-dashboard
 3. Service maps those hashes to `client_id` in `client_auth_identities`.
 4. `simple-backend` sends signed `GET /internal/client-context?client_id=...`.
 5. Service returns current notes, direction, demographics, recent summary, baseline, open alerts, and the stored client key point summaries.
-6. `simple-backend` passes the resulting context and dashboard callback config into `server-custom-llm`.
+6. The same context now also returns:
+   - `consultant_ai_testing_mode`
+   - `ai_escalation_enabled`
+7. `simple-backend` passes the resulting context and dashboard callback config into `server-custom-llm`.
 
 Normal production expectation:
 
@@ -113,6 +116,7 @@ Ownership rule:
 5. Service recomputes the rolling biomarker baseline from the latest ten stored biomarker snapshots.
 6. Service refreshes AI/human session counts, stores session alerts, and writes an audit log row.
 7. If crisis escalation occurred, the linked `escalation_events` row shares the same `session_id`.
+8. If the consultant has `AI Testing Mode` enabled, full AI transcripts are stored alongside the summary instead of only storing the summary artifact.
 
 Client feedback path:
 
@@ -151,6 +155,16 @@ Current end-of-call split:
 3. This service validates `client_id` + `session_id`, optionally validates `meeting_id`, and creates or reuses an `escalation_events` row.
 4. `server-custom-llm` dials the PSTN leg into the same Agora channel.
 5. It posts signed `POST /internal/crisis-escalate-status` transitions (`dialing`, `answered`, `failed`, `completed`).
+
+Current control split:
+
+- consultant `AI Testing Mode`
+  - applies to AI sessions for that consultant
+  - retains the full AI transcript for evaluation/review
+- client `AI escalation enabled`
+  - defaults to on
+  - when off, live AI escalation actions are suppressed for that client even if crisis-level safety is detected
+  - AI conversation continues, and the session can still be marked urgent from safety data
 
 ### Consultant messaging
 

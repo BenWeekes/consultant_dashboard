@@ -1,6 +1,10 @@
 {% extends "shared/base.html" %}
 {% block body %}
-  {% include "consultant/_nav.html" %}
+  {% if theme == "admin" %}
+    {% include "admin/_nav.html" %}
+  {% else %}
+    {% include "consultant/_nav.html" %}
+  {% endif %}
   <div class="card">
     <div class="panel-head">
       <div>
@@ -10,8 +14,26 @@
     <div class="history-toolbar">
       <div class="history-toolbar-left">
         <form method="get" class="actions" style="align-items: end;">
+          {% if theme == "admin" %}
+            <div>
+              <select id="vendor_id" name="vendor_id" onchange="this.form.submit()">
+                <option value="">All vendors</option>
+                {% for vendor in vendors or [] %}
+                  <option value="{{ vendor.id }}" {% if selected_vendor_id == vendor.id %}selected{% endif %}>{{ vendor.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div>
+              <select id="consultant_id" name="consultant_id" onchange="this.form.submit()">
+                <option value="">All consultants</option>
+                {% for consultant in consultants or [] %}
+                  <option value="{{ consultant.id }}" {% if selected_consultant_id == consultant.id %}selected{% endif %}>{{ consultant.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          {% endif %}
           <div>
-            <select id="client_id" name="client_id">
+            <select id="client_id" name="client_id" onchange="this.form.submit()">
               <option value="">All clients</option>
               {% for client in clients %}
                 <option value="{{ client.id }}" {% if selected_client_id == client.id %}selected{% endif %}>{{ client.display_name }}</option>
@@ -60,6 +82,9 @@
       <thead>
         <tr>
           <th>Client</th>
+          {% if theme == "admin" %}
+            <th>Consultant</th>
+          {% endif %}
           <th>Type</th>
           <th>When</th>
           <th>Status</th>
@@ -69,7 +94,10 @@
       <tbody>
       {% for session_row in sessions %}
         <tr>
-          <td><a href="{{ tenant_path('/consultant/sessions/' ~ session_row.id) }}">{{ session_row.display_name }}</a></td>
+          <td><a href="{{ session_detail_path_prefix ~ session_row.id }}">{{ session_row.display_name }}</a></td>
+          {% if theme == "admin" %}
+            <td>{{ session_row.consultant_name or "—" }}</td>
+          {% endif %}
           <td>{{ session_row.session_kind_display }}</td>
           <td>{{ (session_row.ended_at or session_row.started_at or session_row.created_at)|display_dt }}</td>
           <td>
@@ -80,7 +108,7 @@
           <td>{{ session_row.duration_seconds }}s</td>
         </tr>
       {% else %}
-        <tr><td colspan="5" class="muted">No sessions yet.</td></tr>
+        <tr><td colspan="{{ 6 if theme == 'admin' else 5 }}" class="muted">No sessions yet.</td></tr>
       {% endfor %}
       </tbody>
     </table>

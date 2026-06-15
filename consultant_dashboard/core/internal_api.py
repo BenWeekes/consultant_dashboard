@@ -161,6 +161,8 @@ def client_context():
         "sex": client["sex"] or "",
         "consultant_id": client["consultant_id"],
         "consultant_name": client["consultant_name"],
+        "consultant_ai_testing_mode": bool(client["consultant_ai_testing_mode"]),
+        "ai_escalation_enabled": bool(client["ai_escalation_enabled"]),
         "notes": client["notes_current"],
         "direction": client["direction_current"],
         "latest_summary": latest_summary,
@@ -285,6 +287,37 @@ def crisis_escalate_init():
 
     escalation_phone = ((meeting["client_escalation_phone_number"] if meeting else client["escalation_phone_number"]) or "").strip()
     alert = (payload.get("alert") or "").strip()
+    if not bool(client["ai_escalation_enabled"]):
+        event_id = create_escalation_event(
+            db,
+            meeting_id=meeting_id,
+            session_id=session_id,
+            client_id=client_id,
+            source=source,
+            safety_level=level,
+            alert=alert,
+            status="skipped",
+            reason="client_ai_escalation_disabled",
+            escalation_phone_number=escalation_phone,
+        )
+        log_audit(
+            db,
+            actor_type="system",
+            actor_id="server-custom-llm",
+            action="crisis_escalation_skipped",
+            target_type="meeting",
+            target_id=meeting_id,
+            session_id=session_id,
+            details={"client_id": client_id, "reason": "client_ai_escalation_disabled"},
+        )
+        db.commit()
+        db.close()
+        return {
+            "ok": True,
+            "escalate": False,
+            "reason": "client_ai_escalation_disabled",
+            "escalation_event_id": event_id,
+        }
     if not escalation_phone:
         event_id = create_escalation_event(
             db,

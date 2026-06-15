@@ -174,6 +174,24 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
         self.assertEqual(response.json["baseline"]["maxes"]["stress_index"], 64.2)
         self.assertEqual(response.json["baseline"]["maxes"]["safety_level"], 1.0)
         self.assertEqual(len(response.json["alerts"]), 2)
+        self.assertFalse(response.json["consultant_ai_testing_mode"])
+        self.assertTrue(response.json["ai_escalation_enabled"])
+
+    def test_client_context_returns_testing_and_ai_escalation_flags(self):
+        db = get_db(self.app.config)
+        db.execute("UPDATE consultants SET ai_testing_mode = 1 WHERE id = ?", (self.consultant_id,))
+        db.execute("UPDATE clients SET ai_escalation_enabled = 0 WHERE id = ?", (self.client_id,))
+        db.commit()
+        db.close()
+
+        query_string = f"client_id={self.client_id}"
+        response = self.client.get(
+            f"/internal/client-context?{query_string}",
+            headers=self.internal_headers("GET", "/internal/client-context", query_string),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json["consultant_ai_testing_mode"])
+        self.assertFalse(response.json["ai_escalation_enabled"])
 
     def test_client_context_preserves_prior_ai_kps_when_second_session_omits_it(self):
         self.ingest_session(session_id="sess_internal_keep_kps_001", urgent_escalation=False)
@@ -276,6 +294,31 @@ class ConsultantDashboardInternalApiTest(ConsultantDashboardTestCase):
         self.assertTrue(response.json["ok"])
         self.assertFalse(response.json["escalate"])
         self.assertEqual(response.json["reason"], "missing_phone")
+
+    def test_crisis_escalate_init_returns_skipped_when_ai_escalation_disabled(self):
+        db = get_db(self.app.config)
+        db.execute("UPDATE clients SET ai_escalation_enabled = 0 WHERE id = ?", (self.client_id,))
+        db.commit()
+        db.close()
+        payload = {
+            "client_id": self.client_id,
+            "session_id": "sess_crisis_disabled",
+            "channel_name": "ai-room-disabled",
+            "level": 3,
+            "alert": "urgent",
+            "source": "thymia",
+        }
+        body = json.dumps(payload, separators=(",", ":"))
+        response = self.client.post(
+            "/internal/crisis-escalate-init",
+            data=body,
+            content_type="application/json",
+            headers=self.internal_headers("POST", "/internal/crisis-escalate-init", body),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json["ok"])
+        self.assertFalse(response.json["escalate"])
+        self.assertEqual(response.json["reason"], "client_ai_escalation_disabled")
 
     def test_crisis_escalate_init_requires_numeric_level(self):
         payload = {

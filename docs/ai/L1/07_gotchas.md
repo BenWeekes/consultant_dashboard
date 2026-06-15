@@ -52,6 +52,10 @@
     - biomarker safety max reaches crisis threshold, or
     - a linked `escalation_events` row already shows crisis-level escalation
   - do not assume the sender is the only source of truth for this flag
+- **AI transcript retention and AI escalation are now controlled in different places.**
+  - consultant `AI Testing Mode` controls whether full AI transcripts are retained
+  - client `AI escalation enabled` controls whether live AI escalation actions can fire
+  - do not treat consultant testing mode as an escalation-disable switch
 - **Server-rendered tests can miss layout bugs.**
   - the consultant client page needed a browser-level measurement pass because equal-height outer grid rows did not guarantee equal-height inner cards
   - when spacing or panel heights matter, inspect live `getBoundingClientRect()` and computed styles instead of trusting only HTML assertions

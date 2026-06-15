@@ -2,5 +2,6 @@
   <a href="{{ tenant_url_for('web.admin_dashboard') }}" class="{% if request.path == '/admin/dashboard' %}nav-active{% endif %}">Overview</a>
   <a href="{{ tenant_url_for('web.admin_vendors') }}" class="{% if request.path.startswith('/admin/vendors') %}nav-active{% endif %}">Vendors</a>
   <a href="{{ tenant_url_for('web.admin_consultants') }}" class="{% if request.path.startswith('/admin/consultants') %}nav-active{% endif %}">Consultants</a>
+  <a href="{{ tenant_url_for('web.admin_sessions') }}" class="{% if request.path.startswith('/admin/sessions') %}nav-active{% endif %}">Sessions</a>
   <a href="{{ tenant_url_for('auth.admin_account') }}" class="{% if request.path == '/admin/account' %}nav-active{% endif %}">Account</a>
 </div>

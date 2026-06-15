@@ -48,6 +48,7 @@ Contract expectations:
 - `crisis-escalate-status` rejects unknown phases with `400`
 - `crisis-escalate-status` returns `404` if the `escalation_event_id` does not exist
 - `client-context` is the canonical prompt-bootstrap contract for `server-custom-llm`
+  - includes `consultant_ai_testing_mode` and `ai_escalation_enabled`
 - `session-complete` is the canonical ingestion contract for:
   - session key point summaries
   - client key point summaries

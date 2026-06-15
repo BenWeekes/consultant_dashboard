@@ -89,9 +89,13 @@ def _ensure_migrations(db: sqlite3.Connection, config: Optional[dict] = None) ->
     if "vendor_id" not in consultant_columns:
         db.execute("ALTER TABLE consultants ADD COLUMN vendor_id TEXT")
         db.execute("UPDATE consultants SET vendor_id = ? WHERE vendor_id IS NULL OR vendor_id = ''", (default_vendor_id,))
+    if "ai_testing_mode" not in consultant_columns:
+        db.execute("ALTER TABLE consultants ADD COLUMN ai_testing_mode INTEGER NOT NULL DEFAULT 0")
     if "vendor_id" not in client_columns:
         db.execute("ALTER TABLE clients ADD COLUMN vendor_id TEXT")
         db.execute("UPDATE clients SET vendor_id = ? WHERE vendor_id IS NULL OR vendor_id = ''", (default_vendor_id,))
+    if "ai_escalation_enabled" not in client_columns:
+        db.execute("ALTER TABLE clients ADD COLUMN ai_escalation_enabled INTEGER NOT NULL DEFAULT 1")
     if "password_hash" not in client_columns:
         db.execute("ALTER TABLE clients ADD COLUMN password_hash TEXT")
     if "ai_summary_storage_key" not in client_columns:
@@ -755,13 +759,14 @@ def create_consultant(
     password_hash: str,
     notification_email: str,
     escalation_phone_number: str,
+    ai_testing_mode: bool = False,
 ) -> None:
     db.execute(
         """
         INSERT INTO consultants (
             vendor_id, email, password_hash, name, phone_number,
-            notification_email, escalation_phone_number, is_active
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+            notification_email, escalation_phone_number, ai_testing_mode, is_active
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
         """,
         (
             vendor_id or _default_vendor_id(db),
@@ -771,6 +776,7 @@ def create_consultant(
             phone_number.strip(),
             notification_email.strip(),
             escalation_phone_number.strip(),
+            1 if ai_testing_mode else 0,
         ),
     )
 
@@ -834,6 +840,7 @@ def update_consultant(
     phone_number: str,
     notification_email: str,
     escalation_phone_number: str,
+    ai_testing_mode: bool = False,
 ) -> None:
     db.execute(
         """
@@ -843,6 +850,7 @@ def update_consultant(
             phone_number = ?,
             notification_email = ?,
             escalation_phone_number = ?,
+            ai_testing_mode = ?,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
@@ -852,6 +860,7 @@ def update_consultant(
             phone_number.strip(),
             notification_email.strip(),
             escalation_phone_number.strip(),
+            1 if ai_testing_mode else 0,
             consultant_id,
         ),
     )
@@ -898,6 +907,7 @@ def update_client(
     phone_number: str,
     notification_email: str,
     escalation_phone_number: str,
+    ai_escalation_enabled: bool,
     year_of_birth: Optional[int],
     sex: str,
     notes: str,
@@ -913,6 +923,7 @@ def update_client(
             phone_number = ?,
             notification_email = ?,
             escalation_phone_number = ?,
+            ai_escalation_enabled = ?,
             year_of_birth = ?,
             sex = ?,
             notes_current = ?,
@@ -928,6 +939,7 @@ def update_client(
             phone_number.strip(),
             notification_email.strip(),
             escalation_phone_number.strip(),
+            1 if ai_escalation_enabled else 0,
             year_of_birth,
             sex.strip().lower(),
             notes.strip(),
@@ -1056,6 +1068,7 @@ def create_client(
     phone_number: str,
     notification_email: str,
     escalation_phone_number: str,
+    ai_escalation_enabled: bool = True,
     year_of_birth: Optional[int],
     sex: str,
     notes: str,
@@ -1065,9 +1078,9 @@ def create_client(
         """
         INSERT INTO clients (
             vendor_id, first_name, last_name, display_name, email, password_hash, phone_number, notification_email,
-            escalation_phone_number, year_of_birth, sex, notes_current, direction_current,
+            escalation_phone_number, ai_escalation_enabled, year_of_birth, sex, notes_current, direction_current,
             created_by_consultant_id, is_active
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
         """,
         (
             vendor_id or _vendor_id_for_consultant(db, consultant_id),
@@ -1079,6 +1092,7 @@ def create_client(
             phone_number.strip(),
             notification_email.strip(),
             escalation_phone_number.strip(),
+            1 if ai_escalation_enabled else 0,
             year_of_birth,
             sex.strip().lower(),
             notes.strip(),
@@ -2114,7 +2128,8 @@ def resolve_client_identity(db: sqlite3.Connection, vendor_id: str = "", **hashe
 def get_client_context(db: sqlite3.Connection, client_id: str):
     client = db.execute(
         """
-        SELECT c.*, cc.consultant_id, co.name AS consultant_name, co.email AS consultant_email
+        SELECT c.*, cc.consultant_id, co.name AS consultant_name, co.email AS consultant_email,
+               co.ai_testing_mode AS consultant_ai_testing_mode
         FROM clients c
         LEFT JOIN consultant_clients cc ON cc.client_id = c.id
         LEFT JOIN consultants co ON co.id = cc.consultant_id
@@ -2285,7 +2300,9 @@ def list_sessions(db: sqlite3.Connection, consultant_id: Optional[str] = None, l
         ).fetchall()
     return db.execute(
         """
-        SELECT s.*, c.display_name, c.email, c.phone_number, co.name AS consultant_name
+        SELECT s.*, c.display_name, c.email, c.phone_number, co.name AS consultant_name,
+               c.ai_escalation_enabled, co.ai_testing_mode AS consultant_ai_testing_mode,
+               c.vendor_id
         FROM sessions s
         JOIN clients c ON c.id = s.client_id
         LEFT JOIN consultants co ON co.id = s.consultant_id
@@ -2318,7 +2335,8 @@ def get_session_detail(db: sqlite3.Connection, session_id: str, consultant_id: O
     return db.execute(
         f"""
         SELECT s.*, c.display_name, c.email, c.phone_number, c.notes_current, c.direction_current,
-               c.baseline_storage_key, co.name AS consultant_name
+               c.baseline_storage_key, c.ai_escalation_enabled, c.vendor_id,
+               co.name AS consultant_name, co.ai_testing_mode AS consultant_ai_testing_mode
         FROM sessions s
         JOIN clients c ON c.id = s.client_id
         LEFT JOIN consultants co ON co.id = s.consultant_id

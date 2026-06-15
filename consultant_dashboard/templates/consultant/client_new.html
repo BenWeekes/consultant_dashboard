@@ -66,6 +66,12 @@
       </div>
       <div class="field-help">Only US and UK numbers are supported for now. This number is used for SMS verification on every client login.</div>
 
+      <label class="toggle-row" style="margin-top: 10px;">
+        <input type="checkbox" name="ai_escalation_enabled" value="1" {% if form_defaults.ai_escalation_enabled is not defined or form_defaults.ai_escalation_enabled %}checked{% endif %}>
+        <span>AI escalation enabled</span>
+      </label>
+      <div class="field-help">On by default. Turn this off if AI sessions for this client should never trigger live escalation actions.</div>
+
       <label class="field-label">Notification Email <span class="tooltip" tabindex="0" data-tooltip="Receives session-complete and urgent escalation notifications. Defaults to the consultant email if left blank.">?</span></label>
       <input name="notification_email" type="email" placeholder="Notification email" value="{{ form_defaults.notification_email or '' }}">
 
