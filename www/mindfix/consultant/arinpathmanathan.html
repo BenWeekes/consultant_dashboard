@@ -75,73 +75,12 @@
       box-shadow: 0 24px 54px rgba(27, 40, 56, 0.22);
     }
 
-    .consultant-landing-placeholder {
-      aspect-ratio: 860 / 437;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background:
-        radial-gradient(circle at top left, rgba(255,255,255,0.28), transparent 42%),
-        linear-gradient(135deg, #0f7b63 0%, #1b2838 100%);
-      color: white;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .consultant-landing-placeholder::before,
-    .consultant-landing-placeholder::after {
-      content: "";
-      position: absolute;
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.08);
-    }
-
-    .consultant-landing-placeholder::before {
-      width: 240px;
-      height: 240px;
-      top: -72px;
-      right: -60px;
-    }
-
-    .consultant-landing-placeholder::after {
-      width: 180px;
-      height: 180px;
-      bottom: -54px;
-      left: -36px;
-    }
-
-    .consultant-landing-placeholder-inner {
-      position: relative;
-      z-index: 1;
-      text-align: center;
-      padding: 36px;
-    }
-
-    .consultant-landing-monogram {
-      width: 112px;
-      height: 112px;
-      margin: 0 auto 18px;
-      border-radius: 999px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: rgba(255, 255, 255, 0.14);
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      font-family: "Raleway", ui-sans-serif, system-ui, sans-serif;
-      font-size: 2.15rem;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-    }
-
-    .consultant-landing-placeholder h2 {
-      font-size: clamp(1.5rem, 3vw, 2.2rem);
-      margin-bottom: 10px;
-    }
-
-    .consultant-landing-placeholder p {
-      margin: 0;
-      color: rgba(255, 255, 255, 0.88);
-      font-size: 1rem;
+    .consultant-landing-image {
+      display: block;
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      object-fit: cover;
+      object-position: center 20%;
     }
 
     @media (max-width: 991.98px) {
@@ -192,7 +131,7 @@
           <div class="col-lg-5">
             <div class="consultant-landing-copy">
               <span class="eyebrow">MindFix AI Therapy</span>
-              <h1>Connect with Dr Arin Pathmanathan’s AI therapy session</h1>
+              <h1>Connect with Dr Arin’s AI therapy session</h1>
               <a
                 href="/app?profile=therapy&autoconnect=true&returnurl=/"
                 id="arinStartLink"
@@ -216,13 +155,11 @@
                 data-avatar-id="8a58796c-690b-48db-b675-b9e1b5061c38"
                 data-voice-id="aEO01A4wXwd1O8GPgGlF"
               >
-                <div class="consultant-landing-placeholder">
-                  <div class="consultant-landing-placeholder-inner">
-                    <div class="consultant-landing-monogram">AP</div>
-                    <h2>Dr Arin Pathmanathan</h2>
-                    <p>AI therapy session access through MindFix</p>
-                  </div>
-                </div>
+                <img
+                  src="../img/consultants/arinpathmanathan.jpg"
+                  alt="Dr Arin Pathmanathan"
+                  class="consultant-landing-image"
+                >
               </a>
             </div>
           </div>
