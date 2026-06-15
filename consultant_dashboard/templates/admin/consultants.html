@@ -19,6 +19,7 @@
         <tr>
           <th>Name</th>
           <th>Vendor</th>
+          <th>Testing</th>
           <th>Contact</th>
           <th>Clients</th>
           <th>Sessions</th>
@@ -29,12 +30,13 @@
           <tr>
             <td><a href="{{ tenant_path('/admin/consultants/' ~ consultant.id) }}">{{ consultant.name }}</a></td>
             <td>{{ vendors_by_id[consultant.vendor_id].name if vendors_by_id[consultant.vendor_id] is defined else '—' }}</td>
+            <td>{{ 'Y' if consultant.ai_testing_mode else 'N' }}</td>
             <td>{{ consultant.email }}<br><span class="muted">{{ consultant.phone_number }}</span></td>
             <td>{{ consultant.client_count }}</td>
             <td>{{ consultant.session_count }}</td>
           </tr>
         {% else %}
-          <tr><td colspan="5" class="muted">No consultants yet.</td></tr>
+          <tr><td colspan="6" class="muted">No consultants yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>

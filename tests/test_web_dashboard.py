@@ -2475,6 +2475,12 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         consultant = get_consultant_by_email(db, "consultant@example.com", vendor_id=self.vendor_id)
         db.close()
 
+        response = self.client.get(f"/admin/consultants/{consultant['id']}")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"AI Testing Mode", response.data)
+        self.assertIn(b"Enabled", response.data)
+        self.assertIn(b"Disabled", response.data)
+
         response = self.client.post(
             f"/admin/consultants/{consultant['id']}",
             data={
@@ -2502,6 +2508,12 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
 
     def test_consultant_can_disable_client_ai_escalation(self):
         self.consultant_login()
+        response = self.client.get(f"/consultant/clients/{self.client_id}")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Escalate Emergencies", response.data)
+        self.assertIn(b"Enabled", response.data)
+        self.assertIn(b"Disabled", response.data)
+
         response = self.client.post(
             f"/consultant/clients/{self.client_id}",
             data={
@@ -2517,6 +2529,7 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
                 "sex": "male",
                 "notes": "Generalized notes only.",
                 "direction": "Check stress and routines.",
+                "ai_escalation_enabled": "0",
             },
             follow_redirects=True,
         )
@@ -2530,6 +2543,19 @@ class ConsultantDashboardWebTest(ConsultantDashboardTestCase):
         ).fetchone()
         db.close()
         self.assertEqual(row["ai_escalation_enabled"], 0)
+
+    def test_admin_consultants_list_shows_testing_column(self):
+        db = get_db(self.app.config)
+        consultant = get_consultant_by_email(db, "consultant@example.com", vendor_id=self.vendor_id)
+        db.execute("UPDATE consultants SET ai_testing_mode = 1 WHERE id = ?", (consultant["id"],))
+        db.commit()
+        db.close()
+
+        self.admin_login()
+        response = self.client.get("/admin/consultants")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Testing", response.data)
+        self.assertIn(b">Y<", response.data)
 
     def test_consultant_client_list_and_session_detail_render(self):
         self.ingest_session(session_id="sess_web_001", urgent_escalation=True)

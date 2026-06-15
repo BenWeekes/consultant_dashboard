@@ -2302,6 +2302,13 @@ def _checkbox_enabled(req, name: str, default: bool = False) -> bool:
     return "1" in req.form.getlist(name)
 
 
+def _radio_enabled(req, name: str, default: bool = False) -> bool:
+    value = (req.form.get(name) or "").strip().lower()
+    if not value:
+        return default
+    return value in {"1", "true", "yes", "enabled", "on"}
+
+
 def _load_session_detail_assets(db, session_row, session_id: str):
     storage = _storage()
     summary = None
@@ -2438,7 +2445,7 @@ def consultant_client_new():
                 "escalation_phone_country_code": escalation_phone_country_code,
                 "year_of_birth": (request.form.get("year_of_birth") or "").strip(),
                 "sex": (request.form.get("sex") or "").strip().lower(),
-                "ai_escalation_enabled": _checkbox_enabled(request, "ai_escalation_enabled", default=False),
+                "ai_escalation_enabled": _radio_enabled(request, "ai_escalation_enabled", default=True),
                 "notes": request.form.get("notes", "").strip(),
                 "direction": request.form.get("direction", "").strip(),
             }
@@ -2475,7 +2482,7 @@ def consultant_client_new():
                 phone_number=phone_number,
                 notification_email=notification_email,
                 escalation_phone_number=escalation_phone_number,
-                ai_escalation_enabled=_checkbox_enabled(request, "ai_escalation_enabled", default=False),
+                ai_escalation_enabled=_radio_enabled(request, "ai_escalation_enabled", default=True),
                 year_of_birth=year_of_birth,
                 sex=sex,
                 notes=notes,
@@ -2647,7 +2654,7 @@ def consultant_client_detail(client_id: str):
                         phone_number=phone_number,
                         notification_email=notification_email,
                         escalation_phone_number=escalation_phone_number,
-                        ai_escalation_enabled=_checkbox_enabled(request, "ai_escalation_enabled", default=False),
+                        ai_escalation_enabled=_radio_enabled(request, "ai_escalation_enabled", default=True),
                         year_of_birth=year_of_birth,
                         sex=sex,
                         notes=notes,
@@ -3977,7 +3984,7 @@ def admin_consultant_detail(consultant_id: str):
         notification_email = request.form.get("notification_email", "").strip() or email
         raw_escalation_phone = request.form.get("escalation_phone_number", "").strip()
         reset_password = request.form.get("reset_password", "").strip()
-        ai_testing_mode = _checkbox_enabled(request, "ai_testing_mode", default=False)
+        ai_testing_mode = _radio_enabled(request, "ai_testing_mode", default=False)
 
         if not email or not name or not raw_phone_number:
             flash("Email, name, and phone number are required", "error")
