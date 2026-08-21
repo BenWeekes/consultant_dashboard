@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROFILE="${1:-therapy}"
 PROMPT="${DAILY_AGENT_PROBE_PROMPT:-Say hello and tell me the time.}"
 OUT_DIR="${DAILY_AGENT_PROBE_DIR:-$ROOT_DIR/logs/agent-probes}"
+PYTHON_BIN="${PYTHON_BIN:-$ROOT_DIR/venv/bin/python}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 TMP_DIR="$(mktemp -d)"
 mkdir -p "$OUT_DIR"
@@ -28,7 +29,7 @@ if "$ROOT_DIR/scripts/run-voice-probe.sh" "$PROFILE" "" 12 >"$VOICE_OUT" 2>&1; t
   VOICE_OK=1
 fi
 
-python3 - <<'PY' "$STAMP" "$PROFILE" "$PROMPT" "$RTM_OK" "$VOICE_OK" "$RTM_OUT" "$VOICE_OUT" >"$OUT_DIR/$STAMP.json"
+"$PYTHON_BIN" - <<'PY' "$STAMP" "$PROFILE" "$PROMPT" "$RTM_OK" "$VOICE_OK" "$RTM_OUT" "$VOICE_OUT" >"$OUT_DIR/$STAMP.json"
 import json
 import sys
 from pathlib import Path
@@ -55,5 +56,7 @@ cat "$OUT_DIR/$STAMP.json"
 if [[ "$RTM_OK" -eq 1 && "$VOICE_OK" -eq 1 ]]; then
   exit 0
 fi
+
+"$PYTHON_BIN" "$ROOT_DIR/scripts/send_probe_alert.py" "$OUT_DIR/$STAMP.json" || true
 
 exit 1

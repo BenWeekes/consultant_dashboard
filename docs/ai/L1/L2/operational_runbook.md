@@ -111,6 +111,8 @@ scripts/run-daily-agent-probe.sh therapy
 
 This writes a combined JSON record to `logs/agent-probes/<timestamp>.json` and exits non-zero if either probe fails.
 
+On failure it also attempts to email every dashboard admin listed in `CONSULTANT_ADMIN_AUTH_FILE` using the normal SendGrid delivery path.
+
 Notes:
 
 - `scripts/agent_probe_backend.py` mints a valid therapy client JWT before calling `/start-agent`. By default it uses `AI_PROBE_CLIENT_ID` if set, otherwise the first active client in the dashboard database.
