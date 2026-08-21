@@ -79,3 +79,40 @@ PLAYWRIGHT_CONSULTANT_SESSION_COOKIE="$(
     --vendor-slug mindfix
 )" npm run test:e2e -- tests/e2e/consultant-upcoming.spec.ts
 ```
+
+## Daily Agent Probes
+
+These probes exercise the live AI session stack without using the browser UI.
+
+RTM text probe:
+
+```bash
+cd /home/ubuntu/mindfix/consultant_dashboard
+scripts/run-rtm-test.sh therapy "Say hello and tell me the time." 15
+```
+
+This starts a real agent through `simple-backend`, authenticates as a real client, sends a user turn over RTM, and waits for the assistant reply. The output includes `latency_ms` and the assistant text.
+
+Audio-out probe:
+
+```bash
+cd /home/ubuntu/mindfix/consultant_dashboard
+scripts/run-voice-probe.sh therapy "" 12
+```
+
+This starts a real agent, subscribes to the agent RTC audio stream with `go-audio-subscriber`, triggers a spoken reply through `/speak`, and confirms the agent responded. It prefers PCM amplitude detection and falls back to assistant transcript stream events if PCM is not exposed on the host.
+
+Combined daily probe:
+
+```bash
+cd /home/ubuntu/mindfix/consultant_dashboard
+scripts/run-daily-agent-probe.sh therapy
+```
+
+This writes a combined JSON record to `logs/agent-probes/<timestamp>.json` and exits non-zero if either probe fails.
+
+Notes:
+
+- `scripts/agent_probe_backend.py` mints a valid therapy client JWT before calling `/start-agent`. By default it uses `AI_PROBE_CLIENT_ID` if set, otherwise the first active client in the dashboard database.
+- Override the default prompt with `DAILY_AGENT_PROBE_PROMPT` or `VOICE_PROBE_PROMPT`.
+- These probes validate the live orchestration path and agent response path. They do not yet publish a custom WAV utterance into RTC as a full speech-in probe.

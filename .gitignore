@@ -6,3 +6,4 @@ data/
 config/admin_auth.conf
 client/node_modules/
 client/.next/
+logs/agent-probes/
