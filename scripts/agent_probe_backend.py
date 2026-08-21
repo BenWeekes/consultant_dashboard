@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import jwt
+from dotenv import dotenv_values
 
 
 DEFAULT_BACKEND_BASE = "http://127.0.0.1:8082"
@@ -58,9 +59,19 @@ def _read_env_value(env_path: Path, key: str) -> str:
 
 
 def _default_probe_client_id() -> str:
-    override = os.environ.get("AI_PROBE_CLIENT_ID", "").strip()
+    override = (
+        os.environ.get("AI_PROBE_CLIENT_ID", "").strip()
+        or _read_env_value(ROOT_DIR / ".env", "AI_PROBE_CLIENT_ID")
+    )
     if override:
         return override
+    raise RuntimeError(
+        "AI_PROBE_CLIENT_ID must identify a dedicated synthetic client; "
+        "using a real client would contaminate therapy history"
+    )
+
+
+def _load_probe_client(client_id: str) -> sqlite3.Row:
     db_path = _read_env_value(ROOT_DIR / ".env", "CONSULTANT_DB_PATH")
     if not db_path:
         raise RuntimeError("CONSULTANT_DB_PATH not found in consultant_dashboard/.env")
@@ -69,18 +80,52 @@ def _default_probe_client_id() -> str:
     try:
         row = conn.execute(
             """
-            SELECT id
-            FROM clients
-            WHERE is_active = 1
-            ORDER BY created_at ASC, first_name ASC, last_name ASC
-            LIMIT 1
-            """
+            SELECT c.id, c.first_name, c.last_name, c.email, c.phone_number,
+                   c.ai_escalation_enabled, co.ai_testing_mode, v.slug AS vendor_slug
+            FROM clients c
+            JOIN consultant_clients cc ON cc.client_id = c.id
+            JOIN consultants co ON co.id = cc.consultant_id
+            JOIN vendors v ON v.id = c.vendor_id
+            WHERE c.id = ? AND c.is_active = 1
+            """,
+            (client_id,),
         ).fetchone()
     finally:
         conn.close()
     if not row:
-        raise RuntimeError("no active client found for probe auth")
-    return str(row["id"])
+        raise RuntimeError("AI_PROBE_CLIENT_ID does not identify an active client")
+    if not row["ai_testing_mode"] or row["ai_escalation_enabled"]:
+        raise RuntimeError(
+            "probe client must belong to a testing consultant and have AI escalation disabled"
+        )
+    if not row["email"] or not row["phone_number"]:
+        raise RuntimeError("probe client requires synthetic email and phone identity fields")
+    return row
+
+
+def _ensure_backend_probe_profile(profile: str, client: sqlite3.Row, user_id_hash: str) -> None:
+    backend_root = ROOT_DIR.parent / "agent-samples" / "simple-backend"
+    for key, value in dotenv_values(backend_root / ".env").items():
+        if value is not None:
+            os.environ.setdefault(key, value)
+    sys.path.insert(0, str(backend_root))
+    from core.auth import _save_dashboard_profile
+    from core.config import initialize_constants
+
+    constants = initialize_constants(profile)
+    auth_data_dir = Path(constants.get("AUTH_DATA_DIR") or "./data")
+    if not auth_data_dir.is_absolute():
+        constants["AUTH_DATA_DIR"] = str((backend_root / auth_data_dir).resolve())
+    saved_hash = _save_dashboard_profile(
+        constants,
+        str(client["id"]),
+        str(client["email"]),
+        f"{client['first_name']} {client['last_name']}".strip(),
+        str(client["phone_number"]),
+        first_name=str(client["first_name"]),
+    )
+    if saved_hash != user_id_hash:
+        raise RuntimeError("synthetic probe profile hash did not match JWT identity")
 
 
 def _mint_probe_auth_token(profile: str) -> str:
@@ -90,6 +135,8 @@ def _mint_probe_auth_token(profile: str) -> str:
         raise RuntimeError(f"{profile.upper()}_AUTH_JWT_SECRET not found in {simple_backend_env}")
     client_id = _default_probe_client_id()
     user_id_hash = hashlib.sha256(f"client|{client_id}".encode("utf-8")).hexdigest()
+    client = _load_probe_client(client_id)
+    _ensure_backend_probe_profile(profile, client, user_id_hash)
     now = int(time.time())
     payload = {
         "user_id": user_id_hash,
@@ -111,6 +158,7 @@ def start_probe(
     prompt: str = "",
     greeting: str = "",
     connect: bool = True,
+    include_debug: bool = False,
 ) -> dict[str, Any]:
     query = {
         "profile": profile,
@@ -128,6 +176,21 @@ def start_probe(
         payload = json.loads(resp.read().decode("utf-8"))
     agent_id = _parse_agent_id(payload.get("agent_response"))
     payload["agent_id"] = agent_id
+    llm_config = (
+        payload.get("debug", {})
+        .get("agent_payload", {})
+        .get("properties", {})
+        .get("llm", {})
+    )
+    if isinstance(llm_config, dict):
+        payload["llm_has_api_key"] = "api_key" in llm_config
+        payload["llm_auth_configured"] = bool(llm_config.get("api_key"))
+        payload["llm_vendor"] = llm_config.get("vendor")
+        payload["llm_url"] = llm_config.get("url")
+        payload["llm_model"] = llm_config.get("params", {}).get("model")
+        payload["llm_reasoning_effort"] = llm_config.get("params", {}).get("reasoning_effort")
+    if not include_debug:
+        payload.pop("debug", None)
     if not payload.get("channel") or not payload.get("appid") or not payload.get("token"):
         raise RuntimeError(f"start-agent returned incomplete payload: {payload}")
     if not agent_id:
@@ -135,8 +198,11 @@ def start_probe(
     return payload
 
 
-def stop_probe(*, agent_id: str, backend_base: str, profile: str) -> dict[str, Any]:
-    query = urllib.parse.urlencode({"agent_id": agent_id, "profile": profile})
+def stop_probe(*, agent_id: str, backend_base: str, profile: str, channel: str = "") -> dict[str, Any]:
+    params = {"agent_id": agent_id, "profile": profile}
+    if channel:
+        params["channel"] = channel
+    query = urllib.parse.urlencode(params)
     url = f"{backend_base.rstrip('/')}/hangup-agent?{query}"
     return _load_json(url)
 
@@ -151,11 +217,13 @@ def main() -> int:
     start_parser.add_argument("--prompt", default="")
     start_parser.add_argument("--greeting", default="")
     start_parser.add_argument("--token-only", action="store_true")
+    start_parser.add_argument("--include-debug", action="store_true")
 
     stop_parser = subparsers.add_parser("stop")
     stop_parser.add_argument("--profile", default="therapy")
     stop_parser.add_argument("--backend-base", default=DEFAULT_BACKEND_BASE)
     stop_parser.add_argument("--agent-id", required=True)
+    stop_parser.add_argument("--channel", default="")
 
     args = parser.parse_args()
 
@@ -167,12 +235,14 @@ def main() -> int:
                 prompt=args.prompt,
                 greeting=args.greeting,
                 connect=not args.token_only,
+                include_debug=args.include_debug,
             )
         else:
             result = stop_probe(
                 agent_id=args.agent_id,
                 backend_base=args.backend_base,
                 profile=args.profile,
+                channel=args.channel,
             )
     except Exception as exc:
         print(json.dumps({"ok": False, "error": str(exc)}))

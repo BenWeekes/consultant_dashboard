@@ -190,7 +190,12 @@ def main() -> int:
 
             if frame_type == FRAME_JSON:
                 message = json.loads(payload.decode("utf-8"))
-                statuses.append(message)
+                if message.get("type") != "stream_message":
+                    statuses.append({
+                        key: message[key]
+                        for key in ("type", "status", "message", "uid")
+                        if key in message
+                    })
                 if message.get("type") == "stream_message" and str(message.get("uid")) == str(session["agent"]["uid"]):
                     decoded = _decode_stream_message(str(message.get("data") or ""))
                     if decoded and decoded.get("object") == "assistant.transcription":
@@ -256,7 +261,7 @@ def main() -> int:
         "min_transcript_events": MIN_TRANSCRIPT_EVENTS,
         "transcript_preview": transcript_texts[:5],
         "speak_result": speak_result,
-        "statuses": statuses,
+        "statuses": statuses[-10:],
     }
     if stderr_lines:
         result["stderr_tail"] = stderr_lines[-10:]

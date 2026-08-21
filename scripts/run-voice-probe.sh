@@ -7,7 +7,7 @@ WAV_PATH="${2:-}"
 LISTEN_SECS="${3:-12}"
 PROMPT="${VOICE_PROBE_PROMPT:-Say hello and tell me the time.}"
 BACKEND_BASE="${BACKEND_BASE:-http://127.0.0.1:8082}"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+PYTHON_BIN="${PYTHON_BIN:-$ROOT_DIR/venv/bin/python}"
 
 if [[ -n "$WAV_PATH" ]]; then
   echo "warning: explicit WAV input is not wired yet in the private probe; using backend-triggered audio-out confirmation instead." >&2
@@ -20,11 +20,15 @@ if [[ ! -x "$GO_BIN" ]]; then
   (cd "$GO_DIR" && go build -o "$GO_BIN" .)
 fi
 
-START_JSON="$("$PYTHON_BIN" "$ROOT_DIR/scripts/agent_probe_backend.py" start \
+START_JSON=""
+if ! START_JSON="$("$PYTHON_BIN" "$ROOT_DIR/scripts/agent_probe_backend.py" start \
   --profile "$PROFILE" \
   --backend-base "$BACKEND_BASE" \
   --greeting "" \
-)"
+)"; then
+  printf '%s\n' "$START_JSON"
+  exit 1
+fi
 
 if [[ "$(printf '%s' "$START_JSON" | "$PYTHON_BIN" -c 'import json,sys; print("1" if json.load(sys.stdin).get("ok") else "0")')" != "1" ]]; then
   printf '%s\n' "$START_JSON"
@@ -33,12 +37,14 @@ fi
 
 SESSION_JSON="$(printf '%s' "$START_JSON" | "$PYTHON_BIN" -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["result"]))')"
 AGENT_ID="$(printf '%s' "$SESSION_JSON" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["agent_id"])')"
+CHANNEL="$(printf '%s' "$SESSION_JSON" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["channel"])')"
 
 cleanup() {
   "$PYTHON_BIN" "$ROOT_DIR/scripts/agent_probe_backend.py" stop \
     --profile "$PROFILE" \
     --backend-base "$BACKEND_BASE" \
-    --agent-id "$AGENT_ID" >/dev/null 2>&1 || true
+    --agent-id "$AGENT_ID" \
+    --channel "$CHANNEL" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 

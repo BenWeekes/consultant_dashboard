@@ -11,6 +11,7 @@ from typing import Optional
 from werkzeug.security import generate_password_hash
 
 from consultant_dashboard.app import PASSWORD_HASH_METHOD, create_app
+from consultant_dashboard.core import auth as dashboard_auth
 from consultant_dashboard.core.db import (
     create_client,
     create_client_access_link,
@@ -63,6 +64,11 @@ class ConsultantDashboardTestCase(unittest.TestCase):
         os.environ["CRISIS_CALL_PSTN_UID"] = "43455"
         os.environ["CONSULTANT_LOCAL_SUPPORT_LOGIN_ENABLED"] = "false"
         os.environ["CONSULTANT_LOCAL_SUPPORT_LOGIN_SECRET"] = ""
+        os.environ["SHEN_AVAILABLE"] = "true"
+
+        with dashboard_auth._VERIFY_RATE_LOCK:
+            dashboard_auth._SEND_RATE_LIMITS.clear()
+            dashboard_auth._CHECK_RATE_LIMITS.clear()
 
         self.app = create_app()
         self.app.testing = True

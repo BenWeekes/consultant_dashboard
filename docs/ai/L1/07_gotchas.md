@@ -56,6 +56,14 @@
   - consultant `AI Testing Mode` controls whether full AI transcripts are retained
   - client `AI escalation enabled` controls whether live AI escalation actions can fire
   - do not treat consultant testing mode as an escalation-disable switch
+- **Custom-LLM has two separate credentials.**
+  - `properties.llm.api_key` carries a dedicated ConvoAI inbound secret
+  - `LLM_API_KEY` remains server-side and authenticates only the OpenAI upstream call
+  - forwarding the OpenAI key or accepting placeholder Bearer values collapses these trust boundaries and can make every live reply fall back to `Sorry, something went wrong`
+- **Daily probes must never use an arbitrary client.**
+  - `AI_PROBE_CLIENT_ID` is mandatory and points to a synthetic client under a testing consultant
+  - client AI escalation must be disabled
+  - otherwise probe turns contaminate real therapy history and could trigger operational escalation
 - **Server-rendered tests can miss layout bugs.**
   - the consultant client page needed a browser-level measurement pass because equal-height outer grid rows did not guarantee equal-height inner cards
   - when spacing or panel heights matter, inspect live `getBoundingClientRect()` and computed styles instead of trusting only HTML assertions

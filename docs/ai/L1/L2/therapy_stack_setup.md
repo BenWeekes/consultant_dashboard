@@ -88,12 +88,19 @@ Important therapy profile config:
   - typically `http://127.0.0.1:8090`
 - `THERAPY_CONSULTANT_DASHBOARD_INTERNAL_SHARED_SECRET`
 - `THERAPY_AGENT_SERVER_SHARED_SECRET`
+- `THERAPY_CUSTOM_LLM_INBOUND_SECRET`
+  - dedicated Bearer credential passed by Agora as `properties.llm.api_key`
+  - must match custom-LLM `CUSTOM_LLM_INBOUND_SECRET`
+  - must not be the OpenAI provider key
 
 ### `server-custom-llm`
 
 Important local config:
 
-- OpenAI-compatible API key/model values
+- `LLM_API_KEY`
+  - server-side OpenAI provider credential; never supplied in the ConvoAI join payload
+- `CUSTOM_LLM_INBOUND_SECRET`
+  - validates ConvoAI Bearer requests; must match the backend profile value
 - `AGORA_CUSTOMER_ID`
 - `AGORA_CUSTOMER_SECRET`
 - any integration keys such as Thymia
@@ -237,6 +244,20 @@ Fix:
 2. update `THERAPY_LLM_URL`
 3. restart backend on `:8082`
 4. verify the latest curl dump contains the new URL
+
+### Custom-LLM authentication mismatch
+
+Symptoms:
+
+- AI says `Sorry, something went wrong`
+- custom-LLM logs `Rejected custom LLM request with invalid Bearer credential`
+
+Fix:
+
+1. set the same dedicated secret in `THERAPY_CUSTOM_LLM_INBOUND_SECRET` and `CUSTOM_LLM_INBOUND_SECRET`
+2. keep `LLM_API_KEY` only in the custom-LLM environment
+3. restart custom-LLM, then simple-backend
+4. run `scripts/run-daily-agent-probe.sh therapy`
 
 ### Dashboard unavailable
 

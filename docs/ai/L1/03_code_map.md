@@ -10,7 +10,12 @@ consultant-dashboard/
 ├── CLAUDE.md
 ├── docs/ai/
 ├── scripts/
-│   └── run_reminders.py
+│   ├── run_reminders.py
+│   ├── run-daily-agent-probe.sh
+│   └── sync-private-runtime.sh
+├── runtime/
+│   ├── agent-samples/simple-backend/
+│   └── server-custom-llm/node/
 ├── config/
 │   └── admin_auth.conf.example
 ├── consultant_dashboard/
@@ -44,6 +49,17 @@ consultant-dashboard/
   - config loading
   - blueprint registration
   - CLI subcommands
+
+## Private Runtime Overlays
+
+- `runtime/`
+  - private source of truth for MindFix-specific files deployed into sibling Agora sample worktrees
+- `scripts/sync-private-runtime.sh --check`
+  - fails when a deployed sibling file differs from its private copy
+- `scripts/sync-private-runtime.sh --apply`
+  - restores the sibling worktrees from the private copies
+- `scripts/run-daily-agent-probe.sh`
+  - performs the nonce-based ConvoAI/custom-LLM response check and outbound-audio check
 
 ## Core Modules
 

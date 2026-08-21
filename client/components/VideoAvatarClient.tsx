@@ -209,6 +209,9 @@ export function VideoAvatarClient() {
   const [feedbackRating, setFeedbackRating] = useState<number | null>(null);
   const [feedbackComment, setFeedbackComment] = useState("");
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [isWrappingUp, setIsWrappingUp] = useState(false);
+  const wrapUpPromiseRef = useRef<Promise<{ estimated_duration_ms: number } | null> | null>(null);
+  const wrapUpStartedAtRef = useRef<number | null>(null);
   const [availableMics, setAvailableMics] = useState<MediaDeviceInfo[]>([]);
   const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([]);
   const [meetingPreviewStream, setMeetingPreviewStream] = useState<MediaStream | null>(null);
@@ -1101,6 +1104,37 @@ export function VideoAvatarClient() {
     await performStop();
   };
 
+  const triggerWrapUpOnce = () => {
+    if (wrapUpPromiseRef.current) return;
+    if (meetingMode) return;
+    const channel = channelRef.current;
+    if (!channel || !sessionAgentId) return;
+    wrapUpStartedAtRef.current = Date.now();
+    wrapUpPromiseRef.current = (async () => {
+      try {
+        const response = await fetchWithAuth(`${backendUrl}/wrap-up-agent`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            profile: profile.trim() || DEFAULT_PROFILE,
+            channel,
+          }),
+        });
+        if (!response.ok) {
+          console.warn(`Wrap-up call returned ${response.status}`);
+          return null;
+        }
+        const data = await response.json();
+        return {
+          estimated_duration_ms: Number(data.estimated_duration_ms || 0),
+        };
+      } catch (error) {
+        console.warn("Wrap-up call failed:", error);
+        return null;
+      }
+    })();
+  };
+
   const handleEndCallClick = () => {
     const isHostMeetingParticipant =
       meetingMode && meetingParticipantRole === "host";
@@ -1108,6 +1142,9 @@ export function VideoAvatarClient() {
       void handleStop();
       return;
     }
+    // Fire the wrap-up call now so the AI's closing turn can start playing
+    // via TTS while the user is still in the feedback dialog.
+    triggerWrapUpOnce();
     setFeedbackOpen(true);
   };
 
@@ -1126,10 +1163,27 @@ export function VideoAvatarClient() {
           avatarId: currentAvatarId,
         });
       }
+      // Wait for the wrap-up TTS to finish before disconnecting the agent.
+      if (wrapUpPromiseRef.current) {
+        setIsWrappingUp(true);
+        const wrapUpResult = await wrapUpPromiseRef.current;
+        const estMs = wrapUpResult?.estimated_duration_ms ?? 8000;
+        const elapsedMs = wrapUpStartedAtRef.current
+          ? Date.now() - wrapUpStartedAtRef.current
+          : 0;
+        const remainingMs = Math.max(0, estMs + 2000 - elapsedMs);
+        const cappedMs = Math.min(remainingMs, 20000);
+        if (cappedMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, cappedMs));
+        }
+      }
       const nextUrl = await performStop({ redirectAfter: false });
       setFeedbackOpen(false);
+      setIsWrappingUp(false);
       setFeedbackRating(null);
       setFeedbackComment("");
+      wrapUpPromiseRef.current = null;
+      wrapUpStartedAtRef.current = null;
       if (nextUrl) {
         window.location.href = nextUrl;
       }
@@ -2079,7 +2133,8 @@ export function VideoAvatarClient() {
             <div className="space-y-2">
               <h2 className="text-xl font-semibold">How was this session?</h2>
               <p className="text-sm text-muted-foreground">
-                Choose a face and add a comment if you want. Then the call will end.
+                Choose a face and add a comment if you want. Your session is
+                wrapping up in the background.
               </p>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5">
@@ -2130,7 +2185,11 @@ export function VideoAvatarClient() {
                 disabled={feedbackSubmitting || feedbackRating === null}
                 className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
               >
-                {feedbackSubmitting ? "Ending..." : "Send and End"}
+                {isWrappingUp
+                  ? "Wrapping up..."
+                  : feedbackSubmitting
+                  ? "Ending..."
+                  : "Send and End"}
               </button>
             </div>
           </div>

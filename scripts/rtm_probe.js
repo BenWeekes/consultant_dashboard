@@ -22,6 +22,43 @@ function loadRtmModule() {
   );
 }
 
+function decodeMessage(message) {
+  if (typeof message === "string") return message;
+  if (message instanceof Uint8Array) return new TextDecoder().decode(message);
+  if (message instanceof ArrayBuffer) {
+    return new TextDecoder().decode(new Uint8Array(message));
+  }
+  return "";
+}
+
+function extractResponseText(message) {
+  const raw = decodeMessage(message).trim();
+  if (!raw) return "";
+  try {
+    const parsed = JSON.parse(raw);
+    const candidates = [
+      parsed.text,
+      parsed.message,
+      parsed.content,
+      parsed.data?.text,
+      parsed.data?.message,
+      parsed.data?.content,
+      parsed.payload?.text,
+      parsed.payload?.message,
+    ];
+    return candidates.find((value) => typeof value === "string" && value.trim())?.trim() || "";
+  } catch (_) {
+    return raw;
+  }
+}
+
+function isFailureResponse(text) {
+  const normalized = String(text || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return normalized.includes("something went wrong")
+    || normalized.includes("sorry there was an error")
+    || normalized.includes("unable to respond right now");
+}
+
 async function main() {
   const [
     appId,
@@ -32,6 +69,7 @@ async function main() {
     timeoutSeconds = "12",
     sendDelayMs = "1500",
     holdAfterResponseMs = "0",
+    expectedText = "",
   ] = process.argv.slice(2);
 
   if (!appId || !channel || !token || !uid || !prompt) {
@@ -66,15 +104,22 @@ async function main() {
   client.addEventListener("message", async (event) => {
     try {
       const publisher = String(event.publisher || "");
-      let text = "";
-      if (typeof event.message === "string") {
-        text = event.message;
-      } else if (event.message instanceof Uint8Array) {
-        text = new TextDecoder().decode(event.message);
-      } else if (event.message instanceof ArrayBuffer) {
-        text = new TextDecoder().decode(new Uint8Array(event.message));
-      }
+      const text = extractResponseText(event.message);
       if (!text || publisher === String(uid)) {
+        return;
+      }
+      if (isFailureResponse(text)) {
+        await finish(1, {
+          ok: false,
+          channel,
+          publisher,
+          latency_ms: sentMs ? Date.now() - sentMs : null,
+          response: text,
+          error: "Agent returned its configured failure response",
+        });
+        return;
+      }
+      if (expectedText && !text.toLowerCase().includes(expectedText.toLowerCase())) {
         return;
       }
       responsePayload = {
@@ -124,9 +169,13 @@ async function main() {
   }, timeoutMs);
 }
 
-main().catch((error) => {
-  process.stdout.write(
-    `${JSON.stringify({ ok: false, error: error.message || String(error) })}\n`
-  );
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    process.stdout.write(
+      `${JSON.stringify({ ok: false, error: error.message || String(error) })}\n`
+    );
+    process.exit(1);
+  });
+}
+
+module.exports = { decodeMessage, extractResponseText, isFailureResponse };

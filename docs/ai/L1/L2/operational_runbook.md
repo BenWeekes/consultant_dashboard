@@ -88,10 +88,12 @@ RTM text probe:
 
 ```bash
 cd /home/ubuntu/mindfix/consultant_dashboard
-scripts/run-rtm-test.sh therapy "Say hello and tell me the time." 15
+scripts/run-rtm-test.sh therapy \
+  "Reply with exactly: MINDFIX_PROBE_OK_MANUAL" 30 \
+  "MINDFIX_PROBE_OK_MANUAL"
 ```
 
-This starts a real agent through `simple-backend`, authenticates as a real client, sends a user turn over RTM, and waits for the assistant reply. The output includes `latency_ms` and the assistant text.
+This starts a real agent through `simple-backend`, authenticates as the dedicated synthetic probe client, sends a user turn over RTM, and waits for the expected assistant reply. It rejects known failure responses such as `Sorry, something went wrong`. The output includes `latency_ms` and the assistant text.
 
 Audio-out probe:
 
@@ -109,12 +111,24 @@ cd /home/ubuntu/mindfix/consultant_dashboard
 scripts/run-daily-agent-probe.sh therapy
 ```
 
-This writes a combined JSON record to `logs/agent-probes/<timestamp>.json` and exits non-zero if either probe fails.
+This uses a unique nonce on each run, writes a concise JSON record to `logs/agent-probes/<timestamp>.json`, and exits non-zero if either check fails:
+
+- authenticated `/start-agent` succeeds for the synthetic client and ConvoAI returns the exact nonce through custom-LLM
+- the audio probe confirms the agent spoke back
 
 On failure it also attempts to email every dashboard admin listed in `CONSULTANT_ADMIN_AUTH_FILE` using the normal SendGrid delivery path.
 
 Notes:
 
-- `scripts/agent_probe_backend.py` mints a valid therapy client JWT before calling `/start-agent`. By default it uses `AI_PROBE_CLIENT_ID` if set, otherwise the first active client in the dashboard database.
-- Override the default prompt with `DAILY_AGENT_PROBE_PROMPT` or `VOICE_PROBE_PROMPT`.
+- `AI_PROBE_CLIENT_ID` is required. It must identify a dedicated active client under a consultant with `AI Testing Mode` enabled and must have client AI escalation disabled. The probe refuses to use arbitrary real clients.
+- The payload must include Agora's top-level `properties.llm.api_key`, but its value is a dedicated custom-LLM inbound secret, never the OpenAI provider key.
+- Override both `DAILY_AGENT_PROBE_PROMPT` and `DAILY_AGENT_PROBE_EXPECTED_TEXT` together when changing the nonce assertion. `VOICE_PROBE_PROMPT` controls only the audio-out check.
 - These probes validate the live orchestration path and agent response path. They do not yet publish a custom WAV utterance into RTC as a full speech-in probe.
+
+Production cron:
+
+```cron
+17 6 * * * flock -n /tmp/mindfix-daily-agent-probe.lock /home/ubuntu/mindfix/consultant_dashboard/scripts/run-daily-agent-probe.sh therapy >> /tmp/mindfix-daily-agent-probe.log 2>&1
+```
+
+The lock prevents overlapping agents if a run stalls. Failure sends an email to configured dashboard admins; success is recorded without email.

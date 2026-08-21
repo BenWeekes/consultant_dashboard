@@ -13,6 +13,24 @@ This file mirrors the project-specific external runtime changes that were requir
 - client `AI escalation enabled`
 - full AI transcript retention for testing consultants
 - suppression of live AI escalation when client AI escalation is disabled
+- authenticated ConvoAI-to-custom-LLM requests without forwarding provider credentials
+- one RTM client per channel with bounded reconnect behavior
+
+The deployable private copies live under `runtime/`. Run `scripts/sync-private-runtime.sh --check` to detect drift and `scripts/sync-private-runtime.sh --apply` to copy the private versions into the sibling runtime worktrees.
+
+## Custom LLM credential boundary
+
+Agora requires a top-level `properties.llm.api_key` for custom LLM Bearer authentication. MindFix assigns a dedicated inbound secret to that field:
+
+- simple-backend: `THERAPY_CUSTOM_LLM_INBOUND_SECRET`
+- custom-LLM: `CUSTOM_LLM_INBOUND_SECRET`
+- OpenAI upstream: custom-LLM reads `LLM_API_KEY` only from its own environment
+
+The inbound secret and provider key must be different. Missing or incorrect inbound credentials receive HTTP `401`; a missing server configuration receives HTTP `503`.
+
+## RTM lifecycle
+
+The custom-LLM RTM client records a connecting session before awaiting login, so `/register-agent` and the first chat request share one connection. `DISCONNECTED` is left to the Agora SDK rather than spawning a replacement client; explicit retries are deduplicated, bounded, and cancelled on session destruction.
 
 ## simple-backend change
 
