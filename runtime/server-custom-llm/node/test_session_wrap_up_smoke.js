@@ -94,7 +94,7 @@ test('session-wrap-up returns closing text and calls Agora speak', async (t) => 
       THYMIA_ENABLED: 'false',
       SHEN_ENABLED: 'false',
       ENABLE_MEMORY: 'false',
-      AGENT_SERVER_SHARED_SECRET: '',
+      AGENT_SERVER_SHARED_SECRET: 'test-agent-secret',
     },
     stdio: 'ignore',
   });
@@ -105,7 +105,10 @@ test('session-wrap-up returns closing text and calls Agora speak', async (t) => 
   // Register a fake agent so /session-wrap-up can look it up.
   const registerResp = await fetch(`http://127.0.0.1:${appPort}/register-agent`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Agent-Server-Secret': 'test-agent-secret',
+    },
     body: JSON.stringify({
       app_id: 'test-app',
       channel: 'test-channel',
@@ -119,11 +122,15 @@ test('session-wrap-up returns closing text and calls Agora speak', async (t) => 
 
   const wrapResp = await fetch(`http://127.0.0.1:${appPort}/session-wrap-up`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Agent-Server-Secret': 'test-agent-secret',
+    },
     body: JSON.stringify({
       app_id: 'test-app',
       channel: 'test-channel',
       user_id: '',
+      agent_id: 'agent-42',
     }),
   });
 
@@ -159,7 +166,7 @@ test('session-wrap-up returns 404 when no agent is registered', async (t) => {
       THYMIA_ENABLED: 'false',
       SHEN_ENABLED: 'false',
       ENABLE_MEMORY: 'false',
-      AGENT_SERVER_SHARED_SECRET: '',
+      AGENT_SERVER_SHARED_SECRET: 'test-agent-secret',
     },
     stdio: 'ignore',
   });
@@ -169,8 +176,11 @@ test('session-wrap-up returns 404 when no agent is registered', async (t) => {
 
   const wrapResp = await fetch(`http://127.0.0.1:${appPort}/session-wrap-up`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ app_id: 'nope', channel: 'nope' }),
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Agent-Server-Secret': 'test-agent-secret',
+    },
+    body: JSON.stringify({ app_id: 'nope', channel: 'nope', agent_id: 'nope' }),
   });
   assert.equal(wrapResp.status, 404);
   assert.equal(state.speakCalls, 0);

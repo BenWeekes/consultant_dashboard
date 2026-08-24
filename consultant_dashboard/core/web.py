@@ -105,7 +105,7 @@ from .meetings import (
 from .phone_numbers import country_options, infer_country_code, local_display_number, normalize_phone
 from .realtime import publish_client_thread_update
 from .storage import EncryptedStorage
-from .vendors import current_branding, current_storage_root, current_vendor_slug, get_current_vendor, tenant_path, tenant_public_url, tenant_url_for
+from .vendors import current_branding, current_storage_root, current_vendor_slug, get_current_vendor, storage_root_for_client, tenant_path, tenant_public_url, tenant_url_for
 from werkzeug.security import generate_password_hash
 
 web_bp = Blueprint("web", __name__)
@@ -2310,7 +2310,10 @@ def _radio_enabled(req, name: str, default: bool = False) -> bool:
 
 
 def _load_session_detail_assets(db, session_row, session_id: str):
-    storage = _storage()
+    storage = EncryptedStorage(
+        storage_root_for_client(session_row["client_id"]),
+        current_app.config["MASTER_KEY"],
+    )
     summary = None
     transcript = None
     transcript_text = ""
@@ -3649,6 +3652,24 @@ def consultant_session_detail(session_id: str):
     return response
 
 
+def _delete_session_storage_artifacts(db, storage, session_row) -> None:
+    """Remove every encrypted artifact owned by a session before its row."""
+    keys = [
+        session_row["summary_storage_key"],
+        session_row["transcript_storage_key"],
+        session_row["biomarker_storage_key"],
+        session_row["memory_storage_key"],
+    ]
+    alert_rows = db.execute(
+        "SELECT details_storage_key FROM session_alerts WHERE session_id = ?",
+        (session_row["id"],),
+    ).fetchall()
+    keys.extend(row["details_storage_key"] for row in alert_rows)
+    for key in keys:
+        if key:
+            storage.delete_json(key)
+
+
 @web_bp.post("/consultant/sessions/<session_id>/delete")
 @require_consultant
 def consultant_session_delete(session_id: str):
@@ -3658,8 +3679,9 @@ def consultant_session_delete(session_id: str):
     if not session_row:
         db.close()
         abort(404)
-    storage = _storage()
     client_id = session_row["client_id"]
+    storage = EncryptedStorage(storage_root_for_client(client_id), current_app.config["MASTER_KEY"])
+    _delete_session_storage_artifacts(db, storage, session_row)
     delete_session(db, session_id=session_id)
     _refresh_client_derived_state(db, storage, client_id)
     log_audit(
@@ -4172,8 +4194,9 @@ def admin_session_delete(session_id: str):
     if not session_row:
         db.close()
         abort(404)
-    storage = _storage()
     client_id = session_row["client_id"]
+    storage = EncryptedStorage(storage_root_for_client(client_id), current_app.config["MASTER_KEY"])
+    _delete_session_storage_artifacts(db, storage, session_row)
     delete_session(db, session_id=session_id)
     _refresh_client_derived_state(db, storage, client_id)
     log_audit(

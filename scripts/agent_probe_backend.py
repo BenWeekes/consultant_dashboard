@@ -176,6 +176,7 @@ def start_probe(
         payload = json.loads(resp.read().decode("utf-8"))
     agent_id = _parse_agent_id(payload.get("agent_response"))
     payload["agent_id"] = agent_id
+    payload["probe_auth_token"] = token
     llm_config = (
         payload.get("debug", {})
         .get("agent_payload", {})
@@ -198,13 +199,18 @@ def start_probe(
     return payload
 
 
-def stop_probe(*, agent_id: str, backend_base: str, profile: str, channel: str = "") -> dict[str, Any]:
+def stop_probe(
+    *, agent_id: str, backend_base: str, profile: str, channel: str = "", auth_token: str = ""
+) -> dict[str, Any]:
     params = {"agent_id": agent_id, "profile": profile}
     if channel:
         params["channel"] = channel
     query = urllib.parse.urlencode(params)
     url = f"{backend_base.rstrip('/')}/hangup-agent?{query}"
-    return _load_json(url)
+    headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else {}
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read().decode("utf-8"))
 
 
 def main() -> int:
@@ -224,6 +230,7 @@ def main() -> int:
     stop_parser.add_argument("--backend-base", default=DEFAULT_BACKEND_BASE)
     stop_parser.add_argument("--agent-id", required=True)
     stop_parser.add_argument("--channel", default="")
+    stop_parser.add_argument("--auth-token", default="")
 
     args = parser.parse_args()
 
@@ -243,6 +250,7 @@ def main() -> int:
                 backend_base=args.backend_base,
                 profile=args.profile,
                 channel=args.channel,
+                auth_token=args.auth_token,
             )
     except Exception as exc:
         print(json.dumps({"ok": False, "error": str(exc)}))

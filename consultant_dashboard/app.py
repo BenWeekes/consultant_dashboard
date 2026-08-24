@@ -56,6 +56,18 @@ def create_app() -> Flask:
     configure_session(app)
     configure_realtime(app)
 
+    @app.after_request
+    def add_security_headers(response):
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault("Permissions-Policy", "camera=(self), microphone=(self), geolocation=()")
+        if request.is_secure:
+            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        if request.path.startswith(("/admin", "/consultant", "/client")):
+            response.headers.setdefault("Cache-Control", "no-store")
+        return response
+
     require_admin_auth_file(config["ADMIN_AUTH_FILE"])
 
     db_path = Path(config["DB_PATH"])

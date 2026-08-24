@@ -2,7 +2,7 @@ import json
 import threading
 from collections import defaultdict
 from datetime import datetime, timezone
-from queue import Queue
+from queue import Empty, Full, Queue
 
 from flask import current_app, session
 from flask_sock import Sock
@@ -19,7 +19,7 @@ class _RealtimeHub:
         self._subscribers = defaultdict(list)
 
     def subscribe(self, client_id: str) -> Queue:
-        q: Queue = Queue()
+        q: Queue = Queue(maxsize=100)
         with self._lock:
             self._subscribers[client_id].append(q)
         return q
@@ -36,7 +36,16 @@ class _RealtimeHub:
         with self._lock:
             queues = list(self._subscribers.get(client_id, []))
         for queue in queues:
-            queue.put(payload)
+            try:
+                queue.put_nowait(payload)
+            except Full:
+                # Drop the oldest notification rather than allowing a slow
+                # browser to grow process memory without bound.
+                try:
+                    queue.get_nowait()
+                    queue.put_nowait(payload)
+                except (Empty, Full):
+                    pass
 
 
 hub = _RealtimeHub()
@@ -96,7 +105,11 @@ def consultant_messages_ws(ws, client_id: str):
     try:
         ws.send(json.dumps({"type": "connected", "client_id": client_id}))
         while True:
-            ws.send(json.dumps(queue.get()))
+            try:
+                payload = queue.get(timeout=20)
+                ws.send(json.dumps(payload))
+            except Empty:
+                ws.send(json.dumps({"type": "heartbeat"}))
     except Exception:
         pass
     finally:
@@ -115,7 +128,11 @@ def client_messages_ws(ws, token: str):
     try:
         ws.send(json.dumps({"type": "connected", "client_id": client_id}))
         while True:
-            ws.send(json.dumps(queue.get()))
+            try:
+                payload = queue.get(timeout=20)
+                ws.send(json.dumps(payload))
+            except Empty:
+                ws.send(json.dumps({"type": "heartbeat"}))
     except Exception:
         pass
     finally:

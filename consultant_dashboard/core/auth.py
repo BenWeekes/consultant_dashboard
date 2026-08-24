@@ -33,6 +33,7 @@ VERIFY_CHECK_MAX_PER_IP = 10
 VERIFY_CHECK_MAX_PER_PHONE = 7
 _SEND_RATE_LIMITS = {}
 _CHECK_RATE_LIMITS = {}
+_ADMIN_LOGIN_RATE_LIMITS = {}
 _VERIFY_RATE_LOCK = threading.Lock()
 
 
@@ -118,6 +119,10 @@ def _now_ts() -> int:
 def _rate_limit_consume(store: Dict[str, list], key: str, window_seconds: int, limit: int) -> bool:
     now = _now_ts()
     with _VERIFY_RATE_LOCK:
+        for stale_key in list(store):
+            store[stale_key] = [ts for ts in store[stale_key] if now - ts < window_seconds]
+            if not store[stale_key]:
+                store.pop(stale_key, None)
         active = [ts for ts in store.get(key, []) if now - ts < window_seconds]
         if len(active) >= limit:
             store[key] = active
@@ -667,6 +672,10 @@ def admin_login():
 
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
+    remote_ip = (request.remote_addr or "unknown").strip()
+    if not _rate_limit_consume(_ADMIN_LOGIN_RATE_LIMITS, f"{remote_ip}:{email}", 900, 8):
+        flash("Too many login attempts. Please wait and try again.", "error")
+        return render_template("admin/login.html", brand=_brand_name()), 429
     users, _secret, _ttl = _load_admin_users(current_app.config["ADMIN_AUTH_FILE"])
     hashed = users.get(email)
     if not hashed or not check_password_hash(hashed, password):
@@ -786,3 +795,8 @@ def require_admin(fn):
 
 def configure_session(app) -> None:
     app.permanent_session_lifetime = timedelta(seconds=app.config["SESSION_TTL"])
+    app.config.update(
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=not app.config.get("AUTH_DEV_MODE", False),
+    )

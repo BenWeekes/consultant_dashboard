@@ -858,53 +858,7 @@ def send_agent_to_channel(channel, agent_payload, constants):
         "Authorization": auth_header
     }
 
-    payload_json = json.dumps(agent_payload, indent=2)
-
-    print(f"Sending agent to Agora ConvoAI:")
-    print(f"URL: {agent_api_url}")
-    advanced = agent_payload.get('properties', {}).get('advanced_features')
-    if advanced:
-        print(f"🔧 enable_rtm: {advanced.get('enable_rtm')}")
-    else:
-        print(f"🔧 pipeline mode (no advanced_features)")
-
-    # Optional curl dump (disabled by default to avoid exposing API keys)
-    enable_curl_dump = constants.get("ENABLE_CURL_DUMP", "false").lower() == "true"
-
-    if enable_curl_dump:
-        # Build header arguments for curl from the headers dict
-        header_args = ""
-        for header_name, header_value in headers.items():
-            header_args += f"  -H '{header_name}: {header_value}' \\\n"
-
-        # Print equivalent curl command for debugging
-        payload_compact = json.dumps(agent_payload)
-        curl_cmd = f"curl -X POST '{agent_api_url}' \\\n{header_args}  -d '{payload_compact}'"
-        print(f"\n📋 Equivalent curl command:\n{curl_cmd}\n")
-
-        # Write curl command to file with timestamp and profile name
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        profile_name = constants.get("PROFILE_NAME", "default")
-        curl_file_path = f"/tmp/agora_curl_{profile_name}_{timestamp}.sh"
-
-        # Write prettified version to file
-        payload_pretty = json.dumps(agent_payload, indent=2)
-        curl_file_content = f"""#!/bin/bash
-# Agora ConvoAI Request
-# Timestamp: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-# Channel: {channel}
-
-curl -X POST '{agent_api_url}' \\
-{header_args}  -d '{payload_pretty}'
-"""
-
-        with open(curl_file_path, 'w') as f:
-            f.write(curl_file_content)
-
-        print(f"📝 Curl command saved to: {curl_file_path}")
-
-    print(f"Payload: {payload_json}")
+    payload_json = json.dumps(agent_payload)
 
     conn.request("POST", path, payload_json, headers)
 
@@ -912,8 +866,7 @@ curl -X POST '{agent_api_url}' \\
     status_code = response.status
     response_text = response.read().decode('utf-8')
 
-    print(f"Response status: {status_code}", flush=True)
-    print(f"Response body: {response_text}", flush=True)
+    print(f"Agora ConvoAI join status={status_code} response_bytes={len(response_text)}", flush=True)
 
     conn.close()
 

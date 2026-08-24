@@ -140,8 +140,8 @@ def current_branding() -> Dict[str, Any]:
     brand_data.setdefault("accent", "#0f6b42")
     brand_data.setdefault("accent_soft", "rgba(15, 107, 66, 0.08)")
     brand_data.setdefault("accent_soft_solid", "#ebf4ec")
-    brand_data.setdefault("consultant_accent", "#6b9bd1")
-    brand_data.setdefault("consultant_accent_soft", "rgba(107, 155, 209, 0.12)")
+    brand_data.setdefault("consultant_accent", "#2f5f8f")
+    brand_data.setdefault("consultant_accent_soft", "rgba(47, 95, 143, 0.12)")
     brand_data.setdefault("consultant_accent_soft_solid", "#edf3fb")
     brand_data.setdefault("text_main", "#132218")
     brand_data.setdefault("text_muted", "#5a7261")
@@ -153,7 +153,7 @@ def current_branding() -> Dict[str, Any]:
     brand_data.setdefault("consultant_bg_end", "#ecf3fb")
     brand_data.setdefault("topbar_bg", "#1b2838")
     brand_data.setdefault("topbar_text", "#ffffff")
-    brand_data.setdefault("topbar_mark", "#2bb58e")
+    brand_data.setdefault("topbar_mark", "#167a5d")
     return brand_data
 
 

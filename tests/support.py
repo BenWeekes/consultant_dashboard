@@ -69,6 +69,7 @@ class ConsultantDashboardTestCase(unittest.TestCase):
         with dashboard_auth._VERIFY_RATE_LOCK:
             dashboard_auth._SEND_RATE_LIMITS.clear()
             dashboard_auth._CHECK_RATE_LIMITS.clear()
+            dashboard_auth._ADMIN_LOGIN_RATE_LIMITS.clear()
 
         self.app = create_app()
         self.app.testing = True

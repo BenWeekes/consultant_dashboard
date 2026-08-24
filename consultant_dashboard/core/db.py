@@ -2099,30 +2099,36 @@ def upsert_session(
 
 
 def resolve_client_identity(db: sqlite3.Connection, vendor_id: str = "", **hashes: str):
-    clauses = []
-    params: List[object] = []
-    for column in ("google_sub_hash", "email_hash", "normalized_name_hash", "phone_hash"):
-        value = hashes.get(column)
-        if value:
-            clauses.append(f"{column} = ?")
-            params.append(value)
-    if not clauses:
+    if not vendor_id:
         return None
-    vendor_sql = ""
-    if vendor_id:
-        vendor_sql = "AND cai.vendor_id = ?"
-        params.append(vendor_id)
-    sql = f"""
-        SELECT cai.client_id, cc.consultant_id, c.is_active, c.email, c.first_name, c.last_name, c.display_name, c.phone_number
+    matched_client_ids = set()
+    for column in ("google_sub_hash", "email_hash", "phone_hash", "normalized_name_hash"):
+        value = hashes.get(column)
+        if not value:
+            continue
+        rows = db.execute(
+            f"SELECT client_id FROM client_auth_identities WHERE {column} = ? AND vendor_id = ?",
+            (value, vendor_id),
+        ).fetchall()
+        matched_client_ids.update(row["client_id"] for row in rows)
+
+    # Conflicting identity signals must fail closed rather than selecting the
+    # newest matching client and potentially exposing another person's data.
+    if len(matched_client_ids) != 1:
+        return None
+    client_id = next(iter(matched_client_ids))
+    return db.execute(
+        """
+        SELECT cai.client_id, cc.consultant_id, c.is_active, c.email, c.first_name,
+               c.last_name, c.display_name, c.phone_number
         FROM client_auth_identities cai
         JOIN clients c ON c.id = cai.client_id
         LEFT JOIN consultant_clients cc ON cc.client_id = cai.client_id
-        WHERE ({' OR '.join(clauses)})
-        {vendor_sql}
-        ORDER BY cc.created_at DESC
+        WHERE cai.client_id = ? AND cai.vendor_id = ?
         LIMIT 1
-    """
-    return db.execute(sql, params).fetchone()
+        """,
+        (client_id, vendor_id),
+    ).fetchone()
 
 
 def get_client_context(db: sqlite3.Connection, client_id: str):

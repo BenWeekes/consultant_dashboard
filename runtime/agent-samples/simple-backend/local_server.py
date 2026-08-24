@@ -73,6 +73,46 @@ app.register_blueprint(auth_bp)
 
 _max_duration_timers: dict[str, threading.Timer] = {}
 _max_duration_lock = threading.Lock()
+_active_agents: dict[str, dict[str, str]] = {}
+_active_agents_lock = threading.Lock()
+_PUBLIC_AGENT_QUERY_KEYS = {
+    "profile", "connect", "channel", "debug", "scheduled_meeting_id", "session_id", "agent_id",
+    "avatar_id", "voice_id", "asr_language", "greeting", "enable_aivad", "xhandle",
+}
+
+
+def _safe_agent_query_params():
+    """Keep browser input to explicitly supported, non-secret overrides."""
+    return {
+        key: value
+        for key, value in request.args.to_dict().items()
+        if key in _PUBLIC_AGENT_QUERY_KEYS
+    }
+
+
+def _valid_identifier(value: str, *, allow_channel: bool = False) -> bool:
+    pattern = r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}" if allow_channel else r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}"
+    return bool(re.fullmatch(pattern, str(value or "")))
+
+
+def _agent_control_owner(agent_id: str, constants: dict, channel: str = ""):
+    """Authorize control of an agent created by this backend process."""
+    user_id, _, auth_error = get_authenticated_user_id(request, constants)
+    if auth_error:
+        return False, auth_error
+    allow_anonymous = str(os.environ.get("AGENT_CONTROL_ALLOW_ANONYMOUS", "false")).lower() == "true"
+    if user_id in ("", "anonymous") and not allow_anonymous:
+        return False, "Authentication is required"
+    with _active_agents_lock:
+        record = _active_agents.get(str(agent_id))
+    if not record:
+        return False, "Unknown or expired agent"
+    if channel and record.get("channel") != channel:
+        return False, "Agent does not belong to this channel"
+    owner_id = record.get("owner_id", "")
+    if owner_id not in ("", "anonymous") and owner_id != user_id:
+        return False, "Agent does not belong to this account"
+    return True, ""
 
 
 def _schedule_max_duration_hangup(agent_id: str, constants: dict) -> None:
@@ -265,19 +305,22 @@ def _authorize_guest_meeting_identity(req, constants, expected_client_id):
 
 @app.after_request
 def after_request(response):
-    """Add CORS headers to all responses.
-
-    Uses explicit origin (not '*') when an Authorization header is present,
-    since browsers require a specific origin for credentialed requests.
-    """
+    """Add CORS headers only for explicitly configured browser origins."""
     origin = request.headers.get('Origin', '')
-    if origin:
+    allowed_origins = {
+        item.strip().rstrip('/')
+        for item in os.environ.get(
+            "CORS_ALLOWED_ORIGINS",
+            "https://mindfix.me,https://www.mindfix.me,http://localhost:3000,http://127.0.0.1:3000",
+        ).split(',')
+        if item.strip()
+    }
+    if origin and origin.rstrip('/') in allowed_origins:
         response.headers['Access-Control-Allow-Origin'] = origin
         response.headers['Access-Control-Allow-Credentials'] = 'true'
-    else:
-        response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+        response.headers.add('Vary', 'Origin')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
 
 
@@ -299,7 +342,7 @@ def start_agent():
         GET /start-agent?connect=false
     """
     # Get query parameters from HTTP request
-    query_params = request.args.to_dict()
+    query_params = _safe_agent_query_params()
 
     # Get optional profile parameter (normalize to lowercase)
     profile = query_params.get('profile')
@@ -338,7 +381,7 @@ def start_agent():
     if not _video_biomarkers_available(constants):
         video_biomarkers_enabled = False
     if dashboard_context.get('status') == 'resolved':
-        base_prompt = query_params.get('prompt', constants["DEFAULT_PROMPT"])
+        base_prompt = constants["DEFAULT_PROMPT"]
         prompt_addition = build_prompt_addition(
             dashboard_context.get('context') or {},
             audio_biomarkers_enabled=audio_biomarkers_enabled,
@@ -351,6 +394,10 @@ def start_agent():
     # Get or generate channel
     channel = query_params.get('channel') or generate_random_channel(10)
     session_id = (query_params.get('session_id') or '').strip() or str(uuid4())
+    if not _valid_identifier(channel, allow_channel=True):
+        return jsonify({"error": "Invalid channel"}), 400
+    if not _valid_identifier(session_id):
+        return jsonify({"error": "Invalid session_id"}), 400
     query_params['session_id'] = session_id
 
     # Check if token-only mode
@@ -389,6 +436,7 @@ def start_agent():
             "agent": {
                 "uid": constants["AGENT_UID"]
             },
+            "agent_video_uid": str(constants["AGENT_VIDEO_UID"]),
             "agent_rtm_uid": str(constants["AGENT_UID"]),
             "user_rtm_uid": user_rtm_uid,
             "enable_string_uid": False,
@@ -484,6 +532,12 @@ def start_agent():
                     except Exception as e:
                         print(f"[RegisterAgent] FAILED POST {register_url}: {e}")
                 threading.Thread(target=_register, daemon=True).start()
+                with _active_agents_lock:
+                    _active_agents[str(agent_id)] = {
+                        "owner_id": str(user_id or "anonymous"),
+                        "channel": channel,
+                        "profile": str(profile or ""),
+                    }
         except Exception as e:
             print(f"[RegisterAgent] Error parsing agent response: {e}")
 
@@ -499,6 +553,7 @@ def start_agent():
         "agent": {
             "uid": constants["AGENT_UID"]
         },
+        "agent_video_uid": str(constants["AGENT_VIDEO_UID"]),
         "agent_rtm_uid": str(constants["AGENT_UID"]),
         "user_rtm_uid": user_rtm_uid,
         "enable_string_uid": False,
@@ -864,14 +919,21 @@ def wrap_up_agent_route():
     """
     data = request.get_json(force=True, silent=True) or {}
     channel = (data.get('channel') or '').strip()
-    if not channel:
-        return jsonify({"error": "Missing channel"}), 400
+    agent_id = (data.get('agent_id') or '').strip()
+    if not channel or not agent_id:
+        return jsonify({"error": "Missing channel or agent_id"}), 400
 
     profile = data.get('profile')
     if profile:
         profile = str(profile).lower()
 
     constants = initialize_constants(profile)
+    authorized, error = _agent_control_owner(agent_id, constants, channel)
+    if not authorized:
+        return jsonify({"error": error}), 403
+    user_id, _, auth_error = get_authenticated_user_id(request, constants)
+    if auth_error:
+        return jsonify({"error": auth_error}), 401
     app_id = constants.get("APP_ID") or ""
     if not app_id:
         return jsonify({"error": "APP_ID not configured"}), 500
@@ -884,7 +946,8 @@ def wrap_up_agent_route():
     payload = {
         "app_id": app_id,
         "channel": channel,
-        "user_id": str(data.get("user_id") or ""),
+        "user_id": str(user_id or ""),
+        "agent_id": agent_id,
     }
     extra = data.get("extra_instruction")
     if isinstance(extra, str) and extra.strip():
@@ -925,7 +988,7 @@ def hangup_agent_route():
         GET /hangup-agent?agent_id=abc123
     """
     # Get query parameters
-    query_params = request.args.to_dict()
+    query_params = _safe_agent_query_params()
 
     # Get optional profile parameter (normalize to lowercase)
     profile = query_params.get('profile')
@@ -940,14 +1003,19 @@ def hangup_agent_route():
         return jsonify({"error": "Missing agent_id parameter"}), 400
 
     agent_id = query_params['agent_id']
+    channel = query_params.get('channel', '')
+    authorized, error = _agent_control_owner(agent_id, constants, channel)
+    if not authorized:
+        return jsonify({"error": error}), 403
     _cancel_max_duration_timer(agent_id)
     hangup_response = hangup_agent(agent_id, constants)
+    with _active_agents_lock:
+        _active_agents.pop(str(agent_id), None)
 
     # Unregister agent from custom LLM (non-blocking) to clean up audio subscriber + Thymia
     try:
         llm_base = _derive_llm_base_url(constants)
         unregister_url = f"{llm_base}/unregister-agent"
-        channel = query_params.get('channel', '')
         app_id = constants["APP_ID"]
         unregister_payload = {"app_id": app_id, "channel": channel, "agent_id": agent_id}
         def _unregister():
@@ -995,6 +1063,8 @@ def speak():
         return jsonify({"error": "Missing agent_id"}), 400
     if not text:
         return jsonify({"error": "Missing text"}), 400
+    if not isinstance(text, str) or len(text) > 2000:
+        return jsonify({"error": "Text is too long"}), 400
 
     profile = (data.get('profile') or 'video').lower()
     priority = data.get('priority', 'APPEND').upper()
@@ -1002,9 +1072,16 @@ def speak():
         priority = 'APPEND'
 
     constants = initialize_constants(profile)
+    authorized, error = _agent_control_owner(
+        agent_id,
+        constants,
+        str(data.get('channel') or ''),
+    )
+    if not authorized:
+        return jsonify({"error": error}), 403
     result = speak_to_agent(agent_id, text, constants, priority)
 
-    print(f"[Speak] agent={agent_id} priority={priority} status={result['status_code']} text={text[:80]}")
+    print(f"[Speak] agent={agent_id} priority={priority} status={result['status_code']} text_length={len(text)}")
 
     if not result['success']:
         return jsonify({"error": result['response'], "status_code": result['status_code']}), result['status_code']

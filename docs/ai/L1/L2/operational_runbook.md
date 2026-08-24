@@ -93,16 +93,16 @@ scripts/run-rtm-test.sh therapy \
   "MINDFIX_PROBE_OK_MANUAL"
 ```
 
-This starts a real agent through `simple-backend`, authenticates as the dedicated synthetic probe client, sends a user turn over RTM, and waits for the expected assistant reply. It rejects known failure responses such as `Sorry, something went wrong`. The output includes `latency_ms` and the assistant text.
+This starts a real agent through `simple-backend`, authenticates as the dedicated synthetic probe client, and sends the ConvoAI peer-message envelope over RTM. It rejects known failure responses such as `Sorry, something went wrong`. If ConvoAI completes the turn through custom-LLM but does not echo assistant text over RTM, the probe verifies the exact nonce through the custom server's authenticated local diagnostic endpoint. The output includes `latency_ms` and the assistant text.
 
 Audio-out probe:
 
 ```bash
 cd /home/ubuntu/mindfix/consultant_dashboard
-scripts/run-voice-probe.sh therapy "" 12
+scripts/run-voice-probe.sh therapy "" 25
 ```
 
-This starts a real agent, subscribes to the agent RTC audio stream with `go-audio-subscriber`, triggers a spoken reply through `/speak`, and confirms the agent responded. It prefers PCM amplitude detection and falls back to assistant transcript stream events if PCM is not exposed on the host.
+This starts a real agent, subscribes to the agent RTC audio stream with `go-audio-subscriber`, triggers a spoken reply through `/speak`, and requires non-silent PCM from the agent. Transcript events alone do not pass this check, because they can exist while outbound audio is silent.
 
 Combined daily probe:
 
@@ -124,6 +124,8 @@ Notes:
 - The payload must include Agora's top-level `properties.llm.api_key`, but its value is a dedicated custom-LLM inbound secret, never the OpenAI provider key.
 - Override both `DAILY_AGENT_PROBE_PROMPT` and `DAILY_AGENT_PROBE_EXPECTED_TEXT` together when changing the nonce assertion. `VOICE_PROBE_PROMPT` controls only the audio-out check.
 - These probes validate the live orchestration path and agent response path. They do not yet publish a custom WAV utterance into RTC as a full speech-in probe.
+- A failed outbound-audio check is a real health failure, even when the custom-LLM nonce check passes. Investigate Agora TTS/RTC delivery before treating the system as fully healthy.
+- The audio probe subscribes to the avatar's video/audio UID (`102`), not the conversational agent control UID (`100`). The combined daily probe listens for 25 seconds by default; override with `DAILY_AGENT_AUDIO_LISTEN_SECONDS` when diagnosing slow TTS startup.
 
 Production cron:
 

@@ -587,6 +587,7 @@
       .modal-head h2 { margin: 0; font-size: 22px; }
       .modal-close { background: transparent; color: var(--text-muted); border: 1px solid #d7e0ea; }
       .table { width: 100%; border-collapse: collapse; }
+      .responsive-table { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
       .table th {
         text-align: left;
         padding: 12px;
@@ -637,8 +638,8 @@
         .wrap { padding: 18px 16px; }
         .split { grid-template-columns: 1fr; }
         .client-header { display: grid; }
-        .client-top-grid, .client-bottom-grid, .client-bottom-grid.three-column { grid-template-columns: 1fr; }
-        [data-client-editor-card] { height: auto; }
+        .client-top-grid, .client-top-grid.two-column, .client-bottom-grid, .client-bottom-grid.three-column { grid-template-columns: 1fr; }
+        [data-client-editor-card] { height: auto; min-height: 0; }
         .client-side-stack { grid-template-rows: auto auto auto auto auto; }
         .session-top-card { min-height: auto; }
         .session-side-stack { height: auto; }

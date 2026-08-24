@@ -69,6 +69,7 @@ def _run_rtm_probe(
     channel: str,
     token: str,
     uid: str,
+    agent_rtm_uid: str,
     prompt: str,
     timeout_seconds: int,
     hold_after_response_ms: int,
@@ -80,6 +81,7 @@ def _run_rtm_probe(
         channel,
         token,
         uid,
+        agent_rtm_uid,
         prompt,
         str(timeout_seconds),
         "0",
@@ -95,11 +97,14 @@ def _run_rtm_probe(
     return result
 
 
-def _post_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _post_json(url: str, payload: dict[str, Any], auth_token: str = "") -> dict[str, Any]:
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            **({"Authorization": f"Bearer {auth_token}"} if auth_token else {}),
+        },
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=20) as response:
@@ -161,7 +166,10 @@ def main() -> int:
         "channel": session["channel"],
         "botUid": str(session.get("uid")),
         "token": session["token"],
-        "targetUid": str(session["agent"]["uid"]),
+        "targetUid": os.environ.get(
+            "VOICE_PROBE_TARGET_UID",
+            str(session.get("agent_video_uid") or session["agent"]["uid"]),
+        ),
     }
     proc.stdin.write((json.dumps(start_cmd) + "\n").encode("utf-8"))
     proc.stdin.flush()
@@ -211,10 +219,12 @@ def main() -> int:
                         f"{args.backend_base.rstrip('/')}/speak",
                         {
                             "agent_id": session["agent_id"],
+                            "channel": session["channel"],
                             "profile": args.profile,
                             "text": args.prompt,
                             "priority": "INTERRUPT",
                         },
+                        str(session.get("probe_auth_token") or ""),
                     )
                 elif status == "target_left":
                     break
@@ -245,10 +255,7 @@ def main() -> int:
                 proc.kill()
             except Exception:
                 pass
-    success = (
-        (voiced_frames >= MIN_VOICED_FRAMES and peak_rms >= RMS_THRESHOLD)
-        or transcript_events >= MIN_TRANSCRIPT_EVENTS
-    )
+    success = voiced_frames >= MIN_VOICED_FRAMES and peak_rms >= RMS_THRESHOLD
     result = {
         "ok": success,
         "agent_spoke": success,

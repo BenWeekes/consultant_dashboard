@@ -280,13 +280,13 @@ export function useAgoraVideoClient() {
 
           voiceAI.on(
             AgoraVoiceAIEvents.TRANSCRIPT_UPDATED,
-            (messages: TranscriptHelperItem[]) => {
-              const convertedMessages = messages.map((m) => ({
+            (messages: TranscriptHelperItem<unknown>[]) => {
+              const convertedMessages: IMessageListItem[] = messages.map((m) => ({
                 turn_id: m.turn_id,
                 uid: m.uid,
                 text: m.text,
                 status: m.status,
-                timestamp: m.timestamp,
+                timestamp: m._time,
               }));
 
               const completedMessages = convertedMessages
@@ -343,12 +343,12 @@ export function useAgoraVideoClient() {
               const senderRole =
                 parsed.sender_role === "host" ? "host" : "guest";
               if (isTranscript) {
-                const transcriptItem = {
+                const transcriptItem: IMessageListItem = {
                   turn_id: timestamp,
                   uid: senderUid,
                   role: senderRole,
                   text: String(parsed.text || ""),
-                  status: isFinal ? TurnStatus.FINAL : TurnStatus.IN_PROGRESS,
+                  status: isFinal ? TurnStatus.END : TurnStatus.IN_PROGRESS,
                   timestamp,
                   messageId: messageId || `${senderUid}:${timestamp}`,
                   isFinal,
@@ -369,17 +369,18 @@ export function useAgoraVideoClient() {
                 }
                 return;
               }
+              const chatItem: IMessageListItem = {
+                turn_id: timestamp,
+                uid: senderUid,
+                role: senderRole,
+                text: String(parsed.text || ""),
+                status: 2,
+                timestamp,
+                messageId: messageId || `${senderUid}:${timestamp}`,
+              };
               setMessageList((prev) => [
                 ...prev,
-                {
-                  turn_id: timestamp,
-                  uid: senderUid,
-                  role: senderRole,
-                  text: String(parsed.text || ""),
-                  status: 2,
-                  timestamp,
-                  messageId: messageId || `${senderUid}:${timestamp}`,
-                },
+                chatItem,
               ]);
               return;
             }
@@ -429,7 +430,7 @@ export function useAgoraVideoClient() {
                       uid: line.uid,
                       role: transcriptRole,
                       text: line.text,
-                      status: TurnStatus.FINAL,
+                      status: TurnStatus.END,
                       timestamp: Date.parse(line.time) || Date.now(),
                       messageId: transcriptMessageId,
                       isFinal: true,

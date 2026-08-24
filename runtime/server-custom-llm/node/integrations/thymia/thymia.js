@@ -1,0 +1,908 @@
+/**
+ * Thymia voice biomarker module — self-contained plugin.
+ *
+ * Implements the module interface consumed by custom_llm.js:
+ *   init(audioSubscriber, options)
+ *   getToolDefinitions()
+ *   getToolHandlers()
+ *   onRequest(ctx)
+ *   onResponse(ctx)
+ *   getSystemInjection(appId, channel)
+ *   shutdown()
+ */
+
+const { ThymiaClient } = require('./thymia_client');
+const thymiaStore = require('./thymia_store');
+const agentUpdater = require('../../agent_updater');
+const dashboardClient = require('../../consultant_dashboard_client');
+const { CUSTOM_POLICY_NAME, getPoliciesConfig, loadCustomPolicyPrompt } = require('./thymia_policy_config');
+
+const logger = {
+  info: (message) => console.log(`INFO: [ThymiaModule] ${message}`),
+  debug: (message) => console.log(`DEBUG: [ThymiaModule] ${message}`),
+  error: (message, error) => console.error(`ERROR: [ThymiaModule] ${message}`, error),
+};
+
+// ─── Agent Registry (populated via onAgentRegistered from custom_llm.js) ───
+const agentMap = new Map(); // appId:channel → { agentId, authHeader, agentEndpoint }
+
+// Ring buffer: 60 seconds of 16kHz mono 16-bit PCM = 1,920,000 bytes
+const PCM_BUFFER_SIZE = 16000 * 2 * 60;
+
+// ─── Per-channel Thymia state ───
+
+const channelState = new Map(); // key: "appId:channel"
+
+function getKey(appId, channel) {
+  return `${appId}:${channel}`;
+}
+
+function getOrCreateState(appId, channel) {
+  const key = getKey(appId, channel);
+  if (!channelState.has(key)) {
+    channelState.set(key, {
+      thymiaClient: null,
+      thymiaConnected: false,
+      // PCM ring buffer for pre-connection buffering
+      pcmBuffer: Buffer.alloc(PCM_BUFFER_SIZE),
+      pcmWritePos: 0,
+      pcmBytesWritten: 0,
+      // Pending transcripts queued before Thymia connects
+      pendingTranscripts: [],
+      lastSafetySignature: '',
+      lastAudioLevelLogAt: 0,
+      lastAudioSilent: null,
+      lastNonSilentAudioAt: 0,
+      lastFinalSttAt: 0,
+      inputIdleLogged: false,
+      connectPending: false,
+    });
+  }
+  return channelState.get(key);
+}
+
+// ─── Internal helpers ───
+
+let _audioSubscriber = null;
+let _getRtmClient = null; // getter function, since RTM initializes async
+let _idleTimer = null;
+let _onSafetyUpdate = null;
+
+/**
+ * Check if a biomarkers object has any non-null numeric scores.
+ */
+function hasNonNullScores(obj) {
+  if (!obj) return false;
+  return Object.values(obj).some((v) => v !== null && v !== undefined && typeof v === 'number');
+}
+
+/**
+ * Format all biomarker scores into a human-readable summary.
+ * Skips near-zero values (< 0.001) to reduce noise.
+ */
+function formatBiomarkerSummary(metrics) {
+  const parts = [];
+  const bio = metrics.biomarkers || {};
+
+  for (const [name, value] of Object.entries(bio)) {
+    if (value === null || value === undefined || typeof value !== 'number') continue;
+    if (Math.abs(value) < 0.001) continue; // skip near-zero
+    const pct = (value * 100).toFixed(1);
+    // Capitalize first letter
+    const label = name.charAt(0).toUpperCase() + name.slice(1).replace(/_/g, ' ');
+    parts.push(`${label}: ${pct}%`);
+  }
+
+  // Also include safety if present
+  const s = metrics.safety || {};
+  if (s.alert && s.alert !== 'none') {
+    parts.push(`Safety alert: ${s.alert}`);
+  }
+
+  return parts.length > 0
+    ? `Voice Biomarker Results: ${parts.join(', ')}`
+    : 'Voice biomarker analysis in progress...';
+}
+
+/**
+ * Send biomarker results to frontend via RTM.
+ */
+function pushBiomarkersViaRTM(channel, metrics) {
+  try {
+    const rtm = require('../../rtm_client');
+    const keys = Object.keys(metrics.biomarkers || {}).filter(k => {
+      const v = metrics.biomarkers[k];
+      return v !== null && v !== undefined && typeof v === 'number' && Math.abs(v) >= 0.001;
+    });
+    const ts = Date.now();
+    const safety = metrics.safety || {};
+    logger.info(
+      `[RTM_SEND] t=${ts} biomarkers to ${channel}: ${keys.join(', ')} (${keys.length} scores) safety_level=${safety.level ?? 'none'} safety_alert=${safety.alert || 'none'} active_policy=${safety.active_policy || 'none'}`
+    );
+    const rtmMsg = JSON.stringify({
+      object: 'thymia.biomarkers',
+      text: formatBiomarkerSummary(metrics),
+      biomarkers: metrics.biomarkers,
+      wellness: metrics.wellness,
+      clinical: metrics.clinical,
+      safety: metrics.safety,
+      timestamp: new Date().toISOString(),
+      _server_ts: ts,
+    });
+    rtm.sendRTMMessage(channel, rtmMsg).then((ok) => {
+      logger.info(`[RTM_SENT] t=${Date.now()} biomarkers published=${ok} (latency=${Date.now() - ts}ms)`);
+    });
+  } catch (e) {
+    logger.debug('RTM not available for biomarker push: ' + e.message);
+  }
+}
+
+/**
+ * Send progress update to frontend via RTM.
+ */
+function pushProgressViaRTM(channel, progressData) {
+  try {
+    const rtm = require('../../rtm_client');
+    const summary = Object.entries(progressData).map(([k, v]) =>
+      `${k}:${v.speech_seconds.toFixed(1)}/${v.trigger_seconds}s${v.processing ? '*' : ''}`
+    ).join(' ');
+    const ts = Date.now();
+    logger.info(`[RTM_SEND] t=${ts} progress to ${channel}: ${summary}`);
+    const rtmMsg = JSON.stringify({
+      object: 'thymia.progress',
+      progress: progressData,
+      timestamp: new Date().toISOString(),
+      _server_ts: ts,
+    });
+    rtm.sendRTMMessage(channel, rtmMsg).then((ok) => {
+      logger.info(`[RTM_SENT] t=${Date.now()} progress published=${ok} (latency=${Date.now() - ts}ms)`);
+    });
+  } catch (e) {
+    logger.debug('RTM not available for progress push: ' + e.message);
+  }
+}
+
+/**
+ * Build the biomarker system injection content string.
+ * Categorizes biomarkers and includes recommended_actions.for_agent if present.
+ */
+function buildBiomarkerInjection(metrics) {
+  const WELLNESS_KEYS = ['distress', 'stress', 'burnout', 'fatigue', 'low_self_esteem'];
+  const CLINICAL_KEYS = ['depression_probability', 'anxiety_probability'];
+  const EMOTION_KEYS = ['angry', 'disgusted', 'fearful', 'happy', 'neutral', 'other', 'sad', 'surprised'];
+  const SKIP_KEYS = ['<unk>', 'unk', 'interpretation'];
+
+  const wellnessParts = [];
+  const clinicalParts = [];
+  const emotionParts = [];
+
+  for (const [name, value] of Object.entries(metrics.biomarkers || {})) {
+    if (value === null || value === undefined || typeof value !== 'number') continue;
+    if (Math.abs(value) < 0.001) continue;
+    if (SKIP_KEYS.includes(name)) continue;
+
+    const pct = Math.round(value * 100);
+    const label = name.replace(/^symptom_/, '').replace(/_probability$/, '').replace(/_/g, ' ');
+
+    if (WELLNESS_KEYS.includes(name)) {
+      wellnessParts.push(`${label}: ${pct}%`);
+    } else if (CLINICAL_KEYS.includes(name) || name.startsWith('symptom_')) {
+      clinicalParts.push(`${label}: ${pct}%`);
+    } else if (EMOTION_KEYS.includes(name)) {
+      emotionParts.push(`${label}: ${pct}%`);
+    }
+  }
+
+  if (wellnessParts.length === 0 && clinicalParts.length === 0 && emotionParts.length === 0) return null;
+
+  let injection = `[Voice Biomarker Update] These are live voice biomarker scores analysed continuously since the start of this call. They update as the conversation progresses.\n`;
+  if (wellnessParts.length > 0) {
+    injection += `Wellness: ${wellnessParts.join(', ')}\n`;
+  }
+  if (emotionParts.length > 0) {
+    injection += `Emotions: ${emotionParts.join(', ')}\n`;
+  }
+  if (clinicalParts.length > 0) {
+    injection += `Clinical: ${clinicalParts.join(', ')}\n`;
+  }
+
+  // Include safety recommended_actions.for_agent if present
+  const safety = metrics.safety || {};
+  if (safety.recommended_actions) {
+    const actions = safety.recommended_actions;
+    if (typeof actions === 'object' && actions.for_agent) {
+      injection += `\n[Safety Guidance] ${actions.for_agent}\n`;
+      if (actions.urgency) injection += `Urgency: ${actions.urgency}\n`;
+    } else if (Array.isArray(actions) && actions.length > 0) {
+      injection += `\n[Safety Guidance] ${actions.join('; ')}\n`;
+    }
+  }
+  if (safety.concerns && safety.concerns.length > 0) {
+    injection += `Concerns: ${safety.concerns.join(', ')}\n`;
+  }
+
+  injection += `Use these insights naturally in conversation. Don't list numbers - describe what the data suggests. Celebrate low scores as positives and explore elevated scores therapeutically.`;
+
+  return injection;
+}
+
+/**
+ * Push biomarkers via shared agent updater (combined with other modules like Shen).
+ */
+function pushBiomarkersViaAgentUpdate(appId, channel, metrics) {
+  const key = getKey(appId, channel);
+  if (!agentUpdater.getAgent(appId, channel)) {
+    logger.debug(`[AgentUpdate] no agent registered for ${key}, skipping`);
+    return;
+  }
+
+  const injection = buildBiomarkerInjection(metrics);
+  if (!injection) {
+    logger.debug(`[AgentUpdate] no meaningful biomarker data for ${key}, skipping`);
+    return;
+  }
+
+  logger.info(`[AgentUpdate] t=${Date.now()} pushing biomarkers via shared updater content_len=${injection.length}`);
+
+  agentUpdater.setInjection(appId, channel, 'thymia', injection);
+}
+
+/**
+ * Flush the PCM ring buffer to the Thymia client.
+ */
+function flushBuffer(state) {
+  if (!state.thymiaClient || state.pcmBytesWritten === 0) return;
+
+  const totalBuffered = Math.min(state.pcmBytesWritten, state.pcmBuffer.length);
+  let data;
+
+  if (state.pcmBytesWritten <= state.pcmBuffer.length) {
+    data = Buffer.from(state.pcmBuffer.slice(0, state.pcmWritePos));
+  } else {
+    data = Buffer.concat([
+      state.pcmBuffer.slice(state.pcmWritePos),
+      state.pcmBuffer.slice(0, state.pcmWritePos),
+    ]);
+  }
+
+  // Send in 32KB chunks to avoid overwhelming WebSocket
+  const chunkSize = 32 * 1024;
+  for (let i = 0; i < data.length; i += chunkSize) {
+    const chunk = data.slice(i, Math.min(i + chunkSize, data.length));
+    state.thymiaClient.sendAudio(chunk);
+  }
+
+  logger.info(`Flushed ${totalBuffered} bytes of buffered PCM to Thymia`);
+
+  state.pcmBytesWritten = 0;
+  state.pcmWritePos = 0;
+}
+
+/**
+ * Route PCM audio: stream to Thymia if connected, otherwise ring-buffer.
+ */
+function handleAudio(appId, channel, pcmData) {
+  const state = getOrCreateState(appId, channel);
+  const ts = Date.now();
+  const stats = summarizePcmLevel(pcmData);
+  const shouldLogAudioLevel =
+    !state.lastAudioLevelLogAt ||
+    ts - state.lastAudioLevelLogAt >= 1000 ||
+    state.lastAudioSilent !== stats.silent;
+
+  if (shouldLogAudioLevel) {
+    logger.info(
+      `[AUDIO_LEVEL] t=${ts} session=${getKey(appId, channel)} rms=${stats.rms.toFixed(4)} peak=${stats.peak.toFixed(4)} silent=${stats.silent} bytes=${pcmData.length} connected=${Boolean(state.thymiaConnected && state.thymiaClient)}`
+    );
+    state.lastAudioLevelLogAt = ts;
+    state.lastAudioSilent = stats.silent;
+  }
+
+  if (!stats.silent) {
+    state.lastNonSilentAudioAt = ts;
+    state.inputIdleLogged = false;
+  }
+
+  if (state.thymiaConnected && state.thymiaClient) {
+    state.thymiaClient.sendAudio(pcmData);
+  } else {
+    // Buffer PCM (ring buffer)
+    const space = state.pcmBuffer.length - state.pcmWritePos;
+    if (pcmData.length <= space) {
+      pcmData.copy(state.pcmBuffer, state.pcmWritePos);
+      state.pcmWritePos += pcmData.length;
+    } else {
+      pcmData.copy(state.pcmBuffer, state.pcmWritePos, 0, space);
+      pcmData.copy(state.pcmBuffer, 0, space);
+      state.pcmWritePos = pcmData.length - space;
+    }
+    state.pcmBytesWritten += pcmData.length;
+  }
+}
+
+function summarizePcmLevel(pcmData) {
+  if (!Buffer.isBuffer(pcmData) || pcmData.length < 2) {
+    return { rms: 0, peak: 0, silent: true };
+  }
+
+  let sumSquares = 0;
+  let peak = 0;
+  let samples = 0;
+
+  for (let offset = 0; offset + 1 < pcmData.length; offset += 2) {
+    const sample = pcmData.readInt16LE(offset) / 32768;
+    const abs = Math.abs(sample);
+    sumSquares += sample * sample;
+    if (abs > peak) peak = abs;
+    samples += 1;
+  }
+
+  if (samples === 0) {
+    return { rms: 0, peak: 0, silent: true };
+  }
+
+  const rms = Math.sqrt(sumSquares / samples);
+  return {
+    rms,
+    peak,
+    silent: rms < 0.01 && peak < 0.03,
+  };
+}
+
+function startIdleMonitor() {
+  if (_idleTimer) return;
+  _idleTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [key, state] of channelState.entries()) {
+      const lastInputAt = Math.max(state.lastNonSilentAudioAt || 0, state.lastFinalSttAt || 0);
+      if (!lastInputAt || state.inputIdleLogged) continue;
+      const idleForMs = now - lastInputAt;
+      if (idleForMs < 5000) continue;
+      logger.info(
+        `[INPUT_IDLE] t=${now} session=${key} idle_for_ms=${idleForMs} last_non_silent_audio_at=${state.lastNonSilentAudioAt || 0} last_final_stt_at=${state.lastFinalSttAt || 0}`
+      );
+      state.inputIdleLogged = true;
+    }
+  }, 1000);
+  if (typeof _idleTimer.unref === 'function') _idleTimer.unref();
+}
+
+function stopIdleMonitor() {
+  if (_idleTimer) {
+    clearInterval(_idleTimer);
+    _idleTimer = null;
+  }
+}
+
+function summarizeSafetyActions(actions) {
+  if (!actions) return '';
+  if (typeof actions === 'object' && actions.for_agent) {
+    return String(actions.for_agent).replace(/\s+/g, ' ').trim();
+  }
+  if (Array.isArray(actions) && actions.length > 0) {
+    return actions.map((item) => String(item || '').trim()).filter(Boolean).join('; ');
+  }
+  return String(actions || '').replace(/\s+/g, ' ').trim();
+}
+
+function summarizeSafetyResult(result) {
+  const inner = result?.result || {};
+  const payload =
+    inner.response && typeof inner.response === 'object'
+      ? inner.response
+      : inner;
+  const classification =
+    payload.classification && typeof payload.classification === 'object'
+      ? payload.classification
+      : payload;
+  const turn = payload.segment_number ?? inner.segment_number ?? result?.triggered_at_turn ?? '';
+  const level = classification.level ?? '';
+  const alert = classification.alert || 'none';
+  const rawConcerns = Array.isArray(payload.concerns)
+    ? payload.concerns
+    : Array.isArray(classification.concerns)
+      ? classification.concerns
+      : [];
+  const concerns = rawConcerns
+    ? rawConcerns.map((item) => String(item).replace(/\s+/g, ' ').trim())
+    : [];
+  const guidance = summarizeSafetyActions(
+    payload.recommended_actions || classification.recommended_actions || inner.recommended_actions
+  );
+  return {
+    turn: String(turn),
+    level: String(level),
+    alert: String(alert),
+    concerns,
+    guidance,
+    signature: JSON.stringify({
+      level: String(level),
+      alert: String(alert),
+      concerns,
+      guidance,
+    }),
+  };
+}
+
+/**
+ * Connect Thymia client for a channel.
+ */
+function connectThymia(appId, channel, config) {
+  const key = getKey(appId, channel);
+  const state = getOrCreateState(appId, channel);
+
+  if (state.thymiaClient && state.thymiaConnected) {
+    logger.info(`Thymia already connected for ${key}`);
+    return state.thymiaClient;
+  }
+
+  state.connectPending = false;
+
+  const client = new ThymiaClient({
+    apiKey: config.apiKey,
+    onPolicyResult: (result) => {
+      const ts = Date.now();
+      const bioKeys = Object.keys((result.result || {}).biomarkers || {});
+      const actions = (result.result || {}).recommended_actions;
+      logger.info(`[THYMIA_CB] t=${ts} onPolicyResult policy=${result.policy} biomarker_keys=[${bioKeys.join(',')}] has_actions=${!!actions}`);
+      // Pick which policy's classifications drive the safety state.
+      // When a custom policy is configured, prefer it. Otherwise consume the default.
+      const customPromptLoaded = !!loadCustomPolicyPrompt(logger);
+      const policyName = result.policy_name || result.policy || '';
+      const isSafetyPolicy = customPromptLoaded
+        ? policyName === CUSTOM_POLICY_NAME
+        : policyName === 'agora_safety_analysis' || policyName === 'safety_analysis';
+      if (isSafetyPolicy) {
+        const safety = summarizeSafetyResult(result);
+        const changed = state.lastSafetySignature !== safety.signature;
+        logger.info(
+          `[SAFETY_TIMELINE] t=${ts} level=${safety.level} alert=${safety.alert} changed=${changed}`
+        );
+        state.lastSafetySignature = safety.signature;
+        if (_onSafetyUpdate) {
+          Promise.resolve(
+            _onSafetyUpdate({
+              appId,
+              channel,
+              safety,
+              result,
+            })
+          ).catch((error) => {
+            logger.error(`[SafetyUpdateHook] ${key} ${error.message}`);
+          });
+        }
+      }
+      thymiaStore.updateFromPolicyResult(appId, channel, result);
+      // Push to frontend via RTM + Agent Update API when we have meaningful biomarker scores
+      const metrics = thymiaStore.getMetrics(appId, channel);
+      if (metrics && hasNonNullScores(metrics.biomarkers)) {
+        pushBiomarkersViaRTM(channel, metrics);
+        pushBiomarkersViaAgentUpdate(appId, channel, metrics);
+      } else {
+        logger.info(`[THYMIA_CB] t=${Date.now()} no non-null scores yet, skipping pushes`);
+      }
+    },
+    onProgress: (msg) => {
+      const ts = Date.now();
+      thymiaStore.updateProgress(appId, channel, msg);
+      if (msg.biomarkers) {
+        pushProgressViaRTM(channel, msg.biomarkers);
+      } else {
+        logger.info(`[THYMIA_CB] t=${ts} onProgress but no biomarkers field in msg`);
+      }
+    },
+    onStatus: (status) => {
+      if (status === 'connected') {
+        state.thymiaConnected = true;
+        thymiaStore.setSessionActive(appId, channel, true);
+        logger.info(`Thymia connected for ${key}, flushing buffered audio`);
+        flushBuffer(state);
+        // Flush pending transcripts
+        if (state.pendingTranscripts.length > 0) {
+          logger.info(`Flushing ${state.pendingTranscripts.length} pending transcript(s)`);
+          for (const t of state.pendingTranscripts) {
+            if (t.source === 'agora_stt' && t.isFinal !== false) {
+              logger.info(
+                `[THYMIA_STT] t=${Date.now()} speaker=${t.speaker} final=${t.isFinal !== false} text_length=${String(t.text || '').length}`
+              );
+            }
+            state.thymiaClient.sendTranscript(t.speaker, t.text, t.isFinal !== false);
+          }
+          state.pendingTranscripts = [];
+        }
+      } else if (status === 'disconnected') {
+        state.thymiaConnected = false;
+        thymiaStore.setSessionActive(appId, channel, false);
+      }
+    },
+    onError: (err) => {
+      logger.error(`Thymia error for ${key}:`, err);
+    },
+  });
+
+  state.thymiaClient = client;
+  client.connect(config);
+
+  return client;
+}
+
+function normalizeBirthSex(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === 'male' || normalized === 'female' ? normalized : undefined;
+}
+
+function buildThymiaConfig({
+  apiKey,
+  stableLabel,
+  yearOfBirth,
+  sex,
+}) {
+  const { policies, customPolicies } = getPoliciesConfig(logger);
+  return {
+    user_label: stableLabel,
+    date_of_birth: yearOfBirth ? `${yearOfBirth}-01-01` : undefined,
+    birth_sex: normalizeBirthSex(sex),
+    biomarkers: ['helios', 'apollo'],
+    policies,
+    custom_policies: customPolicies,
+    apiKey,
+  };
+}
+
+function ensureConnectedWithDashboardContext(appId, channel, earlyParams, fallbackUserLabel) {
+  const key = getKey(appId, channel);
+  const state = getOrCreateState(appId, channel);
+  if (state.thymiaConnected || state.connectPending) {
+    return;
+  }
+
+  const apiKey = earlyParams?.thymia_api_key || process.env.THYMIA_API_KEY || '';
+  if (!apiKey) {
+    logger.debug(`No Thymia API key yet for ${key}, deferring connect`);
+    return;
+  }
+
+  const dashboard = dashboardClient.createDashboardConfig(earlyParams);
+  const fallbackLabel = dashboard?.clientId ? `client-${dashboard.clientId}` : fallbackUserLabel;
+  const connectWith = (ctx) => {
+    const stableLabel = dashboard?.clientId ? `client-${dashboard.clientId}` : fallbackLabel;
+    connectThymia(
+      appId,
+      channel,
+      buildThymiaConfig({
+        apiKey,
+        stableLabel,
+        yearOfBirth: ctx?.year_of_birth,
+        sex: ctx?.sex,
+      })
+    );
+  };
+
+  if (!dashboard) {
+    connectWith(null);
+    return;
+  }
+
+  state.connectPending = true;
+  dashboardClient.getClientContext(dashboard, logger)
+    .then((ctx) => connectWith(ctx))
+    .catch((err) => {
+      state.connectPending = false;
+      logger.error(`Failed to load dashboard client context for Thymia ${key}: ${err.message}`);
+      connectWith(null);
+    });
+}
+
+/**
+ * Forward a transcript to Thymia, or queue if not yet connected.
+ */
+function sendTranscript(appId, channel, speaker, text, meta = {}) {
+  const key = getKey(appId, channel);
+  const state = channelState.get(key);
+  if (!state) return;
+  const source = meta.source || 'app';
+  const isFinal = meta.isFinal !== false;
+
+  if (source === 'agora_stt' && isFinal) {
+    state.lastFinalSttAt = Date.now();
+    state.inputIdleLogged = false;
+    logger.info(`[THYMIA_STT] t=${Date.now()} session=${key} speaker=${speaker} final=${isFinal} text_length=${String(text || '').length}`);
+  }
+
+  if (state.thymiaClient && state.thymiaConnected) {
+    logger.info(`Sending transcript to Thymia [${key}] source=${source} final=${isFinal}: ${speaker} text_length=${String(text || '').length}`);
+    state.thymiaClient.sendTranscript(speaker, text, isFinal);
+  } else {
+    state.pendingTranscripts.push({ speaker, text, source, isFinal });
+    logger.debug(`Queued transcript (Thymia not ready) [${key}] source=${source} final=${isFinal}: ${speaker} text_length=${String(text || '').length}`);
+  }
+}
+
+// ─── Tool definitions ───
+
+const TOOL_DEFINITIONS = [
+  {
+    type: 'function',
+    function: {
+      name: 'get_wellness_metrics',
+      description:
+        'Get the current voice biomarker wellness metrics for the user in this session. ' +
+        'Returns stress, burnout, fatigue, and other indicators detected from voice analysis. ' +
+        'Only available after Thymia voice analysis has been running for at least 30 seconds.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'start_thymia_session',
+      description:
+        'Start a Thymia voice biomarker analysis session for the current user. ' +
+        'This connects to the Thymia Sentinel API and begins analyzing the user voice ' +
+        'for wellness indicators. Call this when the user wants a wellness check or ' +
+        'when you need to assess their emotional state from voice.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: "User's name or label for the session",
+          },
+          year_of_birth: {
+            type: 'integer',
+            description: "User's birth year (e.g. 1990), used for age-adjusted analysis",
+          },
+          sex: {
+            type: 'string',
+            enum: ['male', 'female'],
+            description: "User's biological sex, used for voice analysis calibration",
+          },
+          locale: {
+            type: 'string',
+            description: "User's language/locale code (e.g. 'en', 'es', 'fr'). Default: 'en'",
+          },
+        },
+        required: ['name'],
+      },
+    },
+  },
+];
+
+function getWellnessMetrics(appId, userId, channel, args) {
+  logger.info(`get_wellness_metrics called for ${appId}:${channel}`);
+  const metrics = thymiaStore.getMetrics(appId, channel);
+
+  if (!metrics) {
+    return JSON.stringify({
+      status: 'no_data',
+      message:
+        'No voice biomarker data available yet. The analysis needs at least 30 seconds of speech. ' +
+        'If a Thymia session has not been started, call start_thymia_session first.',
+    });
+  }
+
+  return JSON.stringify({
+    status: 'ok',
+    session_active: metrics.sessionActive,
+    results_count: metrics.resultsCount,
+    last_updated: metrics.lastUpdated,
+    wellness: metrics.wellness,
+    clinical: metrics.clinical,
+    safety: metrics.safety,
+  });
+}
+
+function startThymiaSession(appId, userId, channel, args) {
+  logger.info(`start_thymia_session called for ${appId}:${channel}`);
+
+  if (!_audioSubscriber) {
+    return JSON.stringify({
+      status: 'error',
+      message: 'Audio subscriber not available. Thymia integration is not enabled.',
+    });
+  }
+
+  const name = args.name || 'user';
+  const yearOfBirth = args.year_of_birth;
+  const sex = args.sex;
+  const locale = args.locale || 'en';
+
+  const dateOfBirth = yearOfBirth ? `${yearOfBirth}-01-01` : undefined;
+
+  const config = {
+    user_label: name,
+    date_of_birth: dateOfBirth,
+    birth_sex: sex,
+    language: locale,
+  };
+
+  connectThymia(appId, channel, config);
+
+  return JSON.stringify({
+    status: 'ok',
+    message: `Thymia voice analysis session started for ${name}. ` +
+      'Biomarker results will be available after approximately 30 seconds of speech. ' +
+      'Use get_wellness_metrics to retrieve results.',
+  });
+}
+
+const TOOL_MAP = {
+  get_wellness_metrics: getWellnessMetrics,
+  start_thymia_session: startThymiaSession,
+};
+
+// ─── Module interface ───
+
+module.exports = {
+  name: 'thymia',
+
+  // Exposed for unit testing of policy plumbing.
+  getPoliciesConfig,
+
+  /**
+   * Initialize the module with an AudioSubscriber and options.
+   */
+  init(audioSubscriber, options = {}) {
+    _audioSubscriber = audioSubscriber;
+    _getRtmClient = options.rtmClient || null;
+    _onSafetyUpdate = options.onSafetyUpdate || null;
+
+    // Listen for audio events from the generic subscriber
+    audioSubscriber.on('audio', (appId, channel, pcmData) => {
+      handleAudio(appId, channel, pcmData);
+    });
+
+    startIdleMonitor();
+    logger.info('Thymia module initialized');
+  },
+
+  /**
+   * Called when simple-backend registers an agent_id for an appId+channel.
+   * Stores the mapping so we can call Agent Update API when biomarkers arrive.
+   */
+  onAgentRegistered(appId, channel, agentId, authHeader, agentEndpoint, prompt, earlyParams) {
+    const key = getKey(appId, channel);
+    const meetingMode = !!earlyParams?.meeting_mode;
+    const runtimeKey = earlyParams?.meeting_runtime_key || '';
+    const audioBiomarkersEnabled = earlyParams?.audio_biomarkers_enabled !== false;
+    agentMap.set(key, { agentId, authHeader, agentEndpoint, originalPrompt: prompt || null, meetingMode, runtimeKey });
+    if (!meetingMode) {
+      agentUpdater.registerAgent(appId, channel, agentId, authHeader, agentEndpoint, prompt);
+    }
+    logger.info(`[AgentRegistered] ${key} → agent=${agentId} prompt_len=${(prompt || '').length} meeting_mode=${meetingMode}`);
+
+    // Early-start audio subscriber + Thymia if tokens were provided at registration
+    const ep = earlyParams || {};
+    if (audioBiomarkersEnabled && ep.subscriber_token && ep.user_uid) {
+      if (_audioSubscriber && !_audioSubscriber.hasSession(appId, channel)) {
+        _audioSubscriber.startSession(appId, channel, ep.user_uid, ep.subscriber_token);
+        logger.info(`[AgentRegistered] Early-started audio subscriber for ${key}`);
+      }
+      ensureConnectedWithDashboardContext(appId, channel, ep, `user-${ep.user_uid}`);
+      logger.info(`[AgentRegistered] Early-started Thymia connect flow for ${key}`);
+    } else if (!audioBiomarkersEnabled) {
+      logger.info(`[AgentRegistered] Audio biomarkers disabled for ${key}, skipping audio subscriber + Thymia`);
+    }
+  },
+
+  /**
+   * Return tool definitions to be merged into the LLM's tool list.
+   */
+  getToolDefinitions() {
+    return TOOL_DEFINITIONS;
+  },
+
+  /**
+   * Return tool handler map to be merged into the tool dispatcher.
+   */
+  getToolHandlers() {
+    return TOOL_MAP;
+  },
+
+  /**
+   * Called on each incoming /chat/completions request.
+   * Auto-starts audio + Thymia, forwards user transcript.
+   */
+  onRequest(ctx) {
+    const { appId, userId, channel, subscriberToken, thymiaApiKey, messages } = ctx;
+
+    if (!appId || !channel || channel === 'default') return;
+
+    const key = getKey(appId, channel);
+
+    // Auto-start audio subscription
+    if (_audioSubscriber && !_audioSubscriber.hasSession(appId, channel)) {
+      _audioSubscriber.startSession(appId, channel, userId, subscriberToken);
+    }
+
+    // Auto-connect Thymia if not already connected
+    const state = channelState.get(key);
+    if (!state || !state.thymiaConnected) {
+      ensureConnectedWithDashboardContext(appId, channel, {
+        ...ctx.earlyParams,
+        thymia_api_key: thymiaApiKey,
+        user_uid: userId,
+      }, `user-${userId}`);
+    }
+
+    // Forward last user transcript to Thymia
+    const userMessages = (messages || []).filter((m) => m.role === 'user');
+    const lastUserMsg = userMessages[userMessages.length - 1];
+    if (lastUserMsg && lastUserMsg.content) {
+      sendTranscript(appId, channel, 'user', lastUserMsg.content, { source: 'app' });
+    }
+  },
+
+  /**
+   * Called after the LLM produces a final assistant response.
+   * Forwards assistant transcript to Thymia.
+   */
+  onResponse(ctx) {
+    const { appId, channel, content } = ctx;
+    if (content) {
+      sendTranscript(appId, channel, 'agent', content, { source: 'agent_response' });
+    }
+  },
+
+  onTranscriptLine(ctx) {
+    const { appId, channel, uid, text, guestUid, isFinal } = ctx || {};
+    if (!text || !isFinal) return;
+    if (String(uid || '') !== String(guestUid || '101')) return;
+    sendTranscript(appId, channel, 'user', text, { source: 'agora_stt', isFinal: true });
+  },
+
+  // getSystemInjection removed — biomarkers now pushed via Agent Update API directly to ConvoAI engine
+
+  /**
+   * Called when an agent is unregistered (call ended / hangup).
+   * Disconnects Thymia client and cleans up state for this channel.
+   */
+  onAgentUnregistered(appId, channel, agentId, runtimeKey) {
+    const key = getKey(appId, channel);
+    const agent = agentMap.get(key);
+    if (agent?.runtimeKey && runtimeKey && agent.runtimeKey !== runtimeKey) {
+      logger.info(`[AgentUnregistered] skipping stale runtime ${runtimeKey} on ${key}`);
+      return;
+    }
+    logger.info(`[AgentUnregistered] ${key} agent=${agentId}`);
+
+    // Disconnect Thymia client for this channel
+    const state = channelState.get(key);
+    if (state) {
+      if (state.thymiaClient) {
+        state.thymiaClient.disconnect();
+        logger.info(`[AgentUnregistered] Thymia client disconnected for ${key}`);
+      }
+      channelState.delete(key);
+    }
+
+    // Remove from agent map and shared updater
+    agentMap.delete(key);
+    if (!agent?.meetingMode) {
+      agentUpdater.unregisterAgent(appId, channel);
+    }
+
+    // Keep the final Thymia store snapshot alive briefly so downstream
+    // session-complete summarization can still read the peak safety state.
+    // The store is cleaned up by its own age-based cleanup timer.
+    thymiaStore.setSessionActive(appId, channel, false);
+  },
+
+  /**
+   * Shut down all Thymia clients and clear state.
+   */
+  shutdown() {
+    stopIdleMonitor();
+    for (const [key, state] of channelState) {
+      if (state.thymiaClient) {
+        state.thymiaClient.disconnect();
+      }
+    }
+    channelState.clear();
+    logger.info('All Thymia sessions shut down');
+  },
+};

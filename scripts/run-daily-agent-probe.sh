@@ -30,7 +30,7 @@ if "$ROOT_DIR/scripts/run-rtm-test.sh" \
 fi
 
 # Separately verify that the live agent can produce outbound audio.
-if "$ROOT_DIR/scripts/run-voice-probe.sh" "$PROFILE" "" 15 >"$VOICE_OUT" 2>&1; then
+if "$ROOT_DIR/scripts/run-voice-probe.sh" "$PROFILE" "" "${DAILY_AGENT_AUDIO_LISTEN_SECONDS:-25}" >"$VOICE_OUT" 2>&1; then
   VOICE_OK=1
 fi
 

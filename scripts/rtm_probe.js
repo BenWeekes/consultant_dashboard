@@ -65,6 +65,7 @@ async function main() {
     channel,
     token,
     uid,
+    agentRtmUid,
     prompt,
     timeoutSeconds = "12",
     sendDelayMs = "1500",
@@ -72,9 +73,9 @@ async function main() {
     expectedText = "",
   ] = process.argv.slice(2);
 
-  if (!appId || !channel || !token || !uid || !prompt) {
+  if (!appId || !channel || !token || !uid || !agentRtmUid || !prompt) {
     throw new Error(
-      "Usage: rtm_probe.js <appId> <channel> <token> <uid> <prompt> [timeoutSeconds] [sendDelayMs]"
+      "Usage: rtm_probe.js <appId> <channel> <token> <uid> <agentRtmUid> <prompt> [timeoutSeconds] [sendDelayMs]"
     );
   }
 
@@ -105,6 +106,16 @@ async function main() {
     try {
       const publisher = String(event.publisher || "");
       const text = extractResponseText(event.message);
+      if (process.env.RTM_PROBE_DEBUG === "true") {
+        console.error(JSON.stringify({
+          probe_event: true,
+          publisher,
+          channel: event.channelName || "",
+          custom_type: event.customType || event.custom_type || "",
+          message_length: typeof event.message === "string" ? event.message.length : 0,
+          text_length: text.length,
+        }));
+      }
       if (!text || publisher === String(uid)) {
         return;
       }
@@ -149,7 +160,15 @@ async function main() {
   setTimeout(async () => {
     try {
       sentMs = Date.now();
-      await client.publish(channel, prompt);
+      const payload = JSON.stringify({
+        priority: 'interrupted',
+        interruptable: true,
+        message: prompt,
+      });
+      await client.publish(agentRtmUid, payload, {
+        channelType: 'USER',
+        customType: 'user.transcription',
+      });
     } catch (error) {
       await finish(1, {
         ok: false,

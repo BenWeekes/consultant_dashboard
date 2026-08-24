@@ -7,6 +7,7 @@
 {% else %}
   {% set topbar_href = tenant_url_for('web.home') %}
 {% endif %}
+{% if not (request.path.startswith('/consultant') and request.path != '/consultant/login') %}
 <div class="public-topbar-shell">
   <a class="public-topbar-link{% if request.path.startswith('/consultant') and request.path != '/consultant/login' %} public-topbar-hidden{% endif %}" href="{{ topbar_href }}" aria-label="Go to home page">
     <span class="public-topbar-mark">
@@ -19,3 +20,4 @@
     <span>{{ vendor_branding.wordmark }}</span>
   </a>
 </div>
+{% endif %}

@@ -38,13 +38,15 @@ fi
 SESSION_JSON="$(printf '%s' "$START_JSON" | "$PYTHON_BIN" -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["result"]))')"
 AGENT_ID="$(printf '%s' "$SESSION_JSON" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["agent_id"])')"
 CHANNEL="$(printf '%s' "$SESSION_JSON" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["channel"])')"
+PROBE_AUTH_TOKEN="$(printf '%s' "$SESSION_JSON" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["probe_auth_token"])')"
 
 cleanup() {
   "$PYTHON_BIN" "$ROOT_DIR/scripts/agent_probe_backend.py" stop \
     --profile "$PROFILE" \
     --backend-base "$BACKEND_BASE" \
     --agent-id "$AGENT_ID" \
-    --channel "$CHANNEL" >/dev/null 2>&1 || true
+    --channel "$CHANNEL" \
+    --auth-token "$PROBE_AUTH_TOKEN" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 

@@ -1,6 +1,4 @@
 const express = require('express');
-const cors = require('cors');
-const morgan = require('morgan');
 const dotenv = require('dotenv');
 const OpenAI = require('openai');
 const fs = require('fs').promises;
@@ -44,6 +42,29 @@ const MAX_TRANSCRIPT_TEXT_LENGTH = 200000;
 const MAX_TRANSCRIPT_LINES = 5000;
 const MAX_TRANSCRIPT_LINE_LENGTH = 2000;
 const SUPPORTED_REASONING_EFFORTS = new Set(['none', 'minimal', 'low', 'medium', 'high']);
+const ENABLE_RTM_DIRECT_INPUT = process.env.ENABLE_RTM_DIRECT_INPUT === 'true';
+const probeCompletionObservations = new Map();
+
+function safeMessage(value) {
+  if (value instanceof Error) return value.message;
+  return String(value || '').slice(0, 500);
+}
+
+function recordProbeCompletion(channel, requestMessages, content, startedAt) {
+  if (!channel || !Array.isArray(requestMessages) || !content) return;
+  const serialized = JSON.stringify(requestMessages);
+  const nonce = serialized.match(/MINDFIX_PROBE_OK_[A-Z0-9_]+/)?.[0];
+  if (!nonce) return;
+  probeCompletionObservations.set(channel, {
+    nonce,
+    response: String(content).slice(0, 240),
+    latency_ms: Math.max(0, Date.now() - startedAt),
+    completed_at: Date.now(),
+  });
+  while (probeCompletionObservations.size > 100) {
+    probeCompletionObservations.delete(probeCompletionObservations.keys().next().value);
+  }
+}
 
 /**
  * Get an OpenAI client using only the server-side provider credential.
@@ -105,7 +126,7 @@ const port = process.env.PORT || 8101;
 const logger = {
   info: (message) => console.log(`INFO: ${message}`),
   debug: (message) => console.log(`DEBUG: ${message}`),
-  error: (message, error) => console.error(`ERROR: ${message}`, error),
+  error: (message, error) => console.error(`ERROR: ${message}${error ? ` ${safeMessage(error)}` : ''}`),
   warn: (message) => console.warn(`WARN: ${message}`),
 };
 
@@ -225,7 +246,10 @@ if (crisisModule) {
 }
 
 function requireAgentServerSecret(req, res, next) {
-  if (!AGENT_SERVER_SHARED_SECRET) return next();
+  if (!AGENT_SERVER_SHARED_SECRET) {
+    logger.error('[Auth] AGENT_SERVER_SHARED_SECRET is not configured');
+    return res.status(503).json({ error: 'Internal authentication is not configured' });
+  }
   const supplied = String(req.headers['x-agent-server-secret'] || '');
   const expected = AGENT_SERVER_SHARED_SECRET;
   if (supplied.length !== expected.length) {
@@ -287,14 +311,41 @@ function sanitizeTranscriptPayload(transcript) {
   return safe;
 }
 
-// Middleware
-app.use(cors());
-app.use(morgan('dev'));
+// Middleware. This service is server-to-server; browser CORS is intentionally
+// disabled so credentials cannot be used from arbitrary origins.
 app.use(express.json({ limit: '1mb' }));
+app.use((req, res, next) => {
+  const started = Date.now();
+  res.on('finish', () => {
+    logger.info(`[HTTP] ${req.method} ${req.path} status=${res.statusCode} duration_ms=${Date.now() - started}`);
+  });
+  next();
+});
 
 // Health check endpoint
 app.get('/ping', (req, res) => {
   res.json({ message: 'pong' });
+});
+
+// Local-only diagnostic used by the daily probe after it injects a real RTM
+// turn. It reports a nonce-matched ConvoAI completion without exposing normal
+// transcript content or request bodies.
+app.get('/probe/completion-status', requireCustomLlmSecret, (req, res) => {
+  const channel = String(req.query.channel || '');
+  const expected = String(req.query.nonce || '');
+  const observation = probeCompletionObservations.get(channel);
+  const matched = Boolean(
+    observation &&
+    expected &&
+    observation.nonce === expected &&
+    observation.response.toLowerCase().includes(expected.toLowerCase())
+  );
+  return res.json({
+    ok: matched,
+    channel_present: Boolean(channel),
+    latency_ms: matched ? observation.latency_ms : null,
+    response: matched ? observation.response : null,
+  });
 });
 
 // ─── Agent Registry (meeting runtime key → agent metadata) ───
@@ -329,6 +380,7 @@ function registerAgent(appId, channel, agentId, authHeader, agentEndpoint, maxSe
     agentEndpoint,
     registeredAt: Date.now(),
     maxSessionDuration: maxSessionDuration || 0,
+    prompt: options.prompt || '',
     wrapUpSent: false,
     meetingMode: !!options.meetingMode,
     guestUid: options.guestUid || '',
@@ -387,7 +439,7 @@ function publishMeetingTranscriptLine(channel, entry, line) {
       is_final: Boolean(line.is_final),
     };
     logger.info(
-      `[TranscriptRTM] runtime=${entry?.runtimeKey || 'unknown'} channel=${channel} uid=${payload.sender_uid} final=${payload.is_final} text=${payload.text.slice(0, 80)}`
+      `[TranscriptRTM] runtime_present=${Boolean(entry?.runtimeKey)} final=${payload.is_final} text_length=${payload.text.length}`
     );
     rtm.sendRTMMessage(channel, JSON.stringify(payload)).catch((error) => {
       logger.error(`[TranscriptLine] failed to publish RTM transcript line: ${error.message}`);
@@ -446,7 +498,7 @@ audioSubscriber.on('stream_message', (appId, channel, message) => {
     const line = extractTranscriptLine(message?.data);
     if (!line) return;
     logger.info(
-      `[TranscriptLine] runtime=${entry.runtimeKey} uid=${line.uid} final=${Boolean(line.is_final)} text=${line.text.slice(0, 80)}`
+      `[TranscriptLine] runtime_present=${Boolean(entry.runtimeKey)} final=${Boolean(line.is_final)} text_length=${String(line.text || '').length}`
     );
     if (line.is_final) {
       appendMeetingTranscriptLine(entry.runtimeKey, line);
@@ -567,7 +619,8 @@ app.post('/register-agent', requireAgentServerSecret, (req, res) => {
       agent_endpoint,
       max_session_duration,
       {
-        meetingMode: !!meeting_mode,
+          prompt: prompt || '',
+          meetingMode: !!meeting_mode,
         meetingRuntimeKey: meeting_runtime_key || '',
         guestUid: guest_uid || '',
         hostUid: host_uid || '',
@@ -584,7 +637,7 @@ app.post('/register-agent', requireAgentServerSecret, (req, res) => {
     }
     throw error;
   }
-  logger.info(`[RegisterAgent] prompt_len=${(prompt || '').length} has_tokens=${!!subscriber_token} user_id=${user_id || 'none'}`);
+  logger.info(`[RegisterAgent] prompt_len=${(prompt || '').length} has_tokens=${!!subscriber_token} user_present=${Boolean(user_id)}`);
   logger.info(
     `[RegisterAgent] meeting_mode=${!!meeting_mode} ` +
     `meeting_id=${meeting_id || 'none'} ` +
@@ -666,15 +719,18 @@ app.post('/register-agent', requireAgentServerSecret, (req, res) => {
 // Caller should delay the actual hangup by roughly estimated_duration_ms + 2s
 // so the closing has time to be spoken.
 app.post('/session-wrap-up', requireAgentServerSecret, async (req, res) => {
-  const { app_id, channel, user_id = '', extra_instruction } = req.body || {};
-  if (!app_id || !channel) {
-    return res.status(400).json({ error: 'Missing app_id or channel' });
+  const { app_id, channel, agent_id, user_id = '', extra_instruction } = req.body || {};
+  if (!app_id || !channel || !agent_id) {
+    return res.status(400).json({ error: 'Missing app_id, channel, or agent_id' });
   }
 
   const agent = getAgent(app_id, channel);
   if (!agent) {
     logger.info(`[SessionWrapUp] no agent registered for ${app_id}:${channel}`);
     return res.status(404).json({ error: 'No agent registered for this channel' });
+  }
+  if (String(agent.agentId) !== String(agent_id)) {
+    return res.status(403).json({ error: 'Agent does not belong to this channel' });
   }
 
   const history = getMessages(app_id, user_id, channel);
@@ -872,18 +928,47 @@ function getMergedToolMap() {
 
 const mergedToolMap = getMergedToolMap();
 
+function messageKey(message) {
+  if (!message || typeof message !== 'object') return '';
+  return JSON.stringify([
+    message.role || '',
+    message.content || '',
+    message.tool_call_id || '',
+    message.name || '',
+  ]);
+}
+
+function isSequenceIncluded(container, sequence) {
+  if (!sequence.length) return true;
+  let cursor = 0;
+  for (const message of container) {
+    if (messageKey(message) === messageKey(sequence[cursor])) {
+      cursor += 1;
+      if (cursor === sequence.length) return true;
+    }
+  }
+  return false;
+}
+
 function buildMessagesWithHistory(appId, userId, channel, requestMessages) {
   const history = getMessages(appId, userId, channel);
   const incoming = Array.isArray(requestMessages) ? requestMessages : [];
 
-  // Save incoming user messages
+  // Agora may resend the complete conversation on every turn. If it contains
+  // the persisted history, use that request as the canonical sequence instead
+  // of appending a second copy of every turn.
+  const canonical = isSequenceIncluded(incoming, history)
+    ? incoming
+    : [...history, ...incoming];
+  const known = new Set(history.map(messageKey));
   for (const msg of incoming) {
-    if (msg.role === 'user') {
+    if (msg?.role === 'user' && !known.has(messageKey(msg))) {
       saveMessage(appId, userId, channel, msg);
+      known.add(messageKey(msg));
     }
   }
 
-  return [...history, ...incoming];
+  return canonical;
 }
 
 /**
@@ -958,9 +1043,10 @@ function executeTools(toolCalls, appId, userId, channel) {
 
 app.post('/chat/completions', requireCustomLlmSecret, async (req, res) => {
   try {
-    // Log non-message fields to see what engine forwards
-    const { messages: _msgs, ...reqMeta } = req.body;
-    logger.info(`Request meta (non-messages): ${JSON.stringify(reqMeta)}`);
+    const requestStartedAt = Date.now();
+    logger.info(`[Chat] messages=${Array.isArray(req.body?.messages) ? req.body.messages.length : 0} ` +
+      `model=${String(req.body?.model || DEFAULT_LLM_MODEL).slice(0, 80)} ` +
+      `stream=${req.body?.stream !== false}`);
 
     const {
       model = DEFAULT_LLM_MODEL,
@@ -985,7 +1071,8 @@ app.post('/chat/completions', requireCustomLlmSecret, async (req, res) => {
     const { appId, userId, channel, agentUid, subscriberToken, rtmToken, rtmUid, thymiaApiKey, authenticatedUserId, authenticatedUserName } = extractContext(req.body);
     const client = getOpenAIClient();
 
-    logger.info(`Context: appId=${appId}, userId=${userId}, channel=${channel}, model=${model} thymia_key_in_params=${thymiaApiKey ? 'yes' : 'no'} auth_user=${authenticatedUserId || 'none'}`);
+    logger.info(`[Chat] context_present=${Boolean(appId && userId && channel)} model=${String(model).slice(0, 80)} ` +
+      `thymia_key_present=${Boolean(thymiaApiKey)} authenticated_user_present=${Boolean(authenticatedUserId)}`);
 
     const agentEntry = getAgent(appId, channel);
     if (agentEntry?.meetingMode) {
@@ -1093,7 +1180,7 @@ app.post('/chat/completions', requireCustomLlmSecret, async (req, res) => {
     for (const mod of modules) {
       if (mod.getSystemInjection) {
         const injection = mod.getSystemInjection(appId, channel);
-        logger.info(`[SystemInjection] module=${mod.name || 'unknown'} hasInjection=${!!injection}${injection ? ` content="${injection.substring(0, 200)}"` : ''}`);
+        logger.info(`[SystemInjection] module=${mod.name || 'unknown'} present=${Boolean(injection)}`);
         if (injection) {
           const sysIdx = messages.findIndex(m => m.role === 'system');
           if (sysIdx >= 0) {
@@ -1108,8 +1195,7 @@ app.post('/chat/completions', requireCustomLlmSecret, async (req, res) => {
     // Log system messages summary so we can verify injection ordering
     const sysMsgs = messages.filter(m => m.role === 'system');
     for (let i = 0; i < sysMsgs.length; i++) {
-      const preview = sysMsgs[i].content.substring(0, 120).replace(/\n/g, '\\n');
-      logger.info(`[SysMsg ${i}/${sysMsgs.length}] ${preview}...`);
+      logger.info(`[SysMsg ${i}/${sysMsgs.length}] content_present=${Boolean(sysMsgs[i].content)}`);
     }
 
     // Dump full messages to /tmp for debugging (enable via DUMP_LLM_MESSAGES=true)
@@ -1148,6 +1234,7 @@ app.post('/chat/completions', requireCustomLlmSecret, async (req, res) => {
               role: 'assistant',
               content,
             });
+            recordProbeCompletion(channel, requestMessages, content, requestStartedAt);
             // Module onResponse hooks
             for (const mod of modules) {
               if (mod.onResponse) mod.onResponse({ appId, userId, channel, content });
@@ -1261,6 +1348,7 @@ app.post('/chat/completions', requireCustomLlmSecret, async (req, res) => {
           role: 'assistant',
           content: accumulatedContent,
         });
+        recordProbeCompletion(channel, requestMessages, accumulatedContent, requestStartedAt);
         // Module onResponse hooks
         for (const mod of modules) {
           if (mod.onResponse) mod.onResponse({ appId, userId, channel, content: accumulatedContent });
@@ -1275,8 +1363,7 @@ app.post('/chat/completions', requireCustomLlmSecret, async (req, res) => {
     logger.error('Chat completion error:', error);
 
     if (!res.headersSent) {
-      const errorDetail = `${error.message}\n${error.stack || ''}`;
-      return res.status(500).json({ detail: errorDetail });
+      return res.status(500).json({ detail: 'LLM request failed' });
     }
 
     res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
@@ -1296,7 +1383,8 @@ const waitingMessages = [
 
 app.post('/rag/chat/completions', requireCustomLlmSecret, async (req, res) => {
   try {
-    logger.info(`Received RAG request: ${JSON.stringify(req.body)}`);
+    logger.info(`[RAG] messages=${Array.isArray(req.body?.messages) ? req.body.messages.length : 0} ` +
+      `model=${String(req.body?.model || DEFAULT_LLM_MODEL).slice(0, 80)}`);
 
     const {
       model = DEFAULT_LLM_MODEL,
@@ -1419,8 +1507,7 @@ app.post('/rag/chat/completions', requireCustomLlmSecret, async (req, res) => {
     logger.error('RAG chat completion error:', error);
 
     if (!res.headersSent) {
-      const errorDetail = `${error.message}\n${error.stack || ''}`;
-      return res.status(500).json({ detail: errorDetail });
+      return res.status(500).json({ detail: 'RAG request failed' });
     }
 
     res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
@@ -1460,7 +1547,7 @@ async function readPCMFile(filePath, sampleRate, durationMs) {
 
 app.post('/audio/chat/completions', requireCustomLlmSecret, async (req, res) => {
   try {
-    logger.info(`Received audio request: ${JSON.stringify(req.body)}`);
+    logger.info(`[Audio] request_received=true`);
 
     const { stream = true } = req.body;
 
@@ -1579,8 +1666,7 @@ app.post('/audio/chat/completions', requireCustomLlmSecret, async (req, res) => 
     logger.error('Audio chat completion error:', error);
 
     if (!res.headersSent) {
-      const errorDetail = `${error.message}\n${error.stack || ''}`;
-      return res.status(500).json({ detail: errorDetail });
+      return res.status(500).json({ detail: 'Audio request failed' });
     }
 
     res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
@@ -1672,12 +1758,17 @@ function handleRTMPresence(channel, event) {
 
 async function handleRTMMessage(event) {
   try {
-    const messageText =
+    const customType = event.customType || event.custom_type || '';
+    if (!ENABLE_RTM_DIRECT_INPUT || customType !== 'user.transcription') {
+      return;
+    }
+    const rawMessage =
       typeof event.message === 'string'
         ? event.message
         : event.message?.toString?.() || '';
     const channelName = event.channelName || 'default';
     const publisherUserId = event.publisher || 'unknown';
+    let messageText = rawMessage;
 
     // Skip messages handled by integration modules (shen.vitals, thymia.biomarkers, etc.)
     try {
@@ -1685,19 +1776,33 @@ async function handleRTMMessage(event) {
       if (parsed.object && /^(shen\.|thymia\.)/.test(parsed.object)) {
         return; // Already handled by the module's own RTM handler
       }
+      if (typeof parsed.message === 'string') {
+        messageText = parsed.message.trim();
+      }
     } catch (_) {
       // Not JSON — treat as a regular chat message
     }
 
-    logger.info(
-      `RTM message from ${publisherUserId} on ${channelName}: ${messageText}`
+    if (!messageText) return;
+
+    logger.info(`[RTM] message_received=true publisher_present=${publisherUserId !== 'unknown'} text_length=${messageText.length}`);
+
+    // Resolve the app from the registered channel. The env fallback supports
+    // the legacy single-session RTM configuration.
+    const registeredEntry = [...agentRegistry.values()].find(
+      (entry) => entry.channel === channelName,
     );
+    const appId = registeredEntry?.appId || process.env.AGORA_APP_ID || '';
 
-    // Use a default appId from env for RTM conversations
-    const appId = process.env.AGORA_APP_ID || '';
+    const agent = getAgent(appId, channelName);
+    const systemMessages = agent?.prompt
+      ? [{ role: 'system', content: agent.prompt }]
+      : [];
 
-    // Build messages with history
+    // Build messages with history. This path is opt-in and accepts only the
+    // same explicit transcription message type used by the diagnostic probe.
     const messages = buildMessagesWithHistory(appId, publisherUserId, channelName, [
+      ...systemMessages,
       { role: 'user', content: messageText },
     ]);
 
@@ -1777,10 +1882,12 @@ process.on('SIGTERM', () => { shutdownAll(); process.exit(0); });
 
 // Prevent RTM WASM async errors from crashing the server
 process.on('uncaughtException', (err) => {
-  logger.error('Uncaught exception (server continues):', err);
+  logger.error('Uncaught exception; shutting down for supervised restart:', err);
+  process.exit(1);
 });
 process.on('unhandledRejection', (reason) => {
-  logger.error('Unhandled rejection (server continues):', reason);
+  logger.error('Unhandled rejection; shutting down for supervised restart:', reason);
+  process.exit(1);
 });
 
 // Start server

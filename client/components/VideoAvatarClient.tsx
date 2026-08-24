@@ -28,7 +28,17 @@ import { ThemeToggle } from "./ThemeToggle";
 import { CombinedBiomarkersPanel } from "./biomarkers/CombinedBiomarkersPanel";
 
 function getBackendOverride(params: URLSearchParams): string | null {
-  return params.get("backend") || params.get("backend_url");
+  const candidate = params.get("backend") || params.get("backend_url");
+  if (!candidate || typeof window === "undefined") return null;
+  const configured = (process.env.NEXT_PUBLIC_ALLOWED_BACKEND_URLS || "")
+    .split(",")
+    .map((value) => value.trim().replace(/\/$/, ""))
+    .filter(Boolean);
+  const local = ["localhost", "127.0.0.1"].includes(window.location.hostname)
+    ? [`${window.location.protocol}//${window.location.hostname}:8082`]
+    : [];
+  const normalized = candidate.replace(/\/$/, "");
+  return [...configured, ...local].includes(normalized) ? normalized : null;
 }
 
 function resolveDefaultBackendUrl() {
@@ -166,12 +176,24 @@ function fallbackConsultantDashboardUrl() {
   return `${window.location.origin}/consultant/dashboard`;
 }
 
+function safeReturnUrl(value: string): string | null {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return null;
+  try {
+    const parsed = new URL(value, window.location.origin);
+    return parsed.origin === window.location.origin
+      ? `${parsed.pathname}${parsed.search}${parsed.hash}`
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export function VideoAvatarClient() {
   const [backendUrl, setBackendUrl] = useState(DEFAULT_BACKEND_URL);
   const [agentId, setAgentId] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(false);
   const [chatMessage, setChatMessage] = useState("");
-  const [enableLocalVideo, setEnableLocalVideo] = useState(true);
+  const [enableLocalVideo, setEnableLocalVideo] = useState(false);
   const [enableAvatar, setEnableAvatar] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [enableAivad, setEnableAivad] = useState(true);
@@ -303,7 +325,7 @@ export function VideoAvatarClient() {
       }
       const ru = params.get("returnurl");
       if (ru) {
-        setReturnUrl(ru);
+        setReturnUrl(safeReturnUrl(ru));
       }
 
       let cleanedUrl = false;
@@ -1118,6 +1140,7 @@ export function VideoAvatarClient() {
           body: JSON.stringify({
             profile: profile.trim() || DEFAULT_PROFILE,
             channel,
+            agent_id: sessionAgentId,
           }),
         });
         if (!response.ok) {

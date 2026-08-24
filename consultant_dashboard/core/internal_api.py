@@ -84,17 +84,20 @@ def internal_health():
     return {
         "status": "ok",
         "service": "consultant-dashboard",
-        "db_path": current_app.config["DB_PATH"],
     }
 
 
 @internal_bp.get("/resolve-client")
 def resolve_client():
     db = get_db(current_app.config)
-    vendor = get_vendor_by_slug(db, request.args.get("vendor_slug", "").strip())
+    vendor_slug = request.args.get("vendor_slug", "").strip().lower()
+    vendor = get_vendor_by_slug(db, vendor_slug)
+    if not vendor:
+        db.close()
+        return jsonify({"found": False, "error": "Unknown vendor"}), 400
     row = resolve_client_identity(
         db,
-        vendor_id=vendor["id"] if vendor else "",
+        vendor_id=vendor["id"],
         google_sub_hash=request.args.get("google_sub_hash", ""),
         email_hash=request.args.get("email_hash", ""),
         normalized_name_hash=request.args.get("normalized_name_hash", ""),
@@ -107,7 +110,7 @@ def resolve_client():
         "found": True,
         "client_id": row["client_id"],
         "consultant_id": row["consultant_id"],
-        "vendor_slug": request.args.get("vendor_slug", "").strip().lower(),
+        "vendor_slug": vendor_slug,
         "is_active": bool(row["is_active"]),
         "email": row["email"] or "",
         "first_name": row["first_name"] or "",
