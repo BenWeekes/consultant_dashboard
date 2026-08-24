@@ -111,10 +111,12 @@ def build_tts_config(tts_vendor, constants, query_params=None):
         tts_config["params"] = {
             "api_key": gradium_api_key,
             "voice_id": voice_id,
-            "base_url": constants.get(
+            "url": constants.get(
                 "GRADIUM_BASE_URL",
                 "wss://api.gradium.ai/api/speech/tts",
             ),
+            "model_name": constants.get("GRADIUM_MODEL_NAME", "default"),
+            "sample_rate": int(constants.get("TTS_SAMPLE_RATE", "24000")),
         }
 
     else:

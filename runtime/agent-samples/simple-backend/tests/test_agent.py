@@ -67,6 +67,8 @@ class TestBuildTTSConfig:
             "GRADIUM_API_KEY": "gradium-test-key",
             "GRADIUM_VOICE_ID": "5EMc3FS3DHJrWJbT",
             "GRADIUM_BASE_URL": "wss://api.gradium.ai/api/speech/tts",
+            "GRADIUM_MODEL_NAME": "default",
+            "TTS_SAMPLE_RATE": "24000",
         })
 
         config = build_tts_config(
@@ -80,7 +82,9 @@ class TestBuildTTSConfig:
             "params": {
                 "api_key": "gradium-test-key",
                 "voice_id": "5EMc3FS3DHJrWJbT",
-                "base_url": "wss://api.gradium.ai/api/speech/tts",
+                "url": "wss://api.gradium.ai/api/speech/tts",
+                "model_name": "default",
+                "sample_rate": 24000,
             },
         }
 

@@ -84,6 +84,7 @@ def initialize_constants(profile=None):
         "GRADIUM_BASE_URL": get_env_var(
             'GRADIUM_BASE_URL', profile, "wss://api.gradium.ai/api/speech/tts"
         ),
+        "GRADIUM_MODEL_NAME": get_env_var('GRADIUM_MODEL_NAME', profile, "default"),
         # TTS_VOICE_ID - universal voice identifier for all vendors
         # Falls back to vendor-specific env vars for backward compatibility
         "TTS_VOICE_ID": (
