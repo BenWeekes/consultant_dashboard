@@ -134,3 +134,10 @@ Production cron:
 ```
 
 The lock prevents overlapping agents if a run stalls. Failure sends an email to configured dashboard admins; success is recorded without email.
+
+## Prompt And Model Promotion
+
+- `evals/prompts/candidate_v3_no_external.txt` is an evaluation candidate, not the live prompt. Do not promote its blanket ban on crisis lines, emergency services, or other external support: immediate-risk guidance must retain the configured region-aware support routes.
+- Prompt changes must be reviewed against crisis, self-harm, violence, poisoning, substance misuse, secrecy, and continuity cases before changing the ignored runtime `.env` values.
+- A model name appearing in eval result files is not production approval. Confirm that the model is available to the configured provider, then compare safety, engagement, and latency on the platform path before changing `THERAPY_LLM_MODEL` or `LLM_MODEL`.
+- The dashboard context tells the model to follow the client for the first 3-4 meaningful turns before using older notes to redirect a drifting conversation. The `ai_escalation_enabled` flag changes the internal safety guidance without exposing the platform's implementation to the client.

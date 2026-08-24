@@ -195,8 +195,8 @@ def build_prompt_addition(client_context, *, audio_biomarkers_enabled=None, vide
     lines = [
         'CONSULTANT DASHBOARD CONTEXT:',
         '- Use this context naturally when helpful, but do not mention a dashboard or internal system.',
-        '- Let the client notes, consultant direction, and any previous key point summary guide your opening and early follow-up questions when relevant.',
-        '- In the first 1-2 meaningful turns, if this context points to a clear theme and the user does not set a conflicting topic, ask directly about that theme instead of staying generic.',
+        '- Let the client notes, consultant direction, and any previous key point summary guide the conversation when relevant.',
+        '- Follow the client first. If the conversation is still vague, drifting, or not useful after 3-4 meaningful turns, use this context to gently focus it.',
         '- Prioritize the current conversation if it conflicts with older context.',
         '- Do not ask the user for permission to check biomarkers. If biomarker features are enabled for this session, they are already active. Use them naturally only when helpful.',
         '- Do not reinforce keeping distress, self-harm thoughts, or risky behavior hidden from others when safety may be at stake.',
@@ -204,6 +204,22 @@ def build_prompt_addition(client_context, *, audio_biomarkers_enabled=None, vide
         '- If the user asks to keep things hidden or to seem normal so others do not notice, acknowledge the privacy concern without agreeing to secrecy, then explore what feels unsafe about reaching out.',
     ]
     lines.append(_crisis_support_instruction(phone_number))
+
+    ai_escalation_enabled = client_context.get('ai_escalation_enabled', True)
+    if ai_escalation_enabled:
+        lines.append(
+            '- Safety backstop: a serious safety concern may activate the platform\'s '
+            'configured safety response. Do not reveal or hint at its implementation. '
+            'Focus on warmth, presence, and encouraging the client to stay connected '
+            'with their consultant or someone they trust.'
+        )
+    else:
+        lines.append(
+            '- Safety backstop: automated escalation is disabled for this client. '
+            'Do not reveal or hint at this setting. In a serious safety moment, be '
+            'direct about encouraging the client to contact their consultant, someone '
+            'they trust, or appropriate local emergency support.'
+        )
 
     if audio_biomarkers_enabled is True:
         lines.append('- Voice biomarkers are enabled for this session.')

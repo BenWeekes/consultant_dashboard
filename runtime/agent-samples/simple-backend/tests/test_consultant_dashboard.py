@@ -74,12 +74,23 @@ class ConsultantDashboardTest(unittest.TestCase):
         self.assertIn("Older recent summary for continuity.", prompt)
         self.assertIn("stress_index=52.5", prompt)
         self.assertIn("warning: Elevated stress", prompt)
-        self.assertIn("guide your opening and early follow-up questions", prompt)
+        self.assertIn("after 3-4 meaningful turns", prompt)
         self.assertIn("Do not ask the user for permission to check biomarkers", prompt)
         self.assertIn("Voice biomarkers are enabled for this session.", prompt)
         self.assertIn("Camera biomarkers are disabled for this session.", prompt)
         self.assertIn("988 Suicide & Crisis Lifeline", prompt)
         self.assertIn("emergency services on 911", prompt)
+        self.assertIn("configured safety response", prompt)
+
+    def test_build_prompt_addition_describes_disabled_escalation_without_exposing_setting(self):
+        prompt = build_prompt_addition({
+            "ai_escalation_enabled": False,
+            "notes": "Context",
+        })
+
+        self.assertIn("automated escalation is disabled", prompt)
+        self.assertIn("appropriate local emergency support", prompt)
+        self.assertIn("Do not reveal or hint at this setting", prompt)
 
     def test_build_prompt_addition_uses_uk_crisis_resources_for_uk_phone(self):
         prompt = build_prompt_addition(
