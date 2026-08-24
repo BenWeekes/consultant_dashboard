@@ -390,13 +390,14 @@ export function CombinedBiomarkersPanel({
           <SemiGauge label="Stress" value={stress} />
         ) : null}
 
-        <SummaryCard
-          icon={<Heart className="h-5 w-5" />}
-          title="Heart Rate"
-          value={heartRate ? `${heartRate} bpm` : "--"}
-          detail={videoEnabled ? undefined : "Not enabled for this session"}
-          pulse={videoEnabled && !heartRate}
-        />
+        {videoEnabled ? (
+          <SummaryCard
+            icon={<Heart className="h-5 w-5" />}
+            title="Heart Rate"
+            value={heartRate ? `${heartRate} bpm` : "--"}
+            pulse={!heartRate}
+          />
+        ) : null}
 
         {voiceEnabled ? (
           <SummaryCard
@@ -535,12 +536,7 @@ export function CombinedBiomarkersPanel({
             <MetricTile label="Signal Quality" value={signalQuality} unit="%" pulse={!signalQuality} />
           </div>
         </SectionCard>
-      ) : (
-        <DisabledSource
-          title="Video Biomarkers"
-          message="Video biomarkers were not enabled for this session."
-        />
-      )}
+      ) : null}
     </div>
   );
 }

@@ -63,6 +63,8 @@ function resolveDefaultBackendUrl() {
 const DEFAULT_BACKEND_URL = resolveDefaultBackendUrl();
 const DEFAULT_PROFILE = process.env.NEXT_PUBLIC_DEFAULT_PROFILE || "VIDEO";
 const SHEN_ENABLED = process.env.NEXT_PUBLIC_ENABLE_SHEN === "true";
+// Keep Shen available in the backend, but hide video biomarker UI until the license is restored.
+const VIDEO_BIOMARKERS_UI_ENABLED = false;
 const SHEN_API_KEY = process.env.NEXT_PUBLIC_SHEN_API_KEY || "";
 const DEVICE_COOKIE_MAX_AGE = 60 * 60 * 24 * 180;
 const MEETING_BOOTSTRAP_STORAGE_KEY = "mindfix_meeting_join_bootstrap";
@@ -1303,9 +1305,8 @@ export function VideoAvatarClient() {
   };
 
   const showThymiaPanel = meetingAudioBiomarkersEnabled;
-  const showShenPanel = shenEnabledForSession;
-  const showBiomarkersPanel =
-    meetingAudioBiomarkersEnabled || meetingVideoBiomarkersEnabled;
+  const showShenPanel = VIDEO_BIOMARKERS_UI_ENABLED && shenEnabledForSession;
+  const showBiomarkersPanel = meetingAudioBiomarkersEnabled;
 
   // Don't render UI until auth check completes
   if (!authChecked) {
@@ -1810,7 +1811,7 @@ export function VideoAvatarClient() {
                               shenState={shenState}
                               isConnected={isConnected}
                               voiceEnabled={meetingAudioBiomarkersEnabled}
-                              videoEnabled={meetingVideoBiomarkersEnabled}
+                              videoEnabled={VIDEO_BIOMARKERS_UI_ENABLED && meetingVideoBiomarkersEnabled}
                             />
                           ),
                         },
@@ -2080,7 +2081,7 @@ export function VideoAvatarClient() {
                                 shenState={shenState}
                                 isConnected={isConnected}
                                 voiceEnabled={meetingAudioBiomarkersEnabled}
-                                videoEnabled={meetingVideoBiomarkersEnabled}
+                                videoEnabled={VIDEO_BIOMARKERS_UI_ENABLED && meetingVideoBiomarkersEnabled}
                               />
                             </div>
                           ),
