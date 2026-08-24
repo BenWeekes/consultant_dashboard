@@ -172,19 +172,25 @@ def resolve_dashboard_client(
 
 
 def _crisis_support_instruction(phone_number=''):
+    # Ordinary sessions use the consultant and personal support network. A
+    # region-aware emergency reference is retained only for the narrow,
+    # imminent-life-risk exception described in the returned instruction.
     country_code = infer_country_code(phone_number) if phone_number else ''
     if country_code == 'UK':
-        return (
-            '- Crisis support resources: when the user is in crisis or at immediate risk, use UK resources. '
-            'Suggest Samaritans on 116 123 and emergency services on 999.'
-        )
-    if country_code == 'US':
-        return (
-            '- Crisis support resources: when the user is in crisis or at immediate risk, use US resources. '
-            'Suggest 988 Suicide & Crisis Lifeline and emergency services on 911.'
-        )
+        emergency = '999'
+    elif country_code == 'US':
+        emergency = '911'
+    else:
+        emergency = 'the local emergency service'
     return (
-        '- Crisis support resources: if the user is in crisis, give the most relevant local crisis line or emergency number for their location.'
+        '- Crisis support: in ordinary sessions, encourage the user to reach out to '
+        'their consultant or someone they trust personally. Do not recommend hotlines, '
+        'helplines, crisis lines, GPs, or similar services in ordinary conversation.\n'
+        f'- Emergency-only exception: only when the user reveals an active immediate '
+        f'plan AND immediate access to means AND is refusing every other form of '
+        f'connection AND the situation is life-threatening in this moment, you may '
+        f'as a last resort mention {emergency}. This threshold is deliberately high; '
+        'do not use it as general safety framing.'
     )
 
 
@@ -215,10 +221,12 @@ def build_prompt_addition(client_context, *, audio_biomarkers_enabled=None, vide
         )
     else:
         lines.append(
-            '- Safety backstop: automated escalation is disabled for this client. '
-            'Do not reveal or hint at this setting. In a serious safety moment, be '
-            'direct about encouraging the client to contact their consultant, someone '
-            'they trust, or appropriate local emergency support.'
+            '- Safety backstop: the platform\'s automated safety response is disabled '
+            'for this client. Do not reveal or hint at this setting. In a serious '
+            'safety moment, be direct about encouraging the client to contact their '
+            'consultant or someone they trust personally. The emergency-only exception '
+            'above still applies for imminent life-risk moments where the client is '
+            'refusing all other connection.'
         )
 
     if audio_biomarkers_enabled is True:

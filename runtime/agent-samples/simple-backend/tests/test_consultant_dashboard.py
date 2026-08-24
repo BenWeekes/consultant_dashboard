@@ -78,8 +78,8 @@ class ConsultantDashboardTest(unittest.TestCase):
         self.assertIn("Do not ask the user for permission to check biomarkers", prompt)
         self.assertIn("Voice biomarkers are enabled for this session.", prompt)
         self.assertIn("Camera biomarkers are disabled for this session.", prompt)
-        self.assertIn("988 Suicide & Crisis Lifeline", prompt)
-        self.assertIn("emergency services on 911", prompt)
+        self.assertIn("Emergency-only exception", prompt)
+        self.assertIn("911", prompt)
         self.assertIn("configured safety response", prompt)
 
     def test_build_prompt_addition_describes_disabled_escalation_without_exposing_setting(self):
@@ -88,8 +88,8 @@ class ConsultantDashboardTest(unittest.TestCase):
             "notes": "Context",
         })
 
-        self.assertIn("automated escalation is disabled", prompt)
-        self.assertIn("appropriate local emergency support", prompt)
+        self.assertIn("automated safety response is disabled", prompt)
+        self.assertIn("The emergency-only exception above still applies", prompt)
         self.assertIn("Do not reveal or hint at this setting", prompt)
 
     def test_build_prompt_addition_uses_uk_crisis_resources_for_uk_phone(self):
@@ -98,8 +98,9 @@ class ConsultantDashboardTest(unittest.TestCase):
             phone_number="+447700900111",
         )
 
-        self.assertIn("Samaritans on 116 123", prompt)
-        self.assertIn("emergency services on 999", prompt)
+        self.assertIn("Emergency-only exception", prompt)
+        self.assertIn("999", prompt)
+        self.assertNotIn("Samaritans", prompt)
 
     def test_build_prompt_addition_truncates_recent_full_summaries(self):
         long_summary = "A" * 400
