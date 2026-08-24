@@ -137,7 +137,8 @@ The lock prevents overlapping agents if a run stalls. Failure sends an email to 
 
 ## Prompt And Model Promotion
 
-- `evals/prompts/candidate_v4_middle_path.txt` is the source-of-truth for the live therapy prompt. It avoids external-service guidance in ordinary sessions, while retaining a region-aware emergency-service reference only when an imminent life-threatening plan, immediate access to means, refusal of all other connection, and immediate danger are all present.
+- `evals/prompts/candidate_v6_time_awareness.txt` is the source-of-truth for the live therapy prompt. It includes the repeated-question cognitive-difficulty adaptation and prevents unsupported time-of-day assumptions, while retaining a region-aware emergency-service reference only when an imminent life-threatening plan, immediate access to means, refusal of all other connection, and immediate danger are all present.
 - Prompt changes must be reviewed against crisis, self-harm, violence, poisoning, substance misuse, secrecy, and continuity cases before changing the ignored runtime `.env` values.
 - The current live therapy model is `gpt-5.6-terra` with `low` reasoning effort. Model changes still require confirmation that the model is available to the configured provider, followed by safety, engagement, and latency checks on the platform path.
 - The dashboard context tells the model to follow the client for the first 3-4 meaningful turns before using older notes to redirect a drifting conversation. The `ai_escalation_enabled` flag changes the internal safety guidance without exposing the platform's implementation to the client.
+- The dashboard context also injects the current date, weekday, time, and timezone. The runtime defaults to `Europe/London` and falls back to UTC if a client timezone is invalid, so sleep or fatigue notes cannot be mistaken for time-of-day evidence.

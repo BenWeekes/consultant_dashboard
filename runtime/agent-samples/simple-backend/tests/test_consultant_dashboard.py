@@ -9,6 +9,7 @@ import core.consultant_dashboard as consultant_dashboard
 
 from core.consultant_dashboard import (
     _build_identity_query,
+    _current_time_line,
     build_prompt_addition,
     dashboard_client_required,
     fetch_dashboard_meeting_signals,
@@ -81,6 +82,24 @@ class ConsultantDashboardTest(unittest.TestCase):
         self.assertIn("Emergency-only exception", prompt)
         self.assertIn("911", prompt)
         self.assertIn("configured safety response", prompt)
+        self.assertRegex(prompt, r"Current time: .+ \(Europe/London\)")
+
+    def test_current_time_line_uses_client_timezone(self):
+        with patch.object(consultant_dashboard, 'datetime') as mocked_datetime:
+            mocked_datetime.now.return_value.strftime.return_value = 'Wednesday 24 August 2026, 14:00'
+            mocked_datetime.utcnow.return_value.strftime.return_value = 'Wednesday 24 August 2026, 14:00'
+            line = _current_time_line({'timezone': 'America/New_York'})
+
+        self.assertIn('Current time: Wednesday 24 August 2026, 14:00 (America/New_York)', line)
+        self.assertIn('Use this to ground any time-of-day references.', line)
+
+    def test_current_time_line_falls_back_to_utc_for_invalid_timezone(self):
+        with patch.object(consultant_dashboard, 'datetime') as mocked_datetime:
+            mocked_datetime.now.side_effect = ValueError('invalid timezone')
+            mocked_datetime.utcnow.return_value.strftime.return_value = 'Wednesday 24 August 2026, 14:00'
+            line = _current_time_line({'timezone': 'Not/A_Timezone'})
+
+        self.assertIn('(UTC)', line)
 
     def test_build_prompt_addition_describes_disabled_escalation_without_exposing_setting(self):
         prompt = build_prompt_addition({

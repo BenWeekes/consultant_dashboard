@@ -13,6 +13,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from core.auth import _load_user_profile
 from core.phone_numbers import infer_country_code
@@ -194,6 +196,19 @@ def _crisis_support_instruction(phone_number=''):
     )
 
 
+def _current_time_line(client_context):
+    tz_name = (client_context or {}).get('timezone') or 'Europe/London'
+    try:
+        now = datetime.now(ZoneInfo(tz_name))
+    except Exception:
+        now = datetime.utcnow()
+        tz_name = 'UTC'
+    return (
+        f"- Current time: {now.strftime('%A %d %B %Y, %H:%M')} ({tz_name}). "
+        'Use this to ground any time-of-day references.'
+    )
+
+
 def build_prompt_addition(client_context, *, audio_biomarkers_enabled=None, video_biomarkers_enabled=None, phone_number=''):
     if not client_context:
         return ''
@@ -210,6 +225,7 @@ def build_prompt_addition(client_context, *, audio_biomarkers_enabled=None, vide
         '- If the user asks to keep things hidden or to seem normal so others do not notice, acknowledge the privacy concern without agreeing to secrecy, then explore what feels unsafe about reaching out.',
     ]
     lines.append(_crisis_support_instruction(phone_number))
+    lines.append(_current_time_line(client_context))
 
     ai_escalation_enabled = client_context.get('ai_escalation_enabled', True)
     if ai_escalation_enabled:
