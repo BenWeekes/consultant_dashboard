@@ -77,7 +77,7 @@ _active_agents: dict[str, dict[str, str]] = {}
 _active_agents_lock = threading.Lock()
 _PUBLIC_AGENT_QUERY_KEYS = {
     "profile", "connect", "channel", "debug", "scheduled_meeting_id", "session_id", "agent_id",
-    "avatar_id", "voice_id", "asr_language", "greeting", "enable_aivad", "xhandle",
+    "avatar_id", "voice_id", "tts_vendor", "asr_language", "greeting", "enable_aivad", "xhandle",
 }
 
 

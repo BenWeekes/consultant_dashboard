@@ -60,6 +60,30 @@ class TestBuildTTSConfig:
         assert config["params"]["voice"] == "custom_voice"
         assert config["params"]["speed"] == 1.5
 
+    def test_gradium_tts_config_uses_server_side_credentials(self, test_constants):
+        """Gradium credentials are configured server-side, not accepted from the URL."""
+        constants = test_constants.copy()
+        constants.update({
+            "GRADIUM_API_KEY": "gradium-test-key",
+            "GRADIUM_VOICE_ID": "5EMc3FS3DHJrWJbT",
+            "GRADIUM_BASE_URL": "wss://api.gradium.ai/api/speech/tts",
+        })
+
+        config = build_tts_config(
+            "gradium",
+            constants,
+            {"voice_id": "5EMc3FS3DHJrWJbT", "api_key": "attacker-value"},
+        )
+
+        assert config == {
+            "vendor": "gradium",
+            "params": {
+                "api_key": "gradium-test-key",
+                "voice_id": "5EMc3FS3DHJrWJbT",
+                "base_url": "wss://api.gradium.ai/api/speech/tts",
+            },
+        }
+
 
 @pytest.mark.unit
 class TestBuildASRConfig:

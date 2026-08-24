@@ -98,6 +98,25 @@ def build_tts_config(tts_vendor, constants, query_params=None):
             "samplingRate": int(query_params.get('rime_sampling_rate', constants["RIME_SAMPLING_RATE"])),
             "speedAlpha": float(query_params.get('rime_speed_alpha', constants["RIME_SPEED_ALPHA"]))
         }
+
+    elif tts_vendor == "gradium":
+        gradium_api_key = constants.get("GRADIUM_API_KEY")
+        if not gradium_api_key:
+            raise ValueError("GRADIUM_API_KEY is required for Gradium")
+
+        voice_id = query_params.get("voice_id") or constants.get("GRADIUM_VOICE_ID")
+        if not voice_id:
+            raise ValueError("GRADIUM_VOICE_ID is required for Gradium")
+
+        tts_config["params"] = {
+            "api_key": gradium_api_key,
+            "voice_id": voice_id,
+            "base_url": constants.get(
+                "GRADIUM_BASE_URL",
+                "wss://api.gradium.ai/api/speech/tts",
+            ),
+        }
+
     else:
         raise ValueError(f"Unsupported TTS vendor: {tts_vendor}")
 
