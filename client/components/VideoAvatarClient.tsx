@@ -199,6 +199,7 @@ export function VideoAvatarClient() {
   const [enableAivad, setEnableAivad] = useState(true);
   const [language, setLanguage] = useState("en-US");
   const [profile, setProfile] = useState("");
+  const [ttsVendor, setTtsVendor] = useState("");
   const [selectedAvatarId, setSelectedAvatarId] = useState("");
   const [selectedVoiceId, setSelectedVoiceId] = useState("");
   const [activeTab, setActiveTab] = useState("video");
@@ -281,11 +282,15 @@ export function VideoAvatarClient() {
       const params = new URLSearchParams(window.location.search);
       const backendOverride = getBackendOverride(params);
       const urlProfile = params.get("profile");
+      const urlTtsVendor = params.get("tts_vendor");
       if (backendOverride) {
         setBackendUrl(backendOverride);
       }
       if (urlProfile) {
         setProfile(urlProfile);
+      }
+      if (urlTtsVendor) {
+        setTtsVendor(urlTtsVendor);
       }
       const urlAvatarId = params.get("avatar_id");
       const urlVoiceId = params.get("voice_id");
@@ -869,6 +874,10 @@ export function VideoAvatarClient() {
         params.append("profile", DEFAULT_PROFILE);
       }
 
+      if (ttsVendor.trim()) {
+        params.append("tts_vendor", ttsVendor.trim());
+      }
+
       // Add agent settings
       params.append("enable_aivad", enableAivad.toString());
       params.append("asr_language", language);
@@ -1177,6 +1186,11 @@ export function VideoAvatarClient() {
     const rating = feedbackRating;
     const comment = feedbackComment.trim();
     setFeedbackSubmitting(true);
+    // Dismiss the dialog immediately. Feedback submission, wrap-up, and
+    // agent cleanup must not make the end-of-session control feel stuck.
+    setFeedbackOpen(false);
+    setFeedbackRating(null);
+    setFeedbackComment("");
     try {
       if (submitFeedback && currentSessionId && rating) {
         postSessionFeedback({
@@ -1186,25 +1200,15 @@ export function VideoAvatarClient() {
           avatarId: currentAvatarId,
         });
       }
-      // Wait for the wrap-up TTS to finish before disconnecting the agent.
+      // Keep wrap-up work alive in the background, but do not block the UI.
       if (wrapUpPromiseRef.current) {
         setIsWrappingUp(true);
-        const wrapUpResult = await wrapUpPromiseRef.current;
-        const estMs = wrapUpResult?.estimated_duration_ms ?? 8000;
-        const elapsedMs = wrapUpStartedAtRef.current
-          ? Date.now() - wrapUpStartedAtRef.current
-          : 0;
-        const remainingMs = Math.max(0, estMs + 2000 - elapsedMs);
-        const cappedMs = Math.min(remainingMs, 20000);
-        if (cappedMs > 0) {
-          await new Promise((resolve) => setTimeout(resolve, cappedMs));
-        }
+        void wrapUpPromiseRef.current.catch((error) => {
+          console.warn("Background wrap-up failed:", error);
+        });
       }
       const nextUrl = await performStop({ redirectAfter: false });
-      setFeedbackOpen(false);
       setIsWrappingUp(false);
-      setFeedbackRating(null);
-      setFeedbackComment("");
       wrapUpPromiseRef.current = null;
       wrapUpStartedAtRef.current = null;
       if (nextUrl) {
